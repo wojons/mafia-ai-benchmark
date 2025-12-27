@@ -17,8 +17,8 @@
 - [x] Created techContext.md with technology stack
 - [x] Created progress.md file
 
-### Specifications (/specs directory) - 17 files
-- [x] README.md - Overview (updated with AI architecture)
+### Specifications (/specs directory) - 18 files
+- [x] README.md - Overview (updated with AI + Technical architecture)
 - [x] event-schemas.md - Event definitions with visibility levels
 - [x] api-specs.md - REST API and WebSocket specs
 - [x] agent-interface.md - AgentPolicy interface
@@ -33,17 +33,15 @@
 - [x] permission-model.md - View modes and privacy
 - [x] implementation-overview.md - Implementation phases and roadmap
 - [x] multi-agent-ai-architecture.md - Complete AI architecture with prompts, memory, Three.js visualization, voice synthesis
-- [x] **technical-architecture-decisions.md** - **NEW** Complete technical stack:
-  - LLM providers (8+ supported: OpenAI, Anthropic, Google, DeepSeek, Groq, Ollama, LM Studio, Custom)
-  - API architecture (REST + WebSocket with complete specs)
-  - CLI client (API integration with streaming)
-  - Language stack (TypeScript 5.x, Node.js 20, React 18)
-  - Database (SQLite with better-sqlite3)
-  - Visualization (2D/3D hybrid, Three.js + React Three Fiber)
-  - Asset generation (procedural avatars and environment)
-  - TTS (Browser native + External APIs)
-  - Game state (Event sourcing + reactive state)
-  - Configuration management (Environment variables)
+- [x] technical-architecture-decisions.md - Complete technical stack (LLM providers, API, CLI, database, visualization, TTS)
+- [x] **stats-and-scoring-system.md** - NEW Complete benchmarking system:
+  - Real-time metrics tracking (tokens, API calls, data transfer)
+  - Post-game performance scoring (role-specific, action quality, strategy)
+  - Model comparison system (win rates, head-to-head, trends)
+  - Benchmark report generation (insights, recommendations, exports)
+  - Database schema for all stats
+  - Stats API endpoints and CLI commands
+  - Dashboard visualization components
 
 ### Game Analysis
 - [x] Analyzed Game 1 transcript (10 agents, THINK vs SAYS divergence)
