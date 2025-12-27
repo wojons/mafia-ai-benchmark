@@ -6,7 +6,7 @@ tools:
   write: true
   edit: true
   read: true
-  bash: false
+  bash: true
   glob: true
   grep: true
   read_file: true
