@@ -2,7 +2,7 @@
 
 This directory contains detailed technical specifications for the Mafia AI Benchmark project.
 
-## Specification Files (16 total)
+## Specification Files (17 total)
 
 ### Core Specifications
 - `event-schemas.md` - Event schema definitions with visibility levels (public/private/admin)
@@ -18,13 +18,26 @@ This directory contains detailed technical specifications for the Mafia AI Bench
 - `suspect-meter.md` - Heuristic scoring algorithm specifications
 
 ### AI & Multi-Agent Architecture
-- `multi-agent-ai-architecture.md` - **NEW** Complete AI architecture with:
+- `multi-agent-ai-architecture.md` - Complete AI architecture with:
   - Role-specific prompts (mafia, doctor, sheriff, vigilante, villager)
   - Agent memory and context management
   - Multi-agent communication protocols
   - Three.js visualization architecture
   - Voice synthesis system
   - API and configuration schemas
+
+### Technical Architecture
+- `technical-architecture-decisions.md` - **NEW** Complete technical stack decisions:
+  - **LLM Providers**: Multi-provider adapter pattern (OpenAI, Anthropic, Google, DeepSeek, Groq, Ollama, LM Studio, Custom)
+  - **API Architecture**: REST + WebSocket with complete endpoint specs
+  - **CLI Client**: API client with streaming support
+  - **Language Stack**: TypeScript 5.x (Node.js backend, React frontend)
+  - **Database**: SQLite (better-sqlite3) with complete schema
+  - **Visualization**: 2D/3D hybrid approach (Three.js + React Three Fiber)
+  - **Asset Generation**: Procedural avatar and environment generation
+  - **TTS**: Browser native (free) + External API support (ElevenLabs, OpenAI)
+  - **Game State**: Event sourcing + reactive state (hybrid streaming)
+  - **Configuration**: Environment variables + config files
 
 ### Frontend Specifications
 - `ui-components.md` - React component specifications (AgentCard, GameFeed, PhaseHeader, Controls)

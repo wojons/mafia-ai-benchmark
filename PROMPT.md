@@ -152,6 +152,20 @@ DELIVERABLES (your output to me):
    - vigilante agents: patience vs chaos, shot timing decisions, identity hiding strategy
    - defensive storytelling when accused
 
+REFERENCE SPECIFICATIONS (use these for implementation details):
+- `specs/technical-architecture-decisions.md` - Complete technical stack:
+  - LLM providers: Multi-provider adapter (OpenAI, Anthropic, Google, DeepSeek, Groq, Ollama, LM Studio, Custom)
+  - API: REST + WebSocket with complete specs
+  - CLI: API integration with streaming
+  - Language: TypeScript 5.x (Node.js 20, React 18)
+  - Database: SQLite with better-sqlite3
+  - Visualization: 2D/3D hybrid (Three.js + React Three Fiber)
+  - TTS: Browser native + External API support
+  - State: Event sourcing + reactive state (hybrid streaming)
+- `specs/multi-agent-ai-architecture.md` - Role prompts and memory system
+- `specs/event-schemas.md` - Complete event definitions
+- `specs/*.md` - All other specifications for game mechanics, UI, etc.
+
 IMPLEMENTATION CONSTRAINTS:
 - Must run locally with one command:
   - `docker-compose up` OR `pnpm i && pnpm dev` (choose and document)
