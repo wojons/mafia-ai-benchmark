@@ -2,7 +2,7 @@
 
 This directory contains detailed technical specifications for the Mafia AI Benchmark project.
 
-## Specification Files (14 total)
+## Specification Files (16 total)
 
 ### Core Specifications
 - `event-schemas.md` - Event schema definitions with visibility levels (public/private/admin)
@@ -14,8 +14,17 @@ This directory contains detailed technical specifications for the Mafia AI Bench
 ### Game Mechanics Specifications
 - `fsm-states.md` - Finite state machine state transitions (SETUP → NIGHT → DAY → END)
 - `role-mechanics.md` - Detailed role behavior (Mafia, Doctor, Sheriff, **Vigilante**, Villagers)
-- `vigilante-mechanics.md` - NEW: Vigilante role with one-shot mechanic and double-kill resolution
+- `vigilante-mechanics.md` - Vigilante role with one-shot mechanic and double-kill resolution
 - `suspect-meter.md` - Heuristic scoring algorithm specifications
+
+### AI & Multi-Agent Architecture
+- `multi-agent-ai-architecture.md` - **NEW** Complete AI architecture with:
+  - Role-specific prompts (mafia, doctor, sheriff, vigilante, villager)
+  - Agent memory and context management
+  - Multi-agent communication protocols
+  - Three.js visualization architecture
+  - Voice synthesis system
+  - API and configuration schemas
 
 ### Frontend Specifications
 - `ui-components.md` - React component specifications (AgentCard, GameFeed, PhaseHeader, Controls)

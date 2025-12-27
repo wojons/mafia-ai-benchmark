@@ -17,8 +17,8 @@
 - [x] Created techContext.md with technology stack
 - [x] Created progress.md file
 
-### Specifications (/specs directory)
-- [x] README.md - Overview
+### Specifications (/specs directory) - 16 files
+- [x] README.md - Overview (updated with AI architecture)
 - [x] event-schemas.md - Event definitions with visibility levels
 - [x] api-specs.md - REST API and WebSocket specs
 - [x] agent-interface.md - AgentPolicy interface
@@ -26,12 +26,13 @@
 - [x] cli-interface.md - mafiactl commands
 - [x] fsm-states.md - State machine transitions
 - [x] role-mechanics.md - Role behaviors (updated with Vigilante)
+- [x] vigilante-mechanics.md - Vigilante role specifications
 - [x] suspect-meter.md - Heuristic scoring algorithm
 - [x] ui-components.md - React component specs
 - [x] streaming-protocol.md - WebSocket protocol
 - [x] permission-model.md - View modes and privacy
-- [x] vigilante-mechanics.md - NEW: Vigilante role specifications
 - [x] implementation-overview.md - Implementation phases and roadmap
+- [x] **multi-agent-ai-architecture.md** - **NEW** Complete AI architecture with prompts, memory, Three.js visualization, voice synthesis
 
 ### Game Analysis
 - [x] Analyzed Game 1 transcript (10 agents, THINK vs SAYS divergence)
