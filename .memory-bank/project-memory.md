@@ -12,19 +12,27 @@
 
 ## Current Status (Dec 28, 2025)
 
-### ✅ Working Features
+### ❌ Critical Issues Blocking Implementation
 
-- Game creation and player management
-- Role assignment (MAFIA, DOCTOR, SHERIFF, VIGILANTE, VILLAGER)
-- Game start/stop transitions
-- Night action submission endpoints
-- Voting endpoints
-- Model configuration (per-player, per-role, bulk)
-- Cost tracking and model pricing
-- SSE event streaming
-- Server stats endpoint
-- **REAL LLM CALLS via OpenRouter** ✅
-- **Server loads game engine module** ✅
+The game engine (game-engine.js) has 11 critical issues identified in `specs/AUDIT_RESULTS.md`:
+
+1. **Win Condition Wrong Location** - Only checked at start of day, should also check at start of night
+2. **Seeds STILL Being Used** - Despite explicit requirement: "Shut the fuck up with this seed concept"
+3. **Role Assigned During Persona Generation** - Persona knows it's playing Mafia before being told
+4. **Think→Speak Missing in Many Places** - Doctor, sheriff, vigilante, voting prompts don't require thinking first
+5. **Mafia Memory Incomplete** - Only last 3 messages, should see ALL
+6. **Vigilante Can Shoot Every Night** - One-shot flag created but never checked
+7. **Multiple Doctors/Sheriffs Ignored** - Only first one acts, others do nothing
+8. **No Villager Base Prompt** - Everyone should get base villager behavior
+9. **Sequential API Calls With Artificial Delays** - Should be parallel for efficiency
+10. **No Statistics Tracking** - Zero stats collection for winners, model performance, costs
+11. **Monolithic 2100+ Line File** - Impossible to maintain, causes circular debugging
+
+### 🔍 Implementation Specs
+
+- `specs/game-flow-and-rules.md` - Complete game flow specification
+- `specs/AUDIT_RESULTS.md` - 11 critical issues with detailed analysis
+- `specs/IMPLEMENTATION_PLAN.md` - Step-by-step fix instructions with line numbers
 
 ### ✅ Test Suites (409+ API tests passing)
 
@@ -174,9 +182,82 @@ cd packages/shared && npm test
 5. **Cost Tracking**: Per-game and per-player cost tracking with thresholds
 6. **Real LLM Calls**: Game engine now makes real API calls to OpenRouter
 
+## Critical Issues Requiring Immediate Attention
+
+### BLOCKER Issues (Cannot proceed without these)
+
+1. ❌ **Remove Seeds from Persona Generation**
+   - Current: `generatePersonaFromSeed(seedDescription, role)` at line 72
+   - Should be: `generatePersona()` with NO parameters
+   - Prompt should say "Choose ANY character" (no seed description)
+   - Remove all seed arrays from startGame (lines 885-919)
+
+2. ❌ **Separate Persona Generation from Role Assignment**
+   - Current: Persona generated WITH role info in same call
+   - Should be: Generate ALL personas first (parallel), THEN assign roles
+   - Personas generated without any game context
+   - Roles assigned randomly AFTER personas created
+
+### CRITICAL Issues (Game-Breaking Bugs)
+
+3. ⏳ **Win Condition Check at Start of Night**
+   - Location: `runNightPhase()` function, line 1005+
+   - Add check BEFORE night phase starts (after this.round++)
+   - Should check: `mafia >= town` and `mafia == 0`
+
+4. ⏳ **Vigilante One-Shot Enforcement**
+   - Location: `runNightPhase()` vigilante section around line 1005-1106
+   - `this.vigilanteShotUsed` is created but NEVER checked
+   - Add `&& !this.vigilanteShotUsed` to filtering logic
+   - Set to true after actually shooting
+
+5. ⏳ **Multiple Doctors/Sheriffs Support**
+   - Doctor: Line 1430-1475 currently only uses `aliveDoctor[0]`
+   - Sheriff: Line 1493-1537 currently only uses `aliveSheriff[0]`
+   - Change from single doctor/sheriff to `for (const doctor of aliveDoctors)`
+
+### HIGH QUALITY Issues (Spec Compliance)
+
+6. ⏳ **Think→Speak Pattern in All Prompts**
+   - Working: Mafia chat, Day discussion
+   - Missing: Doctor action, Sheriff investigation, Vigilante action, Voting
+   - Add to `createPrompt()` function for each role
+
+7. ⏳ **Mafia Full Memory**
+   - Current: `mafiaMessages.slice(-3)` (line 1169) - only last 3 messages
+   - Should be: `mafiaMessages` (ALL messages)
+
+8. ⏳ **Villager Base Prompt for Everyone**
+   - Should be first thing in ALL prompts (before role-specific)
+   - Mafia gets this + secret mafia instructions
+   - Other roles get this + their role instructions
+
+9. ⏳ **Remove Artificial API Delays**
+   - Current: `setTimeout(100)` between calls (line 952)
+   - Should use `Promise.all()` for parallel persona generation
+
+10. ⏳ **Statistics Tracking**
+    - Zero implementation currently
+    - Need: winner tracking, per-model win rates, per-role win rates
+    - Need: token usage, cost per game, store to database
+
+11. ⏳ **Split Monolithic File**
+    - Current: `game-engine.js` is 2100+ lines
+    - Should split into:
+      - `engine/game.js` - Main game loop
+      - `engine/roles/*.js` - Role-specific logic
+      - `engine/phases/*.js` - Phase handlers
+      - `engine/persona.js` - Persona generation
+      - `engine/memory.js` - Memory management
+      - `engine/stats.js` - Statistics tracking
+
 ## Next Steps
 
-### Priority 1: Mafia Consensus Logic
+### Priority 1: Fix Critical Issues (ULTRATHINK execution in progress)
+
+See `specs/IMPLEMENTATION_PLAN.md` for detailed fix instructions.
+
+### Priority 2: Mafia Consensus Logic
 
 - Fix mafia kill voting (currently 3-way tie, need consensus)
 - Add persuasion in mafia chat

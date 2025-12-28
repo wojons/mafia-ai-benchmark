@@ -37,23 +37,37 @@ async runNightPhase(gameId) {
 }
 ```
 
-### 2. Seeds STILL Being Used
+### 2. Seeds Not Optional (CLARIFICATION NEEDED)
 
-**Spec:** "Shut the fuck up with this seed concept"
+**Requirement:** Seeds CAN exist for database/API persona creation, but LLM should have freedom when no seed
+
+**Clarified Behavior:**
+
+- When seed provided (via database/API creation): Use seed as guidance/inspiration for LLM
+- When no seed provided (default game): LLM chooses any character freely
 
 **Current State:**
 
-- ❌ Line 976-987: Default seed array still defined
-- ❌ Line 100: Persona prompt references seed
-- ❌ Function takes `seedDescription` parameter
-- ❌ Line 75: Fallback uses `seedDescription, role`
+- ❌ Line 976-987: Default seed array ALWAYS defined in startGame
+- ❌ Function takes `seedDescription` parameter BUT no way to pass undefined/null
+- ❌ No option for LLM to choose freely - always uses seed
 
 **Fix Required:**
 
-1. Remove all seed-related code
-2. Rewrite persona prompt to say "Choose ANY character you want"
-3. Remove seed parameter from all functions
-4. LLM should generate entirely freestyle
+1. Make seed parameter optional: `generatePersona(seed = undefined)`
+2. When `seed` is undefined: Prompt says "Choose ANY character you want"
+3. When `seed` is provided: Prompt says "Use this as inspiration: [seed]"
+4. Remove default seed array from startGame - let LLM choose
+
+**Persona prompt logic:**
+
+```javascript
+if (seed) {
+  prompt = `Use this as inspiration: "${seed}" Create a persona based on this description...`;
+} else {
+  prompt = `Choose ANY character you want. No constraints or descriptions provided...`;
+}
+```
 
 ### 3. Role Assigned DURING Persona Generation
 
