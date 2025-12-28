@@ -969,12 +969,20 @@ class MafiaGame {
     console.log(E.GAME + " Starting Mafia Game v3");
     console.log("=".repeat(70));
 
-    // Default seeds if none provided
+    // Default seeds if none provided - rich personality descriptions
     if (!personaSeeds) {
-      personaSeeds = [];
-      for (let i = 0; i < numPlayers; i++) {
-        personaSeeds.push("Mysterious townsperson");
-      }
+      personaSeeds = [
+        "A quiet accountant who loves solving puzzles, works with numbers all day, very analytical",
+        "A community organizer who helps neighbors, volunteers at the clinic, believes in community",
+        "A former security consultant who distrusts authority, has a practical approach",
+        "A local business owner who knows everyone in town, always has an alibi",
+        "A retired teacher who loves book clubs, very friendly but observant",
+        "A sports journalist who travels a lot, easy-going, asks about people's day",
+        "A skeptical lawyer who questions everyone's motives, cross-examines witnesses",
+        "A charismatic politician who speaks smoothly, always has a smile, never commits",
+        "A nosy neighbor who knows everyone's business, loves gossip, harmless looking",
+        "A brooding artist who rarely speaks, observes everything, keeps to themselves",
+      ];
     }
 
     // Generate roles first
@@ -991,11 +999,28 @@ class MafiaGame {
       "VILLAGER",
     ];
 
+    // Ensure we have enough seeds for all players (cycle if needed)
+    while (personaSeeds.length < numPlayers) {
+      const moreSeeds = [
+        "A suspicious lawyer who questions everyone's motives",
+        "A quiet observer who watches everything",
+        "A charismatic leader who commands respect",
+        "A brilliant scientist who analyzes data",
+        "A mysterious stranger who just arrived in town",
+        "A local barista who hears everyone's conversations",
+        "A retired detective who can't stop investigating",
+        "A enthusiastic baker who brings treats for everyone",
+        "A withdrawn librarian who reads people like books",
+        "A confident coach who reads team dynamics",
+      ];
+      personaSeeds.push(...moreSeeds);
+    }
+
     console.log(E.LOCK + " Generating personas from seeds...");
 
     // Generate personas for all players
     for (let i = 0; i < numPlayers; i++) {
-      const seed = personaSeeds[i] || "Mysterious townsperson";
+      const seed = personaSeeds[i];
       const role = roleAssignment[i] || "VILLAGER";
 
       console.log(
