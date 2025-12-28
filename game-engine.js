@@ -554,8 +554,11 @@ class MafiaGame {
       console.log(E.MAFIA + " MAFIA CONSENSUS PHASE");
       console.log("-".repeat(50));
 
-      const killVotes = {};
       const aliveTown = alivePlayers.filter((p) => !p.isMafia);
+
+      // First vote round
+      const killVotes = {};
+      const killVoteReasons = {};
 
       for (const mafia of aliveMafia) {
         const gameState = {
@@ -563,7 +566,8 @@ class MafiaGame {
           phase: "MAFIA_KILL_VOTE",
           alivePlayers,
           deadPlayers: this.deadPlayers,
-          previousPhaseData: "Mafia chat complete",
+          previousPhaseData:
+            "Mafia chat complete. Time to vote for our target.",
           messageNumber: 1,
           totalMessages: aliveMafia.length,
         };
@@ -578,10 +582,128 @@ class MafiaGame {
             p.name.toLowerCase().includes(targetName.toLowerCase()),
           ) || aliveTown[Math.floor(Math.random() * aliveTown.length)];
 
-        console.log(mafia.name + " votes to kill: " + target.name);
+        console.log(mafia.name + " initially votes to kill: " + target.name);
         killVotes[target.id] = (killVotes[target.id] || 0) + 1;
+        killVoteReasons[target.id] = response.action?.reasoning || "";
       }
 
+      // Show current votes to mafia and allow persuasion
+      const currentVotes = Object.entries(killVotes)
+        .map(([id, count]) => {
+          const player = alivePlayers.find((p) => p.id === id);
+          return `${player?.name || "Unknown"}: ${count} vote(s)`;
+        })
+        .join(", ");
+
+      console.log("\n📊 Current votes: " + currentVotes);
+
+      // Persuasion round - mafia tries to convince others
+      const persuasionMessages = [];
+      const maxPersuasion = 3; // 3 persuasion attempts
+
+      for (let p = 0; p < maxPersuasion; p++) {
+        // Find the player with the most votes
+        let leaderTargetId = null;
+        let leaderVotes = 0;
+        for (const [targetId, count] of Object.entries(killVotes)) {
+          if (count > leaderVotes) {
+            leaderVotes = count;
+            leaderTargetId = targetId;
+          }
+        }
+
+        if (leaderVotes >= aliveMafia.length) {
+          console.log(
+            "✅ Consensus reached! Mafia united behind " +
+              alivePlayers.find((p) => p.id === leaderTargetId)?.name,
+          );
+          break;
+        }
+
+        // Random mafia tries to persuade
+        const availableMafia = aliveMafia.filter((m) => {
+          const theirVote = Object.entries(killVotes).find(([id, count]) => {
+            // Count how they voted by checking who they targeted
+            const theirTarget =
+              alivePlayers.find((p) => p.id === id) ||
+              aliveTown[Math.floor(Math.random() * aliveTown.length)];
+            return theirTarget?.id !== leaderTargetId;
+          });
+          return true; // Allow anyone to persuade
+        });
+
+        if (availableMafia.length === 0) break;
+
+        const persuader =
+          availableMafia[Math.floor(Math.random() * availableMafia.length)];
+        const leaderTarget = alivePlayers.find((p) => p.id === leaderTargetId);
+
+        const gameState = {
+          round: this.round,
+          phase: "MAFIA_PERSUADE",
+          alivePlayers,
+          deadPlayers: this.deadPlayers,
+          previousPhaseData:
+            "Mafia votes so far: " +
+            currentVotes +
+            ". " +
+            persuader.name +
+            " is trying to convince others to target " +
+            leaderTarget?.name +
+            ".",
+          messageNumber: p + 1,
+          totalMessages: maxPersuasion,
+        };
+
+        const response = await this.getAIResponse(persuader, gameState);
+        console.log(
+          "[Persuasion " +
+            (p + 1) +
+            "/" +
+            maxPersuasion +
+            "] " +
+            persuader.name +
+            " argues: " +
+            response.says,
+        );
+
+        persuasionMessages.push({
+          player: persuader.name,
+          says: response.says,
+        });
+
+        // Random chance to change someone's vote based on persuasion
+        if (Math.random() > 0.5) {
+          // Find someone who voted differently
+          const dissenters = aliveMafia.filter((m) => {
+            // Simulate: find who didn't vote for leader
+            return Math.random() > 0.5; // 50% chance
+          });
+
+          if (dissenters.length > 0) {
+            const changedMafia = dissenters[0];
+            console.log(
+              "  → " +
+                changedMafia.name +
+                " was convinced! Changed vote to " +
+                leaderTarget?.name,
+            );
+            // Decrease old vote
+            for (const [id] of Object.entries(killVotes)) {
+              if (killVotes[id] > 0) {
+                killVotes[id]--;
+                break;
+              }
+            }
+            // Increase leader vote
+            killVotes[leaderTargetId] = (killVotes[leaderTargetId] || 0) + 1;
+          }
+        }
+
+        await new Promise((r) => setTimeout(r, 50));
+      }
+
+      // Final vote count
       let maxVotes = 0;
       let killTargetId = null;
       for (const [targetId, count] of Object.entries(killVotes)) {
@@ -595,7 +717,14 @@ class MafiaGame {
         (p) => p.id === killTargetId,
       ));
       console.log(
-        E.KILL + " MAFIA CONSENSUS: Kill " + mafiaKillTarget.name + "\n",
+        E.KILL +
+          " MAFIA CONSENSUS: Kill " +
+          mafiaKillTarget.name +
+          " (" +
+          maxVotes +
+          "/" +
+          aliveMafia.length +
+          " votes)\n",
       );
 
       this.gameEvents.push(
