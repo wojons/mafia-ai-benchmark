@@ -1,7 +1,14 @@
 # Agent Interface Specifications
 
 ## Overview
+
 Agents implement the `AgentPolicy` interface to participate in the game. This allows for pluggable strategies, from simple scripted heuristics to complex LLM-based reasoning.
+
+The key innovation is the **split-pane consciousness** system:
+- **THINK stream**: Private reasoning visible only to admin/observers
+- **SAYS stream**: Public statements visible to all players
+
+For complete split-pane specifications, see: [Split-Pane Consciousness System](./split-pane-consciousness.md)
 
 ## AgentPolicy Interface
 
@@ -32,20 +39,22 @@ export interface AgentPolicy extends AgentBase {
   /**
    * Generate private internal reasoning (THINK stream)
    * Called before each agent action
+   * Visible only to admin/observers
    */
   think(
     context: GameState,
     privateInfo: PrivateInfo
-  ): AsyncGenerator<string>;
+  ): AsyncGenerator<ThinkChunk>;
 
   /**
    * Generate public statement (SAYS stream)
    * Called during discussion phase
+   * Visible to all players
    */
   say(
     context: GameState,
     publicInfo: PublicInfo
-  ): AsyncGenerator<string>;
+  ): AsyncGenerator<SayChunk>;
 
   /**
    * Submit night action
@@ -64,6 +73,33 @@ export interface AgentPolicy extends AgentBase {
     context: GameState,
     publicInfo: PublicInfo
   ): Promise<VoteAction>;
+
+  /**
+   * Collect and analyze evidence
+   * Called after major events
+   */
+  collectEvidence(
+    context: GameState,
+    event: GameEvent
+  ): Promise<Evidence[]>;
+
+  /**
+   * Build a case against a player
+   * Called when accumulating enough evidence
+   */
+  buildCase(
+    target: string,
+    evidence: string[],
+    narrative: string
+  ): Promise<Case>;
+
+  /**
+   * Analyze other players' behavior
+   * Called regularly to update behavior profiles
+   */
+  analyzeBehavior(
+    playerId: string
+  ): Promise<BehaviorProfile>;
 }
 ```
 
