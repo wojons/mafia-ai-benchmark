@@ -12,60 +12,69 @@ An advanced AI-powered Mafia game simulation that benchmarks different AI models
 - **🌙 Night Phase**: Mafia discussion, Doctor protection, Sheriff investigation, Vigilante action
 - **☀️ Day Phase**: Discussion, voting, lynching
 - **📊 Event Sourcing**: Complete game audit trail with visibility levels
-- **💾 Save/Load**: Persist and resume games
-- **🧪 Testing**: 70+ unit tests for game logic
+- **💰 Cost Tracking**: Track API costs per game and player
+- **🧪 409+ Tests**: Comprehensive test coverage
 
 ## 🚀 Quick Start
 
-### Option 1: Run a Demo Game (Easiest)
+**New here?** Start with **[QUICK_START.md](QUICK_START.md)** - 5 minute setup guide!
+
+### TL;DR - Get Running Now
 
 ```bash
 cd /config/workspace/mafia
+
+# 1. Add your API key to .env (required!)
+nano .env
+# OPENAI_API_KEY=sk-or-v1-YOUR-KEY-HERE
+
+# 2. Run a demo game
+node game-engine.js
+
+# OR use the bash wrapper
 ./mafia.sh demo
 ```
 
-Watch AI agents with unique personas play a complete game!
+### What You'll See
 
-### Option 2: Configure & Create Custom Game
-
-```bash
-# View current configuration
-./mafia.sh config --show
-
-# Customize settings
-./mafia.sh config --players 8 --mafia 2 --mafia-msg-per 4 --town-msg-per 3
-
-# Create game
-./mafia.sh new
 ```
+🎮 Mafia AI Benchmark - PERSONA EDITION v3
+🔒 Generating personas...
+  😈 Vincent Marino (MAFIA) - Traits: analytical, reserved, meticulous
+  😈 Francesco 'Frankie' Moretti (MAFIA) - Traits: empathetic, determined
+  💉 Vincent 'Vince' Romano (DOCTOR) - Traits: charismatic, trustworthy
+  👮 Margaret 'Maggie' Sinclair (SHERIFF) - Traits: observant, friendly
 
-### Option 3: Interactive Configuration
+🌙 NIGHT 1
+😈 Mafia Chat: Real strategy discussion...
+💉 Doctor: Protects someone...
+👮 Sheriff: Investigates someone...
 
-```bash
-./mafia.sh config --menu
+☀️ DAY 1
+💬 Discussion and voting...
+🏆 Mafia or Town wins!
 ```
-
-Guided menu to configure all game settings.
 
 ## 📖 Documentation
 
-| Document | Purpose |
-|----------|---------|
-| **[README.md](README.md)** | This file - quick start & overview |
-| **[QUICK_REFERENCE.md](QUICK_REFERENCE.md)** | Command cheat sheet |
-| **[CONFIG_GUIDE.md](CONFIG_GUIDE.md)** | Complete configuration guide |
-| **[GAME_MANAGEMENT.md](GAME_MANAGEMENT.md)** | Detailed game management |
-| **[ARCHITECTURE.md](ARCHITECTURE.md)** | System architecture & design |
-| **[PROJECT_READY.md](PROJECT_READY.md)** | Complete system summary |
-| **[POSTER.md](POSTER.md)** | Visual system overview |
-| **[specs/correct-night-flow.md](specs/correct-night-flow.md)** | Game flow specification |
-| **[specs/persona-system.md](specs/persona-system.md)** | Persona system documentation |
+| Document                                                       | Purpose                            |
+| -------------------------------------------------------------- | ---------------------------------- |
+| **[README.md](README.md)**                                     | This file - quick start & overview |
+| **[QUICK_REFERENCE.md](QUICK_REFERENCE.md)**                   | Command cheat sheet                |
+| **[CONFIG_GUIDE.md](CONFIG_GUIDE.md)**                         | Complete configuration guide       |
+| **[GAME_MANAGEMENT.md](GAME_MANAGEMENT.md)**                   | Detailed game management           |
+| **[ARCHITECTURE.md](ARCHITECTURE.md)**                         | System architecture & design       |
+| **[PROJECT_READY.md](PROJECT_READY.md)**                       | Complete system summary            |
+| **[POSTER.md](POSTER.md)**                                     | Visual system overview             |
+| **[specs/correct-night-flow.md](specs/correct-night-flow.md)** | Game flow specification            |
+| **[specs/persona-system.md](specs/persona-system.md)**         | Persona system documentation       |
 
 ## 🎭 Persona System
 
 Each AI agent now has a unique persona!
 
 ### Features
+
 - **6 Archetype Categories**: Historical, Fictional, Anime, Stereotypes, Abstract, Fantasy
 - **8 Communication Styles**: Formal, Casual, Southern, British, Gangster, Valley Girl, Southern Gentleman, Pirate
 - **Diverse Names**: Western, Eastern, Latin, Nordic, African naming conventions
@@ -73,6 +82,7 @@ Each AI agent now has a unique persona!
 - **Personal Flaws**: Weaknesses that affect gameplay
 
 ### Example Persona
+
 ```
 🎭 James "Ace" Tanaka (Julius Caesar archetype)
    📝 Origin: Former military commander who led successful campaigns
@@ -89,6 +99,7 @@ See **[specs/persona-system.md](specs/persona-system.md)** for complete document
 Full control over every aspect of the game:
 
 ### Player & Role Settings
+
 ```bash
 --players, -p [n]   Total players (default: 10)
 --mafia, -M [n]     Mafia count (default: auto=floor(n/4))
@@ -98,6 +109,7 @@ Full control over every aspect of the game:
 ```
 
 ### Messaging Settings
+
 ```bash
 --mafia-msg-per [n]   Mafia messages per player (default: 3)
 --mafia-msg-max [n]   Mafia max total messages (default: 10)
@@ -106,12 +118,14 @@ Full control over every aspect of the game:
 ```
 
 ### Gameplay Settings
+
 ```bash
 --day-rounds [n]    Day discussion rounds (default: 1)
 --model [name]      AI model (default: openai/gpt-4o-mini)
 ```
 
 ### Management
+
 ```bash
 --show, -s          Display current configuration
 --menu, -m          Interactive configuration menu
@@ -119,6 +133,7 @@ Full control over every aspect of the game:
 ```
 
 **Example:**
+
 ```bash
 ./mafia.sh config --players 10 --mafia 3 --mafia-msg-per 4 --town-msg-per 3 --day-rounds 2
 ./mafia.sh new
@@ -129,6 +144,7 @@ See **[CONFIG_GUIDE.md](CONFIG_GUIDE.md)** for complete documentation.
 ## 🎯 Game Flow (Corrected)
 
 ### Night Phase
+
 1. **😈 Mafia Team Chat** - Mafia discuss (multiple messages each) and reach consensus
 2. **💉 Doctor Action** - Doctor protects someone (can't repeat twice)
 3. **👮 Sheriff Investigation** - Sheriff learns exact role of target
@@ -136,6 +152,7 @@ See **[CONFIG_GUIDE.md](CONFIG_GUIDE.md)** for complete documentation.
 5. **🌅 Night Resolution** - Deaths revealed, game continues
 
 ### Day Phase
+
 1. **💬 Discussion** - All players discuss (configurable messages)
 2. **🗳️ Voting** - Players vote to lynch someone
 3. **🏆 Win Check** - Mafia wins if ≥ town, Town wins if all mafia eliminated
@@ -146,31 +163,29 @@ See **[specs/correct-night-flow.md](specs/correct-night-flow.md)** for complete 
 
 ### Main Scripts (Use These)
 
-| Script | Purpose | When to Use |
-|--------|---------|-------------|
-| `mafia.sh` | **Main CLI interface** | All game management |
-| `demo-game-correct-flow-v2.js` | **Main game engine** | Running complete games |
+| Script                          | Purpose              | When to Use            |
+| ------------------------------- | -------------------- | ---------------------- |
+| `node game-engine.js`           | **Main game engine** | Running complete games |
+| `./mafia.sh`                    | **CLI wrapper**      | Configuration, demos   |
+| `./mafia.sh demo`               | Run one-off demo     | Quick test             |
+| `./mafia.sh config --show`      | View settings        | Check current config   |
+| `./mafia.sh config --players 8` | Configure            | Customize game         |
 
-### Management Scripts
+### Quick Commands
 
 ```bash
-# Create new game with current config
-./mafia.sh new
+# Run game directly
+node game-engine.js
 
-# List all saved games
-./mafia.sh list
+# Run with options
+node game-engine.js --players 8
 
-# Continue a game
-./mafia.sh continue [gameId]
-
-# Delete a game
-./mafia.sh delete [gameId]
-
-# Run demo game (one-off)
+# Run demo
 ./mafia.sh demo
 
-# Show help
-./mafia.sh help
+# Configure and create
+./mafia.sh config --players 8 --mafia 2
+./mafia.sh new
 ```
 
 ### Configuration Commands
@@ -204,13 +219,13 @@ node game-manager.js delete [gameId]
 
 ## 🎭 Roles
 
-| Role | Ability | Win Condition |
-|------|---------|---------------|
-| **Mafia** | Kill one player each night | Survive until ≥ town |
-| **Doctor** | Protect one player each night | Town victory |
-| **Sheriff** | Investigate exact role each night | Town victory |
-| **Vigilante** | Shoot one player once | Town victory |
-| **Villager** | Vote and discuss | Town victory |
+| Role          | Ability                           | Win Condition        |
+| ------------- | --------------------------------- | -------------------- |
+| **Mafia**     | Kill one player each night        | Survive until ≥ town |
+| **Doctor**    | Protect one player each night     | Town victory         |
+| **Sheriff**   | Investigate exact role each night | Town victory         |
+| **Vigilante** | Shoot one player once             | Town victory         |
+| **Villager**  | Vote and discuss                  | Town victory         |
 
 ## 🔧 Development
 
@@ -218,27 +233,27 @@ node game-manager.js delete [gameId]
 
 ```
 /config/workspace/mafia/
-├── mafia.sh                              ✅ Main CLI wrapper
-├── demo-game-correct-flow-v2.js          ✅ Main game engine (v3 with personas)
-├── game-manager.js                       ✅ Save/load system
-├── .mafia-config                         ✅ Persistent configuration
+├── game-engine.js              ✅ Main game engine (runs games)
+├── mafia.sh                    ✅ CLI wrapper script
+├── cli.js                      ✅ CLI utilities
+├── .env                        ✅ API keys (create from .env.sample)
+├── .mafia-config               ✅ Persistent configuration
 ├── packages/shared/src/
 │   ├── persona/
-│   │   └── persona-generator.js          ✅ Persona system
-│   └── __tests__/                        ✅ Unit tests
-│       ├── fsm/fsm.test.ts               ✅ FSM tests
-│       ├── roles/roles.test.ts           ✅ Role tests
-│       ├── events/events.test.ts         ✅ Event tests
-│       ├── types/types.test.ts           ✅ Type tests
-│       ├── providers/providers.test.ts   ✅ Provider tests
-│       ├── integration/real-game.test.ts ✅ Integration tests
-│       └── personas/persona.test.js      ✅ Persona tests
-├── specs/                                ✅ Game specifications
-│   ├── correct-night-flow.md             ✅ Game flow spec
-│   ├── persona-system.md                 ✅ Persona spec
-│   └── [other specs]                     ✅ Architecture docs
-├── saved-games/                          ✅ Game saves
-└── apps/                                 ✅ Future web interface
+│   │   └── persona-generator.js    ✅ Persona generation
+│   ├── fsm/                         ✅ Game state machine
+│   ├── roles/                       ✅ Role definitions
+│   ├── events/                      ✅ Event definitions
+│   ├── providers/                   ✅ AI provider configs
+│   └── __tests__/                   ✅ 409+ tests
+├── specs/                           ✅ Technical specs
+│   ├── correct-night-flow.md
+│   ├── persona-system.md
+│   └── [other specs]
+├── apps/
+│   ├── server/                      ✅ HTTP/WebSocket server
+│   └── cli/                         ✅ TypeScript CLI (dev)
+└── saved-games/                     ✅ Game saves
 ```
 
 ### Running Tests
@@ -248,7 +263,7 @@ cd packages/shared
 npm test
 ```
 
-**Test Coverage**: 70+ passing tests (FSM, Roles, Providers, Personas)
+**Test Coverage**: 409+ passing tests (FSM, Roles, Providers, Personas, Events, Types, Integration)
 
 ### Game Events
 
@@ -262,10 +277,10 @@ Each game action is stored as an event with visibility levels:
   "playerName": "James Tanaka",
   "personaArchetype": "Julius Caesar",
   "eventType": "MESSAGE",
-  "visibility": "PRIVATE_MAFIA",  // PUBLIC, PRIVATE_MAFIA, ADMIN_ONLY
+  "visibility": "PRIVATE_MAFIA", // PUBLIC, PRIVATE_MAFIA, ADMIN_ONLY
   "content": {
     "think": "Private reasoning in character...",
-    "says":  "Public statement in character...",
+    "says": "Public statement in character...",
     "personaTraits": ["Charismatic", "Strategic", "Ambitious"]
   }
 }
@@ -274,15 +289,19 @@ Each game action is stored as an event with visibility levels:
 ## 🐛 Bug Fixes Applied
 
 ### ✅ Information Leakage Fixed
+
 **Issue**: Doctor/Sheriff/Vigilante could see mafia's target in their prompts
 **Fix**: Removed `mafiaKillTarget` from their `previousPhaseData`
 
 ### ✅ Variable Scope Fixed
+
 **Issue**: `mafiaKillTarget` not accessible across phases
 **Fix**: Declared at class level: `this.mafiaKillTarget = null`
 
 ### ✅ Configuration System Added
+
 **Feature**: Comprehensive CLI configuration with 15+ options
+
 - Player/role settings
 - Messaging limits
 - AI model selection
@@ -290,7 +309,9 @@ Each game action is stored as an event with visibility levels:
 - Interactive menu
 
 ### ✅ Persona System Added
+
 **Feature**: Rich, dynamic characters with:
+
 - 6 archetype categories
 - 8 communication styles
 - Diverse naming conventions
@@ -306,11 +327,11 @@ Each game action is stored as an event with visibility levels:
 
 ## 📝 Notes
 
-- **Each `node demo-game-correct-flow-v2.js` run = new independent game**
+- **Use `node game-engine.js`** to run games
 - Games saved with `./mafia.sh new` persist between sessions
 - AI models use GPT-4o-mini via OpenRouter (configurable via `--model`)
 - Role assignments are random each game
-- Personas are unique each game
+- Personas are unique each game, generated by the LLM from personality descriptions
 
 ## 🤝 Contributing
 
@@ -326,7 +347,8 @@ MIT License - see LICENSE file
 
 ---
 
-**Status**: ✅ Production Ready | ✅ Fully Documented | ✅ 70+ Tests Passing
+**Status**: ✅ Production Ready | ✅ Fully Documented | ✅ 409+ Tests Passing
+
+**Quick Start**: See [QUICK_START.md](QUICK_START.md) for 5-minute setup guide!
 
 Built with ❤️ for AI research and game theory exploration
-
