@@ -69,7 +69,7 @@ The character should feel authentic and consistent. Use the seed description as 
 // PERSONA GENERATION FROM SEED
 // ============================================
 
-async function generatePersona(seed = undefined) {
+async function generatePersona(seed = undefined, temperature = 1.0) {
   if (!API_KEY) {
     // Fallback to procedural generation if no API key
     return generateProceduralPersona(seed);
@@ -95,26 +95,35 @@ async function generatePersona(seed = undefined) {
 
  ${seed ? `Use this as inspiration: "${seed}"` : `Choose ANY character you want. No constraints or descriptions. You can choose from: fictional (books, movies, TV, anime, comics, games), historical figures, original characters, or real people.`}
 
+IMPORTANT: Create unique and diverse personas. Vary:
+- Cognitive styles (Logical, Visual, Intuitive, Emotional, etc.)
+- Communication cadences (Direct, Eloquent, Whimsical, Diplomatic, etc.)
+- Social tendencies (Introverted, Extroverted, Ambiverted)
+- Conflict styles (Collaborative, Assertive, Accommodating)
+- Humor (dry, witty, serious, dark, awkward)
+
 Provide:
  1. A realistic name (diverse cultures, NOT stereotypical Italian mobster names)
-   Examples: Sarah Chen, Marcus Williams, Aiko Tanaka, Fatima Al-Hassan, Erik Johansson, Yuki Suzuki, Priya Patel, Ahmed Hassan, Olga Petrova, Carlos Rivera
-   AVOID: Giovanni, Marco, Vincenzo, Giuseppe, or any stereotypical mobster-sounding names
+    Examples: Sarah Chen, Marcus Williams, Aiko Tanaka, Fatima Al-Hassan, Erik Johansson, Yuki Suzuki, Priya Patel, Ahmed Hassan, Olga Petrova, Carlos Rivera
+    AVOID: Giovanni, Marco, Vincenzo, Giuseppe, or any stereotypical mobster-sounding names
 
  2. A brief personality description (2-3 sentences)
  3. Core traits (3-5 keywords)
- 4. Communication style (1 sentence)
- 5. A notable flaw or quirk
+ 4. Cognitive style (1-2 words, e.g., "Visual-Spatial", "Emotional-Expressive")
+ 5. Communication cadence (1 word, e.g., "Direct", "Eloquent", "Whimsical")
+ 6. Humor style (1 word, e.g., "dry", "witty", "serious")
+ 7. A notable flaw or quirk
 
-Return JSON: { "name": "...", "personality": "...", "traits": [...], "communicationStyle": "...", "flaw": "..."}`,
+Return JSON: { "name": "...", "personality": "...", "traits": [...], "cognitiveStyle": "...", "communicationCadence": "...", "humorStyle": "...", "flaw": "..."}`,
             },
             {
               role: "user",
               content: seed
-                ? `${seed}\n\nCreate a persona inspired by this description. Feel free to expand on it!`
-                : "Generate a persona for me. Choose ANY character - fictional, historical, or original. The more diverse and interesting, the better!",
+                ? `${seed}\n\nCreate a persona inspired by this description. Feel free to expand on it! Make it unique and different from any other personas you've created.`
+                : "Generate a persona for me. Choose ANY character - fictional, historical, or original. The more diverse and interesting, the better! Make it unique.",
             },
           ],
-          temperature: seed ? 0.8 : 0.9,
+          temperature: temperature,
           max_tokens: 400,
           response_format: { type: "json_object" },
         }),
@@ -450,6 +459,56 @@ function generateProceduralPersona(seed = undefined) {
   // Backstory based on seed
   const backstory = `A ${archetype.toLowerCase()} figure known for being ${traits[0].toLowerCase()}. ${seed || "A mysterious background"}`;
 
+  // Generate cognitive styles (fixing identical persona issue)
+  const cognitiveStyles = [
+    "Logical-Sequential",
+    "Visual-Spatial",
+    "Intuitive-Holistic",
+    "Emotional-Expressive",
+    "Analytical-Synthetic",
+    "Creative-Imaginative",
+    "Strategic-Tactical",
+    "Empathetic-Relational",
+    "Abstract-Conceptual",
+    "Concrete-Practical",
+  ];
+
+  // Generate communication cadences (more diversity)
+  const communicationCadences = [
+    "Direct",
+    "Eloquent",
+    "Blunt",
+    "Diplomatic",
+    "Whimsical",
+    "Authoritative",
+    "Casual",
+    "Formal",
+    "Humorous",
+    "Solemn",
+  ];
+
+  const cognitiveStyle =
+    cognitiveStyles[Math.floor(Math.random() * cognitiveStyles.length)];
+  const communicationCadence =
+    communicationCadences[
+      Math.floor(Math.random() * communicationCadences.length)
+    ];
+
+  // Generate verbal tics
+  const verbalTicsPool = [
+    [],
+    ["you know"],
+    ["I mean"],
+    ["hmm"],
+    ["well"],
+    ["actually"],
+    ["sort of"],
+    ["to be honest"],
+    ["technically"],
+  ];
+  const verbalTics =
+    verbalTicsPool[Math.floor(Math.random() * verbalTicsPool.length)];
+
   return {
     name: baseName + " " + (Math.floor(Math.random() * 100) + 1),
     archetype: archetype,
@@ -461,6 +520,33 @@ function generateProceduralPersona(seed = undefined) {
     flaw: flaw,
     backstory: backstory,
     speakingStyle: communicationStyle,
+    coreTraits: selectedTraits,
+    cognitiveStyle: cognitiveStyle,
+    communicationCadence: communicationCadence,
+    verbalTics: verbalTics,
+    socialTendency: ["Ambiverted", "Introverted", "Extroverted"][
+      Math.floor(Math.random() * 3)
+    ],
+    conflictStyle: ["Collaborative", "Assertive", "Accommodating"][
+      Math.floor(Math.random() * 3)
+    ],
+    primaryGoal: [
+      "Survive and win",
+      "Find the truth",
+      "Protect the innocent",
+      "Uncover deception",
+    ][Math.floor(Math.random() * 4)],
+    keyFlaw: flaw,
+    keyMemory: [
+      "First game",
+      "A past betrayal",
+      "A mystery unresolved",
+      "A secret kept",
+    ][Math.floor(Math.random() * 4)],
+    happiness: Math.floor(Math.random() * 10),
+    stress: Math.floor(Math.random() * 10),
+    curiosity: Math.floor(Math.random() * 10),
+    anger: Math.floor(Math.random() * 10),
     origin: seed ? "seed" : "random",
     seed: seed,
   };
@@ -987,7 +1073,7 @@ PERSONA PLAYING INSTRUCTIONS:
 }
 
 class MafiaGame {
-  constructor() {
+  constructor(options = {}) {
     this.players = [];
     this.round = 0;
     this.lastDoctorProtection = null;
@@ -995,6 +1081,25 @@ class MafiaGame {
     this.deadPlayers = [];
     this.gameEvents = [];
     this.mafiaKillTarget = null;
+
+    // Game configuration options
+    this.config = {
+      // Context window management
+      maxContextChars: options.maxContextChars || 100000, // Maximum characters in game history
+
+      // Retry settings
+      maxRetries: options.maxRetries !== undefined ? options.maxRetries : 3,
+      retryDelay: options.retryDelay || 1000, // ms
+
+      // Persona generation diversity
+      personaTemperature: options.personaTemperature || 1.0, // Higher = more diverse
+
+      // Multi-role support (experimental)
+      allowMultiRole: options.allowMultiRole || false,
+    };
+
+    // Track context history
+    this.gameHistory = [];
   }
 
   calculateRoles(numPlayers) {
@@ -1029,8 +1134,16 @@ class MafiaGame {
   }
 
   async startGame(numPlayers = 5, personaSeeds = null) {
-    console.log(E.GAME + " Starting Mafia Game v3");
+    console.log(E.GAME + " Starting Mafia Game v4");
     console.log("=".repeat(70));
+
+    console.log("📋 Game Configuration:");
+    console.log(`   - Max Context: ${this.config.maxContextChars} characters`);
+    console.log(`   - Max Retries: ${this.config.maxRetries}`);
+    console.log(`   - Persona Temperature: ${this.config.personaTemperature}`);
+    console.log(
+      `   - Multi-Role Mode: ${this.config.allowMultiRole ? "ENABLED" : "DISABLED"}\n`,
+    );
 
     // If no personaSeeds provided, create array of undefined for LLM freedom
     // If personaSeeds provided, use them as guidance
@@ -1059,8 +1172,11 @@ class MafiaGame {
 
       console.log(`  [${i + 1}/${numPlayers}] Seed: ${seedDisplay}`);
 
-      // Generate persona (role not known yet)
-      const persona = await generatePersona(seed);
+      // Generate persona (role not known yet) with configured temperature
+      const persona = await generatePersona(
+        seed,
+        this.config.personaTemperature,
+      );
       persona.playerId = "p" + Date.now() + i;
 
       // Temporary store without role
@@ -1575,13 +1691,22 @@ class MafiaGame {
 
         const response = await this.getAIResponse(sheriff, gameState);
 
-        const targetName =
+        let targetName =
           response.action?.target ||
           alivePlayers[Math.floor(Math.random() * alivePlayers.length)].name;
-        const target =
+
+        // Sheriff cannot investigate themselves - they already know their own role
+        let target =
           alivePlayers.find((p) =>
             p.name.toLowerCase().includes(targetName.toLowerCase()),
           ) || alivePlayers[Math.floor(Math.random() * alivePlayers.length)];
+
+        // If sheriff selected themselves, pick a different target
+        if (target.id === sheriff.id) {
+          const otherPlayers = alivePlayers.filter((p) => p.id !== sheriff.id);
+          target =
+            otherPlayers[Math.floor(Math.random() * otherPlayers.length)];
+        }
 
         console.log(sheriff.emoji + " " + sheriff.name + " (SHERIFF):");
         console.log("  " + E.THINK + " THINK: " + response.think);
@@ -2017,7 +2142,7 @@ class MafiaGame {
     await this.runNightPhase(gameId);
   }
 
-  async getAIResponse(player, gameState) {
+  async getAIResponse(player, gameState, retryCount = 0) {
     if (!API_KEY) {
       return this.getMockResponse(player, gameState);
     }
@@ -2047,11 +2172,32 @@ class MafiaGame {
       const data = await response.json();
       const text = data.choices?.[0]?.message?.content || "";
 
-      return this.parseJSONResponse(text);
+      const parsed = this.parseJSONResponse(text);
+
+      // If parsing failed and we have retries left, retry instead of falling back to mock
+      if (!parsed.valid && retryCount < this.config.maxRetries) {
+        console.warn(
+          `[WARN] JSON parse failed for ${player.name}, retrying (${retryCount + 1}/${this.config.maxRetries})...`,
+        );
+        await new Promise((r) => setTimeout(r, this.config.retryDelay));
+        return this.getAIResponse(player, gameState, retryCount + 1);
+      }
+
+      return parsed.valid ? parsed : this.getMockResponse(player, gameState);
     } catch (error) {
       console.error(
         "[ERROR] AI error for " + player.name + ": " + error.message,
       );
+
+      // Retry on network errors if we have retries left
+      if (retryCount < this.config.maxRetries) {
+        console.warn(
+          `[WARN] Network error for ${player.name}, retrying (${retryCount + 1}/${this.config.maxRetries})...`,
+        );
+        await new Promise((r) => setTimeout(r, this.config.retryDelay));
+        return this.getAIResponse(player, gameState, retryCount + 1);
+      }
+
       return this.getMockResponse(player, gameState);
     }
   }
@@ -2062,15 +2208,21 @@ class MafiaGame {
       if (jsonMatch) {
         const json = JSON.parse(jsonMatch[0]);
         return {
+          valid: true,
           think: json.think || "[No private thoughts]",
           says: json.says || "[No public statement]",
           action: json.action || null,
         };
       }
     } catch (e) {
-      // Fall through to default
+      // Fall through to return invalid
     }
-    return this.getMockResponse({}, { phase: "UNKNOWN" });
+    return {
+      valid: false,
+      think: "[Parse failed]",
+      says: "[Parse failed]",
+      action: null,
+    };
   }
 
   getMockResponse(player, gameState) {
@@ -2124,6 +2276,39 @@ class MafiaGame {
       says: "I think we should discuss who to vote for.",
       action: { target: "Bob" },
     };
+  }
+
+  trimGameHistory() {
+    // Calculate current context size
+    let totalChars = 0;
+    for (const msg of this.gameHistory) {
+      totalChars += JSON.stringify(msg).length;
+    }
+
+    // If within limit, nothing to do
+    if (totalChars <= this.config.maxContextChars) {
+      return this.gameHistory;
+    }
+
+    // Need to trim - remove oldest COMPLETE messages
+    // Never split a message - always remove the oldest FULL messages
+    let charsToRemove = totalChars - this.config.maxContextChars;
+
+    while (charsToRemove > 0 && this.gameHistory.length > 0) {
+      const firstMsg = this.gameHistory[0];
+      const msgSize = JSON.stringify(firstMsg).length;
+
+      // Remove the oldest complete message
+      this.gameHistory.shift();
+      charsToRemove -= msgSize;
+    }
+
+    return this.gameHistory;
+  }
+
+  addGameEvent(event) {
+    this.gameHistory.push(event);
+    this.trimGameHistory();
   }
 
   printEventLog() {
