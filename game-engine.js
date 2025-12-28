@@ -794,32 +794,49 @@ function createGameEvent(
 function createPrompt(player, gameState, phase) {
   const persona = player.persona;
 
+  // Universal villager base prompt - everyone gets this because mafia need to pretend to be villagers
+  const villagerBasePrompt = `
+## BASE VILLAGER BEHAVIOR
+You are fundamentally a villager in this town working to find the mafia:
+- You want to help the town by identifying and eliminating mafia members
+- Be helpful, cooperative, and participate in discussions
+- Share honest observations and suspicions with other town members
+- Vote for who you believe is most likely mafia
+- Work together with other town members to solve this mystery
+
+${
+  player.role === "MAFIA"
+    ? "⚠️ IMPORTANT: YOU ARE MAFIA - You must convincingly PRETEND to follow these base villager behaviors while secretly working to eliminate the town. Hide your true identity at all costs."
+    : "Your role gives you special abilities to help the town achieve this common goal."
+}
+`;
+
   const roleInstructions = {
     MAFIA: `You are MAFIA! Your team can see this private chat.
-- Your goal: Eliminate all town members while avoiding detection
-- Coordinate with your mafia teammates to agree on a kill target
-- Blend in with town during day discussions - don't be too suspicious
-- Lie about your observations, defend your teammates subtly`,
+ - Your goal: Eliminate all town members while avoiding detection
+ - Coordinate with your mafia teammates to agree on a kill target
+ - Blend in with town during day discussions - don't be too suspicious
+ - Lie about your observations, defend your teammates subtly`,
     DOCTOR: `You are the DOCTOR. You can protect ONE person per night.
-- Your goal: Protect the sheriff and key town members from being killed
-- You CANNOT protect the same person two nights in a row
-- On night 1, you can protect yourself
-- Use your protection strategically based on suspicions`,
+ - Your goal: Protect the sheriff and key town members from being killed
+ - You CANNOT protect the same person two nights in a row
+ - On night 1, you can protect yourself
+ - Use your protection strategically based on suspicions`,
     SHERIFF: `You are the SHERIFF. You can investigate ONE person per night.
-- Your goal: Identify the mafia and share information with town
-- Investigation reveals the EXACT role: MAFIA, DOCTOR, SHERIFF, VIGILANTE, or VILLAGER
-- Share your findings strategically during day discussions
-- Be careful - if you're too obvious, the mafia will kill you`,
+ - Your goal: Identify the mafia and share information with town
+ - Investigation reveals the EXACT role: MAFIA, DOCTOR, SHERIFF, VIGILANTE, or VILLAGER
+ - Share your findings strategically during day discussions
+ - Be careful - if you're too obvious, the mafia will kill you`,
     VIGILANTE: `You are the VIGILANTE. You can shoot ONE person ONCE during the entire game.
-- Your goal: Help the town by eliminating who you believe is mafia
-- You can ONLY shoot once, so choose carefully!
-- Consider waiting for more information before acting
-- Your shot is secret - no one knows who you shot except you`,
+ - Your goal: Help the town by eliminating who you believe is mafia
+ - You can ONLY shoot once, so choose carefully!
+ - Consider waiting for more information before acting
+ - Your shot is secret - no one knows who you shot except you`,
     VILLAGER: `You are a VILLAGER. You have no special abilities.
-- Your goal: Help identify and eliminate the mafia through discussion and voting
-- Watch voting patterns, accusations, and defenses
-- Look for inconsistencies in what players say
-- Share observations and suspicions during day discussions`,
+ - Your goal: Help identify and eliminate the mafia through discussion and voting
+ - Watch voting patterns, accusations, and defenses
+ - Look for inconsistencies in what players say
+ - Share observations and suspicions during day discussions`,
   };
 
   // Build chat history
@@ -920,6 +937,8 @@ PERSONA PLAYING INSTRUCTIONS:
     ", a " +
     player.role +
     " in a Mafia game.\n\n" +
+    villagerBasePrompt +
+    "\n\n" +
     roleInstructions[player.role] +
     "\n\n" +
     personaContext +
@@ -1231,7 +1250,6 @@ class MafiaGame {
               ? "First night - no previous info"
               : "Mafia discussion so far:\n" +
                 mafiaMessages
-                  .slice(-3)
                   .map((m) => "  - " + m.player + ": " + m.says)
                   .join("\n"),
           chatHistory: mafiaMessages, // Full chat history
@@ -1877,7 +1895,11 @@ class MafiaGame {
         ) || alivePlayers[Math.floor(Math.random() * alivePlayers.length)];
 
       votes[target.id] = (votes[target.id] || 0) + 1;
-      console.log(player.name + " -> " + target.name);
+
+      // Think→Speak pattern for voting
+      console.log(player.name + " -> VOTES: " + target.name);
+      console.log("  " + E.THINK + " THINK: " + response.think);
+      console.log("  " + E.SAYS + ' SAYS:  "' + response.says + '"\n');
 
       this.gameEvents.push(
         createGameEvent(
@@ -1887,7 +1909,12 @@ class MafiaGame {
           player,
           "VOTE",
           "PUBLIC",
-          { targetId: target.id, targetName: target.name },
+          {
+            targetId: target.id,
+            targetName: target.name,
+            think: response.think,
+            says: response.says,
+          },
         ),
       );
     }
