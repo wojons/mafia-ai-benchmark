@@ -1,36 +1,68 @@
 // ============================================
-// PERSONA GENERATION SYSTEM
+// ENHANCED PERSONA GENERATION SYSTEM
+// Using "Simulated Self" Meta-Prompt Template (v2)
 // ============================================
 
 const PERSONA_SYSTEM_PROMPT = `You are a creative character designer for a Mafia game. 
-Generate a detailed persona based on the user's seed description.
+Expand the user's seed description into a complete "Simulated Self" persona.
 
-Return JSON with this exact structure:
+Generate a rich, dynamic character with depth across all these dimensions:
+
+## Core Identity
+- Name (realistic, fits backstory)
+- Physical form/avatar description
+- Backstory (2-3 sentences about origin)
+
+## Psychological Profile
+- Core traits (3-5 adjectives)
+- Cognitive style (how they think)
+- Core values (what matters most)
+- Moral alignment (DnD style)
+
+## Behavioral Model
+- Communication cadence (how they speak)
+- Verbal tics (common phrases)
+- Humor style
+- Social tendencies
+- Conflict resolution style
+
+## Relational Profile
+- Primary goal/motivation
+- Key flaw/insecurity
+- A key formative memory
+
+## Dynamic State
+- Current emotional baseline (happiness, stress, curiosity, anger scales 1-10)
+- State-based behavior modifiers
+
+Return ONLY valid JSON matching this structure:
 {
   "name": "First Last",
-  "archetype": "Archetype Name",
-  "traits": ["Trait1", "Trait2", "Trait3", "Trait4"],
-  "communicationStyle": "Style description",
-  "humor": "humor type",
-  "moralAlignment": "Alignment",
-  "coreValues": ["Value1", "Value2", "Value3"],
-  "flaw": "Character flaw",
-  "backstory": "2-3 sentences about their background",
-  "speakingStyle": "How they phrase things"
+  "physicalForm": "Description of how they appear",
+  "backstory": "Origin story paragraph",
+  "coreTraits": ["trait1", "trait2", "trait3", "trait4", "trait5"],
+  "cognitiveStyle": "Logical-Sequential | Visual | Abstract | Emotional",
+  "coreValues": ["value1", "value2", "value3"],
+  "moralAlignment": "Lawful Good | Neutral Good | Chaotic Good | etc.",
+  "communicationCadence": "Formal | Casual | Quick | Measured | etc.",
+  "verbalTics": ["phrase1", "phrase2", "phrase3"],
+  "humorStyle": "Dry | Witty | Pun-based | Observational | Rare",
+  "socialTendency": "Introverted | Extroverted | Ambiverted",
+  "conflictStyle": "Avoidant | Collaborative | Compromising | Authoritative",
+  "primaryGoal": "Their driving ambition or desire",
+  "keyFlaw": "A relatable weakness",
+  "keyMemory": "A formative past event that shapes them",
+  "happiness": 5,
+  "stress": 3,
+  "curiosity": 7,
+  "anger": 2
 }
 
-Choose from these archetypes: Leader, Diplomat, Detective, Survivor, Scientist, 
-Strategist, Defender, Hero, Liberator, Tactician, Inventor, Conqueror.
+The character should feel authentic and consistent. Use the seed description as the foundation.`;
 
-Choose from: dry, witty, quiet, serious, subtle, gentle, sharp, ironic, 
-rare, warm, bold, comedic, proud, dark, playful, awkward, confident, random
-
-Alignments: Lawful Good, Neutral Good, Chaotic Good, Lawful Neutral, True Neutral, 
-Chaotic Neutral, Lawful Evil, Neutral Evil, Chaotic Evil
-
-Values: Family, Friendship, Justice, Freedom, Power, Knowledge, Honesty, Wealth, Peace, Glory
-
-Flaws: Trusting, Arrogant, Obsessive, Impulsive, Cynical, Naive, Stubborn, Greedy`;
+// ============================================
+// PERSONA GENERATION FROM SEED
+// ============================================
 
 async function generatePersonaFromSeed(seedDescription, role) {
   if (!API_KEY) {
@@ -55,11 +87,24 @@ async function generatePersonaFromSeed(seedDescription, role) {
             { role: "system", content: PERSONA_SYSTEM_PROMPT },
             {
               role: "user",
-              content: `Create a persona for a Mafia game player with this seed: "${seedDescription}". Their game role will be: ${role}. Expand this into a full, unique character.`,
+              content: `Create a detailed persona for a Mafia game player.
+
+SEED DESCRIPTION: "${seedDescription}"
+GAME ROLE: ${role}
+
+Expand this seed into a complete Simulated Self persona. The character should have:
+- A name that fits their backstory
+- A compelling origin story
+- Traits that influence their gameplay
+- A clear communication style
+- A memorable flaw
+- A key memory that shapes them
+
+Return complete JSON with all fields populated.`,
             },
           ],
           temperature: 0.8,
-          max_tokens: 400,
+          max_tokens: 600,
         }),
       },
     );
@@ -71,19 +116,44 @@ async function generatePersonaFromSeed(seedDescription, role) {
     const jsonMatch = text.match(/\{[\s\S]*\}/);
     if (jsonMatch) {
       const persona = JSON.parse(jsonMatch[0]);
+
+      // Generate unique name if not provided
+      const name = persona.name || generateNameFromSeed(seedDescription);
+
       return {
-        name: persona.name || "Unknown",
-        archetype: persona.archetype || "Survivor",
-        traits: persona.traits || ["Strategic", "Cautious"],
-        communicationStyle: persona.communicationStyle || "Direct",
-        humor: persona.humor || "dry",
-        moralAlignment: persona.moralAlignment || "True Neutral",
-        coreValues: persona.coreValues || ["Survival", "Loyalty"],
-        flaw: persona.flaw || "Cautious",
-        backstory: persona.backstory || "A mysterious figure in town.",
-        speakingStyle: persona.speakingStyle || persona.communicationStyle,
-        origin: "custom",
+        // Core Identity
+        name: name,
         seed: seedDescription,
+        physicalForm: persona.physicalForm || "A person in town",
+        backstory: persona.backstory || seedDescription,
+
+        // Psychological Profile
+        coreTraits: persona.coreTraits || ["Strategic", "Cautious"],
+        cognitiveStyle: persona.cognitiveStyle || "Logical-Sequential",
+        coreValues: persona.coreValues || ["Survival"],
+        moralAlignment: persona.moralAlignment || "True Neutral",
+
+        // Behavioral Model
+        communicationCadence: persona.communicationCadence || "Direct",
+        verbalTics: persona.verbalTics || [],
+        humorStyle: persona.humorStyle || "dry",
+        socialTendency: persona.socialTendency || "Ambiverted",
+        conflictStyle: persona.conflictStyle || "Collaborative",
+
+        // Relational Profile
+        primaryGoal: persona.primaryGoal || "Survive and win",
+        keyFlaw: persona.keyFlaw || "Trusting",
+        keyMemory: persona.keyMemory || "First game of Mafia",
+
+        // Dynamic State (baseline)
+        happiness: persona.happiness || 5,
+        stress: persona.stress || 3,
+        curiosity: persona.curiosity || 7,
+        anger: persona.anger || 2,
+
+        // Metadata
+        origin: "seed",
+        role: role,
       };
     }
   } catch (error) {
@@ -93,6 +163,81 @@ async function generatePersonaFromSeed(seedDescription, role) {
   // Fallback to procedural
   return generateProceduralPersona(seedDescription, role);
 }
+
+// ============================================
+// NAME GENERATOR FROM SEED
+// ============================================
+
+function generateNameFromSeed(seed) {
+  const firstNames = [
+    "Alex",
+    "Morgan",
+    "Jordan",
+    "Casey",
+    "Taylor",
+    "Riley",
+    "Avery",
+    "Parker",
+    "Quinn",
+    "Skyler",
+    "Drew",
+    "Blake",
+    "Cameron",
+    "Dakota",
+    "Emerson",
+    "Finley",
+    "Harper",
+    "Hayden",
+    "Jesse",
+    "Kai",
+  ];
+
+  const lastNames = [
+    "Smith",
+    "Johnson",
+    "Williams",
+    "Brown",
+    "Jones",
+    "Garcia",
+    "Miller",
+    "Davis",
+    "Rodriguez",
+    "Martinez",
+    "Wilson",
+    "Anderson",
+    "Taylor",
+    "Thomas",
+    "Moore",
+    "Jackson",
+    "Martin",
+    "Lee",
+    "Thompson",
+    "White",
+  ];
+
+  // Try to extract name hints from seed
+  const seedWords = seed.split(" ");
+  const potentialFirst = seedWords.find((w) =>
+    firstNames.some((fn) => fn.toLowerCase() === w.toLowerCase()),
+  );
+
+  if (potentialFirst) {
+    const first =
+      potentialFirst.charAt(0).toUpperCase() +
+      potentialFirst.slice(1).toLowerCase();
+    const last = lastNames[Math.floor(Math.random() * lastNames.length)];
+    return `${first} ${last}`;
+  }
+
+  // Random name
+  const first = firstNames[Math.floor(Math.random() * firstNames.length)];
+  const last = lastNames[Math.floor(Math.random() * lastNames.length)];
+  return `${first} ${last}`;
+}
+
+// ============================================
+// PROCEDURAL PERSONA FALLBACK
+// ============================================
 
 function generateProceduralPersona(seedDescription, role) {
   // Parse seed for hints
@@ -701,29 +846,60 @@ function createPrompt(player, gameState, phase) {
       "\n## PREVIOUS PHASE\n" + gameState.previousPhaseData + "\n";
   }
 
-  // Persona context - full integration
+  // Enhanced Persona Context - Using Simulated Self template
   const personaContext = `
-## YOUR CHARACTER PERSONA
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-${persona.backstory ? "📖 BACKSTORY: " + persona.backstory + "\n" : ""}
-🎭 ARCHETYPE: ${persona.archetype}
-💡 TRAITS: ${persona.traits.join(", ")}
-🗣️  COMMUNICATION: ${persona.communicationStyle} (${persona.humor} humor)
-⚖️  MORAL ALIGNMENT: ${persona.moralAlignment}
-💎 CORE VALUES: ${persona.coreValues.join(", ")}
-⚠️  CHARACTER FLAW: ${persona.flaw}
-🎤 SPEAKING STYLE: ${persona.speakingStyle || persona.communicationStyle}
-${persona.seed ? `🌱 SEED INSPIRATION: "${persona.seed}"` : ""}
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+╔══════════════════════════════════════════════════════════════════════╗
+║                    YOUR CHARACTER PERSONA                             ║
+╠══════════════════════════════════════════════════════════════════════╣
+║ 🏷️  NAME: ${persona.name}
+║ 👤  FORM: ${persona.physicalForm || "A person in town"}
+║ 📖  BACKSTORY: ${persona.backstory || persona.seed || "A mysterious figure"}
+╠══════════════════════════════════════════════════════════════════════╣
+║ 🧠 PSYCHOLOGICAL PROFILE                                             ║
+║    💡 TRAITS: ${(persona.coreTraits || []).join(", ")}
+║    🧩 COGNITIVE STYLE: ${persona.cognitiveStyle || "Logical-Sequential"}
+║    💎 CORE VALUES: ${(persona.coreValues || []).join(", ")}
+║    ⚖️  MORAL ALIGNMENT: ${persona.moralAlignment || "True Neutral"}
+╠══════════════════════════════════════════════════════════════════════╣
+║ 🗣️  BEHAVIORAL MODEL                                                 ║
+║    📢 CADENCE: ${persona.communicationCadence || "Direct"}
+║    🔄 VERBAL TICS: ${(persona.verbalTics || []).join(", ") || "None"}
+║    😄 HUMOR: ${persona.humorStyle || "dry"}
+║    👥 SOCIAL: ${persona.socialTendency || "Ambiverted"}
+║    ⚔️  CONFLICT: ${persona.conflictStyle || "Collaborative"}
+╠══════════════════════════════════════════════════════════════════════╣
+║ 🎯 RELATIONAL PROFILE                                                ║
+║    🎯 GOAL: ${persona.primaryGoal || "Survive and win"}
+║    ⚠️  FLAW: ${persona.keyFlaw || "Trusting"}
+║    🔮 KEY MEMORY: ${persona.keyMemory || "First game of Mafia"}
+╠══════════════════════════════════════════════════════════════════════╣
+║ 📊 DYNAMIC STATE (Baseline)                                          ║
+║    😊 Happiness: ${persona.happiness || 5}/10
+║    😰 Stress: ${persona.stress || 3}/10
+║    🤔 Curiosity: ${persona.curiosity || 7}/10
+║    😠 Anger: ${persona.anger || 2}/10
+╚══════════════════════════════════════════════════════════════════════╝
 
 PERSONA PLAYING INSTRUCTIONS:
-- Roleplay according to your ARCHETYPE and TRAITS
-- Speak in your CHARACTERISTIC COMMUNICATION STYLE
-- Your SPEAKING STYLE should reflect your ${persona.speakingStyle || persona.communicationStyle} nature
-- Let your FLAW influence your decisions (${persona.flaw})
-- Your CORE VALUES guide what you care about most
-- Your MORAL ALIGNMENT affects ethical choices: ${persona.moralAlignment}
-- Your backstory influences how you view other players`;
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+🎭 EXPRESS YOUR TRAITS: Let your core traits (${(persona.coreValues || []).slice(0, 3).join(", ")}) guide your decisions and word choices.
+
+🗣️  SPEAK YOUR STYLE: Use your characteristic cadence (${persona.communicationCadence || "direct"}) 
+   and verbal tics. Your humor should be ${persona.humorStyle || "dry"}.
+
+🎯 PURSUE YOUR GOAL: Your primary motivation is ${persona.primaryGoal || "winning"}. 
+   Stay true to this ambition.
+
+⚠️  EMBRACE YOUR FLAW: Your weakness (${persona.keyFlaw || "Trusting"}) affects your judgment. 
+   Let it create authentic moments of vulnerability or error.
+
+💭 REFERENCE YOUR MEMORY: "${persona.keyMemory || "First game"}" influences how you see others.
+
+⚖️  ALIGN YOUR ACTIONS: Your ${persona.moralAlignment || "neutral"} alignment affects 
+   the ethical choices you make.
+
+🎭 SOCIAL DYNAMICS: As ${persona.socialTendency || "ambiverted"} in conflicts, you tend to 
+   ${persona.conflictStyle || "collaborate"} when disagreements arise.`;
 
   const prompt =
     "You are " +
@@ -751,19 +927,29 @@ PERSONA PLAYING INSTRUCTIONS:
     "- TOWN wins: When all mafia are eliminated\n\n" +
     "## SPLIT-PANE CONSCIOUSNESS\n" +
     "You must output BOTH your private THINKING and your public STATEMENT:\n" +
-    "- THINK (private): Your true reasoning and strategy. Be honest about your ${persona.archetype} mindset. Consider your ${persona.flaw} flaw affecting your judgment.\n" +
-    "- SAYS (public): What you say to other players. Speak in your ${persona.communicationStyle} style with ${persona.humor} humor. Be authentic to your ${persona.archetype} archetype.\n\n" +
+    "- THINK (private): Your true reasoning and strategy. Be honest about your traits (" +
+    (persona.coreTraits || []).slice(0, 3).join(", ") +
+    "). Consider how your flaw (" +
+    (persona.keyFlaw || "Trusting") +
+    ") might be affecting your judgment.\n" +
+    "- SAYS (public): What you say to other players. Speak in your " +
+    (persona.communicationCadence || "direct") +
+    " cadence. Use your verbal tics (" +
+    (persona.verbalTics || []).slice(0, 2).join(", ") +
+    ") naturally. Your humor should be " +
+    (persona.humorStyle || "dry") +
+    ".\n\n" +
     "## OUTPUT FORMAT\n" +
     'Return JSON: {"think": "your private reasoning", "says": "your public statement", "action": ACTION}\n\n' +
     "Remember: You are " +
     player.name +
-    ", a " +
-    persona.archetype +
-    " with a " +
-    persona.moralAlignment +
-    " alignment. Your flaw (" +
-    persona.flaw +
-    ") may cloud your judgment. Act accordingly.";
+    ". You are " +
+    (persona.primaryGoal ? "driven by " + persona.primaryGoal : "a player") +
+    ". Your " +
+    (persona.moralAlignment || "neutral") +
+    " alignment and " +
+    (persona.keyFlaw || "flaw") +
+    " nature shape your choices. Stay authentic to your persona.";
 
   return prompt;
 }
@@ -1826,18 +2012,19 @@ class MafiaGame {
 
 // Only auto-run when executed directly, not when imported as module
 if (require.main === module) {
-  // Example: Custom persona seeds for more dynamic gameplay
+  // Enhanced persona seeds - detailed descriptions for rich persona generation
+  // These seed descriptions will be expanded by AI into full "Simulated Self" personas
   const customSeeds = [
-    "Suspicious lawyer who questions everyone",
-    "Quiet bookstore owner who observes everything",
-    "Charismatic politician who persuasive and ambitious",
-    "Retired detective skeptical of everyone",
-    "New in town mysterious stranger",
-    "Friendly neighbor who is too trusting",
-    "Arrogant businessperson who thinks they're always right",
-    "Wise old teacher who mediates conflicts",
-    "Impulsive young activist who rushes to judgment",
-    "Cynical journalist investigating the truth",
+    "A suspicious lawyer in a cheap suit who questions everyone's motives, always looking for the angle",
+    "A quiet bookstore owner who observes everything from behind cluttered shelves, speaks rarely but accurately",
+    "A charismatic small-town mayor running for re-election, ambitious and persuasive to a fault",
+    "A gruff retired detective with a keen eye for lies, skeptical of everyone, especially smooth talkers",
+    "A new resident in town who keeps to themselves, mysterious past, always watching",
+    "An overly friendly neighbor who brings baked goods and asks too many questions, genuinely too trusting",
+    "An arrogant tech CEO visiting from the city, thinks they're smarter than everyone, dismissive of small-town drama",
+    "A wise retired schoolteacher who has seen it all, mediates conflicts with gentle authority",
+    "A passionate young activist who rushes to defend the accused, impulsive but sincere",
+    "A hardbitten local journalist who's investigated every scandal in town, sees deception everywhere",
   ];
 
   // Run with custom personas
@@ -1852,24 +2039,29 @@ if (require.main === module) {
       "Seeds:",
       customSeeds
         .slice(0, 5)
-        .map((s) => `"${s}"`)
+        .map((s) => `"${s.substring(0, 50)}..."`)
         .join(", "),
+    );
+    console.log(
+      "These seeds will be expanded into full Simulated Self personas\n",
     );
     game.startGame(5, customSeeds.slice(0, 5)).catch(console.error);
   } else if (args.length > 0 && args[0] === "--demo") {
     // Use minimal seeds for quick demo
     const demoSeeds = [
-      "Suspicious character",
-      "Mysterious figure",
-      "Quiet observer",
-      "Charismatic leader",
-      "Cynical skeptic",
+      "A suspicious character who questions everyone",
+      "A mysterious figure who keeps to themselves",
+      "A quiet observer of human nature",
+      "A charismatic leader who persuades others",
+      "A cynical skeptic who trusts no one",
     ];
     console.log(E.GAME + " Starting with DEMO seeds (fast)");
+    console.log("Brief seeds for quick persona generation\n");
     game.startGame(5, demoSeeds).catch(console.error);
   } else {
     // Default: auto-generate interesting seeds
     console.log(E.GAME + " Starting with AUTO-GENERATED personas");
+    console.log("Using default interesting seed descriptions\n");
     game.startGame(5).catch(console.error);
   }
 }
