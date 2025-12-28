@@ -261,8 +261,10 @@ function generateDoctorSay(state: GameState): string {
 
 ### Constraints
 
-- Cannot investigate self
+- **Cannot investigate self:** Sheriff automatically skips self-investigation attempts, choosing a different random target. This is enforced because sheriff already knows their own role and self-investigation wastes the valuable (once-per-night) investigative ability.
 - Cannot investigate dead players
+- In multi-role games (Sheriff + Mafia), sheriff may choose not to fully reveal findings that could expose mafia teammates
+- Investigation results are private until sheriff chooses to reveal
 - Investigation results are private until sheriff chooses to reveal
 
 ### Private Knowledge
@@ -743,6 +745,210 @@ interface MafiaCoordination {
 - Vigilante shot is unblockable (by default)
 - Creates uncertainty: "Did doctor save or was that vigilante?"
 - Doctor may try to deduce vigilante from shooting patterns
+
+---
+
+## Multi-Role Support (Experimental)
+
+### Overview
+
+Game supports an optional `allowMultiRole` configuration that enables players to have multiple roles simultaneously. This creates interesting "inside man" dynamics where a mafia agent might also be the doctor, sheriff, or vigilante.
+
+### Activation
+
+```typescript
+const game = new MafiaGame({
+  allowMultiRole: true, // Enable multi-role mode
+});
+```
+
+### Allowed Multi-Role Combinations
+
+| Combination       | Description                               | Strategic Impact                                                                        |
+| ----------------- | ----------------------------------------- | --------------------------------------------------------------------------------------- |
+| Sheriff + Mafia   | The mole - sheriff investigates for mafia | Sheriff reports findings to mafia team; mafia knows in advance who sheriff investigates |
+| Doctor + Mafia    | Inside agent - can save mafia kills       | Doctor mafia can choose not to save, or save to disguise alliance                       |
+| Vigilante + Mafia | Confused vigilante - can shoot any target | May accidentally shoot mafia teammates; creates internal mafia conflict                 |
+| Sheriff + Doctor  | Powerful town duo                         | Self-protecting sheriff + doctor support                                                |
+| Any combination   | Multiple roles on single player           | Must balance conflicting objectives                                                     |
+
+### Constraints & Rules
+
+#### Anti-Stacking Rules (when enabled)
+
+To maintain game balance, certain combinations are restricted:
+
+1. **Multiple Mafia Cannot Share Power Role**: Not all mafia can be the same special role
+   - **Rule:** If there are 2+ mafia, at most 1 of them can be the doctor
+   - **Rule:** If there are 2+ mafia, at most 1 of them can be the sheriff
+   - **Purpose:** Prevents mafia from having complete control of doctor/sheriff actions
+
+2. **Self-Investigation Prohibition**: Sheriff cannot investigate themselves
+   - **Reasoning:** Sheriff already knows their own role
+   - **Implementation:** If sheriff selects themselves as target, random other player chosen
+
+3. **Conflict of Interest Resolution**: When roles have conflicting objectives
+   - **Example:** Sheriff+Mafia - must report truth but not reveal mafia identity
+   - **Resolution:** Sheriff reports "role found" without explicit mafia statement in public
+   - Private split-pane THINK shows true analysis
+
+### Implementation Details
+
+#### Sheriff Multi-Role
+
+```typescript
+// If Sheriff is also Mafia:
+function sheriffMafiaInvestigate(target: Player): InvestigationResult {
+  const result = investigate(target); // Get actual role
+
+  // Private (split-pane THINK):
+  const privateThought = {
+    think:
+      `Target ${target.name} is ${result.role}. As mafia, I should: ` +
+      (result.role === "MAFIA"
+        ? "Protect my teammate by not revealing this"
+        : "Report this to town and mafia team"),
+  };
+
+  // Public (split-pane SAYS):
+  const publicStatement = {
+    says: generateSheriffPublicStatement(target, result),
+  };
+
+  return { privateThought, publicStatement, result };
+}
+```
+
+#### Doctor Multi-Role
+
+```typescript
+// If Doctor is also Mafia:
+function doctorMafiaProtect(target: Player): ProtectDecision {
+  const isMafiaTarget = this.role === "MAFIA" && target.isMafia;
+
+  const decision = {
+    think: isMafiaTarget
+      ? "Target is my mafia teammate. If I save, might reveal my alliance. If not, teammate dies."
+      : "Standard doctor protection logic",
+    says: generateDoctorPublicStatement(target),
+    target: isMafiaTarget ? chooseDifferentTarget() : target,
+  };
+}
+```
+
+#### Vigilante Multi-Role
+
+```typescript
+// If Vigilante is also Mafia:
+function vigilanteMafiaShoot(target: Player): ShootDecision {
+  const risk = calculateShotRisk(target);
+
+  const decision = {
+    think:
+      `Target ${target.name} has ${risk}% mafia probability. ` +
+      `If I shoot my teammate, I reveal myself to mafia. ` +
+      `If I shoot town, I help mafia team.`,
+    says: generateVigilantePublicStatement(target),
+    shoot: decideWhetherToShoot(target),
+  };
+}
+```
+
+### Scenario Examples
+
+#### Scenario 1: Sheriff + Mafia (The Perfect Mole)
+
+**Setup:** Player A has roles [SHERIFF, MAFIA]
+
+**Night 1:**
+
+- Sheriff investigates Player B
+- Result: Player B is VILLAGER
+- Private THINK: "B is villager. Safe to report this to town. No threat to mafia."
+
+**Day 1:**
+
+- Sheriff reveals: "I investigated B, they're clean"
+- Town trusts Sheriff's investigation
+- Mafia knows Sheriff's identity from private mafia chat
+- Mafia can use Sheriff's clean reports to misdirect
+
+#### Scenario 2: Doctor + Mafia (The Unexplained Save)
+
+**Setup:** Player A has roles [DOCTOR, MAFIA]
+
+**Night 1:**
+
+- Mafia votes to kill Player B (VILLAGER)
+- Doctor protects Player B (chooses not to save own teammate)
+- Result: Player B dies
+- Town: "Doctor failed to save B" (suspicious but ambiguous)
+
+**Night 2:**
+
+- Mafia votes to kill Player C (VILLAGER)
+- Doctor protects Player C (still not saving mafia)
+- Result: Player C dies
+- Town: "Doctor is inactive/bad" (increases suspicion on doctor role)
+
+**Night 3:**
+
+- Mafia votes to kill Player D (VILLAGER)
+- Doctor protects Player D (saves to look competent)
+- Result: Player D lives
+- Town: "Doctor is back! Good save!"
+
+**Outcome:** Doctor mafia manipulated perception through selective protection.
+
+#### Scenario 3: Two Mafia, One Doctor (Anti-Stacking Rule Applied)
+
+**Setup:**
+
+- Players A, B: MAFIA
+- Player C: DOCTOR
+- Multi-role enabled, but anti-stacking rule active
+
+**Role Assignment:**
+
+- Option 1: Player A becomes [MAFIA, DOCTOR], Player B remains [MAFIA]
+- Option 2: Player B becomes [MAFIA, DOCTOR], Player A remains [MAFIA]
+- **NOT ALLOWED:** Both A and B become [MAFIA, DOCTOR]
+
+**Impact:** Only one mafia can protect/kill, adding strategic decision-making.
+
+### Configuration Options
+
+```typescript
+interface GameConfig {
+  // Multi-role settings
+  allowMultiRole: boolean; // Enable/disable multi-role mode
+  maxRolesPerPlayer?: number; // Limit roles per player (default: 2)
+
+  // Anti-stacking rules
+  limitMafiaPowerOverlap?: boolean; // Restrict mafia from sharing power roles
+  maxMafiaWithPowerRole?: number; // Max mafia with doctor/sheriff (default: 1)
+
+  // Context management
+  maxContextChars?: number; // Max history characters (default: 100,000)
+
+  // Retry settings
+  maxRetries?: number; // Max API retry attempts (default: 3)
+  retryDelay?: number; // Delay between retries in ms (default: 1000)
+
+  // Persona diversity
+  personaTemperature?: number; // LLM temperature for personas (default: 1.0)
+}
+```
+
+### Testing Considerations
+
+When testing multi-role games:
+
+1. Verify self-investigation is blocked
+2. Check that mafia inside agents can coordinate privately
+3. Validate that public statements don't accidentally reveal multiple roles
+4. Ensure split-pane THINK shows true internal conflict
+5. Test anti-stacking rules prevent role concentration
 
 ---
 

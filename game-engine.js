@@ -1085,17 +1085,27 @@ class MafiaGame {
     // Game configuration options
     this.config = {
       // Context window management
-      maxContextChars: options.maxContextChars || 100000, // Maximum characters in game history
+      maxContextChars:
+        options.maxContextChars ||
+        parseInt(process.env.MAX_CONTEXT_CHARS || "100000", 10), // Maximum characters in game history
 
       // Retry settings
-      maxRetries: options.maxRetries !== undefined ? options.maxRetries : 3,
-      retryDelay: options.retryDelay || 1000, // ms
+      maxRetries:
+        options.maxRetries !== undefined
+          ? options.maxRetries
+          : parseInt(process.env.MAX_RETRIES || "3", 10),
+      retryDelay:
+        options.retryDelay ||
+        parseInt(process.env.RETRY_DELAY_MS || "1000", 10), // ms
 
       // Persona generation diversity
-      personaTemperature: options.personaTemperature || 1.0, // Higher = more diverse
+      personaTemperature:
+        options.personaTemperature ||
+        parseFloat(process.env.PERSONA_TEMPERATURE || "1.0"), // Higher = more diverse
 
       // Multi-role support (experimental)
-      allowMultiRole: options.allowMultiRole || false,
+      allowMultiRole:
+        options.allowMultiRole || process.env.ALLOW_MULTI_ROLE === "true",
     };
 
     // Track context history
