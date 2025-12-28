@@ -2,18 +2,32 @@
 
 ## Changes Required
 
-### 1. Remove Seeds from Persona Generation
+### 1. Make Seed Optional for Persona Generation
 
 **Files affected:** `game-engine.js`
 **Function:** `generatePersonaFromSeed(line 72-187)`
 
+**Clarified Requirement:**
+
+- Seeds CAN exist for database/API creation
+- When seed provided: Use as guidance/inspiration
+- When NO seed: LLM chooses any character freely
+- Default game should have NO seeds (LLM freedom)
+
 **Changes:**
 
-- Remove `seedDescription` and `role` parameters
-- Function becomes: `async function generatePersona()`
-- Update prompt to NOT mention seeds or roles
-- Prompt should say: "Choose ANY character you want"
-- Remove all seed-related code paths
+- Function becomes: `async function generatePersona(seed = undefined)`
+- Conditional prompt based on whether seed exists:
+  ```javascript
+  if (seed) {
+    userPrompt = `Use this as inspiration: "${seed}" Create a persona...`;
+  } else {
+    userPrompt = `Choose ANY character you want (fictional, historical, original, real)...`;
+  }
+  ```
+- Remove role parameter
+- Remove default seed array from startGame
+- Allow database/API to pass seed when creating players
 
 ### 2. Fix Procedural Fallback
 
@@ -26,6 +40,7 @@
 - Function becomes: `function generateProceduralPersona()`
 - Remove all seed parsing logic
 - Simple random persona generation:
+
   ```javascript
   function generateProceduralPersona() {
     const firstNames = [...]; // 30 diverse names
@@ -268,7 +283,7 @@ console.log("      Seed: " + (p.persona.seed || "Generated"));
 
 ### BLOCKER (Can't proceed without these fixes)
 
-1. ❌ Remove seeds entirely
+1. ⏳ Make seed optional (seed = undefined, LLM chooses freely when no seed provided, uses as guidance when seed provided)
 2. ❌ Separate persona generation from role assignment
 
 ### CRITICAL (Game-breaking bugs)

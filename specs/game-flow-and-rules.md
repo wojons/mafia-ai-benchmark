@@ -97,16 +97,33 @@ AI models play the Mafia social deduction game. Each model is assigned a persona
 
 **Process:**
 
-1. Game starts, LLM is told: "Generate a persona for a social deduction game"
-2. LLM chooses persona (any character: fictional, anime, real person, etc.)
-3. LLM generates name for persona
-4. **No game context provided yet** - LLM doesn't know it's playing Mafia
+1. Game starts, LLM generates persona (two modes):Mode A - Default game (no seed, database/API creation):
+   ```
+   LLM is told: "Choose ANY character you want"
+   - No constraints or descriptions provided
+   - LLM freely chooses from: fictional, anime, historical, original, real people
+   - Complete creative freedom
+   ```
 
-**Prompt Template:**
+Mode B - Seed provided (database/API creation):
+
+```
+LLM is told: "Use this as inspiration: [seed]"
+- Seed used as guidance/inspiration for persona
+- Database can store personas with seeds
+- API can accept seed when creating players
+```
+
+2. LLM generates name for persona
+3. **No game context provided yet** - LLM doesn't know it's playing Mafia
+4. **Role assigned AFTER persona created**
+
+**Prompt Template (No seed):**
 
 ```
 You are participating in a social deduction game. Create a persona:
 
+Choose ANY character you want:
 - Pick a character (fictional, anime, historical, or invent your own)
 - Generate a name
 - Describe personality traits
@@ -118,6 +135,29 @@ Examples (not limitations):
 - Captain America (heroic, direct)
 - Anime character (specific personality)
 - Custom persona (your creation)
+
+IMPORTANT NAME RULES:
+- Diverse names from various cultures
+- NO stereotypical Italian mobster names
+- Examples: Sarah Chen, Marcus Williams, Aiko Tanaka, Fatima Al-Hassan, Erik Johansson
+```
+
+**Prompt Template (With seed):**
+
+```
+You are creating a persona for a social deduction game.
+
+Use this as inspiration for your persona:
+"${seed}"
+
+Create a character based on this description, but feel free to expand and enhance it.
+
+Provide:
+1. A realistic name (diverse cultures)
+2. A brief personality description
+3. Core traits (3-5 keywords)
+4. Communication style (how they speak)
+5. A notable flaw or quirk
 ```
 
 ### Role Assignment (AFTER Persona Generated)
