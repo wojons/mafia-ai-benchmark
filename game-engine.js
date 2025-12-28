@@ -32,14 +32,7 @@ const E = {
 
 console.log(E.GAME + ' Mafia AI Benchmark - PERSONA EDITION v3');
 console.log('='.repeat(70));
-console.log('Featuring:');
-console.log('1. Dynamic Persona Generation');
-console.log('2. Unique Communication Styles');
-console.log('3. Mafia Team Discussion & Consensus');
-console.log('4. Doctor Protection (can\'t protect same twice)');
-console.log('5. Sheriff Investigation');
-console.log('6. Vigilante Optional Shoot');
-console.log('7. Night -> Day Discussion -> Voting');
+console.log('Features: Persona System, Mafia Consensus, Roles, Voting');
 console.log('='.repeat(70) + '\n');
 
 const API_KEY = process.env.OPENAI_API_KEY || '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';
@@ -52,8 +45,78 @@ const roleEmojis = {
   'VILLAGER': E.VILLAGER,
 };
 
-const PersonaGenerator = require('./packages/shared/src/persona/persona-generator.js');
-const personaGenerator = new PersonaGenerator();
+// Simple Persona Generator (inlined to avoid ESM issues)
+const archetypes = {
+  historical: [
+    { name: 'Caesar', archetype: 'Leader', traits: ['Charismatic', 'Strategic', 'Ambitious'], communicationStyle: 'Authoritative', humor: 'dry' },
+    { name: 'Cleopatra', archetype: 'Diplomat', traits: ['Intelligent', 'Charming', 'Cunning'], communicationStyle: 'Elegant', humor: 'witty' },
+    { name: 'Leonardo', archetype: 'Inventor', traits: ['Curious', 'Creative', 'Perfectionist'], communicationStyle: 'Analytical', humor: 'quiet' },
+    { name: 'Genghis', archetype: 'Conqueror', traits: ['Fierce', 'Strategic', 'Honorable'], communicationStyle: 'Direct', humor: 'serious' },
+    { name: 'Marie', archetype: 'Scientist', traits: ['Dedicated', 'Brilliant', 'Resilient'], communicationStyle: 'Precise', humor: 'subtle' },
+    { name: 'Lincoln', archetype: 'Mediator', traits: ['Wise', 'Patient', 'Principled'], communicationStyle: 'Warm', humor: 'gentle' },
+    { name: 'Elizabeth', archetype: 'Strategist', traits: ['Calculating', 'Charismatic', 'Independent'], communicationStyle: 'Regal', humor: 'sharp' },
+    { name: 'Sun Tzu', archetype: 'Tactician', traits: ['Analytical', 'Strategic', 'Patient'], communicationStyle: 'Measured', humor: 'ironic' }
+  ],
+  fictional: [
+    { name: 'Sherlock', archetype: 'Detective', traits: ['Observant', 'Logical', 'Detached'], communicationStyle: 'Clinical', humor: 'dry' },
+    { name: 'Atticus', archetype: 'Defender', traits: ['Principled', 'Empathetic', 'Courageous'], communicationStyle: 'Warm', humor: 'gentle' },
+    { name: 'Katniss', archetype: 'Survivor', traits: ['Resourceful', 'Brave', 'Protective'], communicationStyle: 'Blunt', humor: 'rare' },
+    { name: 'Diana', archetype: 'Hero', traits: ['Compassionate', 'Fierce', 'Idealistic'], communicationStyle: 'Bold', humor: 'warm' }
+  ],
+  anime: [
+    { name: 'Naruto', archetype: 'Hero', traits: ['Determined', 'Optimistic', 'Protective'], communicationStyle: 'Enthusiastic', humor: 'loud' },
+    { name: 'Light', archetype: 'Strategist', traits: ['Intelligent', 'Ambitious', 'Calculating'], communicationStyle: 'Calm', humor: 'dark' },
+    { name: 'Luffy', archetype: 'Liberator', traits: ['Free-spirited', 'Brave', 'Loyal'], communicationStyle: 'Simple', humor: 'comedic' },
+    { name: 'Senku', archetype: 'Scientist', traits: ['Brilliant', 'Optimistic', 'Scientific'], communicationStyle: 'Excited', humor: 'proud' }
+  ],
+  stereotype: [
+    { name: 'Alex', archetype: 'Jock', traits: ['Athletic', 'Confident', 'Social'], communicationStyle: 'Casual', humor: 'playful' },
+    { name: 'Morgan', archetype: 'Nerd', traits: ['Smart', 'Quiet', 'Technical'], communicationStyle: 'Precise', humor: 'awkward' },
+    { name: 'Jordan', archetype: 'Leader', traits: ['Confident', 'Charismatic', 'Decisive'], communicationStyle: 'Bold', humor: 'confident' },
+    { name: 'Casey', archetype: 'Free Spirit', traits: ['Creative', 'Independent', 'Artistic'], communicationStyle: 'Flowing', humor: 'random' }
+  ]
+};
+
+const firstNames = ['Alex', 'Morgan', 'Jordan', 'Casey', 'Taylor', 'Riley', 'Avery', 'Parker', 'Quinn', 'Skyler'];
+const moralAlignments = ['Lawful Good', 'Neutral Good', 'Chaotic Good', 'Lawful Neutral', 'True Neutral', 'Chaotic Neutral', 'Lawful Evil', 'Neutral Evil', 'Chaotic Evil'];
+const coreValues = ['Family', 'Friendship', 'Justice', 'Freedom', 'Power', 'Knowledge', 'Honesty', 'Wealth', 'Peace', 'Glory'];
+const flaws = ['Trusting', 'Arrogant', 'Obsessive', 'Impulsive', 'Cynical', 'Naive', 'Stubborn', 'Greedy'];
+
+function generateGamePersonas(numPlayers) {
+  const personas = [];
+  const archetypeKeys = Object.keys(archetypes);
+  
+  for (let i = 0; i < numPlayers; i++) {
+    const archetypeKey = archetypeKeys[Math.floor(Math.random() * archetypeKeys.length)];
+    const archetype = archetypes[archetypeKey][Math.floor(Math.random() * archetypes[archetypeKey].length)];
+    const name = firstNames[Math.floor(Math.random() * firstNames.length)] + ' ' + (i + 1);
+    
+    const roleAssignment = [
+      'MAFIA', 'MAFIA', 'MAFIA',
+      'DOCTOR',
+      'SHERIFF',
+      'VIGILANTE',
+      'VILLAGER', 'VILLAGER', 'VILLAGER', 'VILLAGER'
+    ];
+    const gameRole = roleAssignment[i] || 'VILLAGER';
+    
+    personas.push({
+      playerId: 'p' + Date.now() + i,
+      name: name,
+      archetype: archetype.archetype,
+      traits: archetype.traits,
+      communicationStyle: archetype.communicationStyle,
+      humor: archetype.humor,
+      origin: archetypeKey,
+      moralAlignment: moralAlignments[Math.floor(Math.random() * moralAlignments.length)],
+      coreValues: coreValues.slice(0, 3).sort(() => Math.random() - 0.5),
+      flaw: flaws[Math.floor(Math.random() * flaws.length)],
+      gameRole: gameRole
+    });
+  }
+  
+  return personas;
+}
 
 function simpleUUID() {
   return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, c => {
@@ -120,7 +183,8 @@ class MafiaGame {
     console.log(E.GAME + ' Starting Mafia Game v3');
     console.log('='.repeat(70));
 
-    const personas = personaGenerator.generateGamePersonas(numPlayers);
+    // Generate personas for all players
+    const personas = generateGamePersonas(numPlayers);
     
     for (let i = 0; i < numPlayers; i++) {
       const persona = personas[i];
