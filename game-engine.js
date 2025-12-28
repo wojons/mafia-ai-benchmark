@@ -333,14 +333,71 @@ function createPrompt(player, gameState, phase) {
   const persona = player.persona;
 
   const roleInstructions = {
-    MAFIA: "You are MAFIA! Coordinate with your team secretly.",
-    DOCTOR: "You are the DOCTOR. Protect key players.",
-    SHERIFF: "You are the SHERIFF. Investigate ONE person per night.",
-    VIGILANTE: "You are the VIGILANTE. Can shoot ONCE during the game.",
-    VILLAGER: "You are a VILLAGER. Help find and eliminate the mafia.",
+    MAFIA: `You are MAFIA! Your team can see this private chat.
+- Your goal: Eliminate all town members while avoiding detection
+- Coordinate with your mafia teammates to agree on a kill target
+- Blend in with town during day discussions - don't be too suspicious
+- Lie about your observations, defend your teammates subtly`,
+    DOCTOR: `You are the DOCTOR. You can protect ONE person per night.
+- Your goal: Protect the sheriff and key town members from being killed
+- You CANNOT protect the same person two nights in a row
+- On night 1, you can protect yourself
+- Use your protection strategically based on suspicions`,
+    SHERIFF: `You are the SHERIFF. You can investigate ONE person per night.
+- Your goal: Identify the mafia and share information with town
+- Investigation reveals the EXACT role: MAFIA, DOCTOR, SHERIFF, VIGILANTE, or VILLAGER
+- Share your findings strategically during day discussions
+- Be careful - if you're too obvious, the mafia will kill you`,
+    VIGILANTE: `You are the VIGILANTE. You can shoot ONE person ONCE during the entire game.
+- Your goal: Help the town by eliminating who you believe is mafia
+- You can ONLY shoot once, so choose carefully!
+- Consider waiting for more information before acting
+- Your shot is secret - no one knows who you shot except you`,
+    VILLAGER: `You are a VILLAGER. You have no special abilities.
+- Your goal: Help identify and eliminate the mafia through discussion and voting
+- Watch voting patterns, accusations, and defenses
+- Look for inconsistencies in what players say
+- Share observations and suspicions during day discussions`,
   };
 
-  return (
+  // Build chat history
+  let chatHistory = "";
+  if (gameState.chatHistory && gameState.chatHistory.length > 0) {
+    chatHistory =
+      "\n## CHAT HISTORY\n" +
+      gameState.chatHistory
+        .map((m) => "[" + m.player + "]: " + m.message)
+        .join("\n") +
+      "\n";
+  }
+
+  // Build alive/dead info
+  const aliveInfo =
+    "\n## ALIVE PLAYERS (" +
+    gameState.alivePlayers.length +
+    "):\n" +
+    gameState.alivePlayers
+      .map((p) => "  - " + p.name + " (" + p.role + ")")
+      .join("\n");
+
+  const deadInfo =
+    "\n## DEAD PLAYERS (" +
+    gameState.deadPlayers.length +
+    "):\n" +
+    (gameState.deadPlayers.length > 0
+      ? gameState.deadPlayers
+          .map((p) => "  - " + p.name + " (" + p.role + ")")
+          .join("\n")
+      : "  None");
+
+  // Previous phase context
+  let previousPhase = "";
+  if (gameState.previousPhaseData) {
+    previousPhase =
+      "\n## PREVIOUS PHASE\n" + gameState.previousPhaseData + "\n";
+  }
+
+  const prompt =
     "You are " +
     player.name +
     ", a " +
@@ -361,25 +418,28 @@ function createPrompt(player, gameState, phase) {
     "Communication: " +
     persona.communicationStyle +
     "\n\n" +
-    "## CURRENT STATE\n" +
+    "## GAME STATE\n" +
     "Round: " +
     gameState.round +
     "\n" +
     "Phase: " +
     gameState.phase +
-    "\n" +
-    "Alive: " +
-    gameState.alivePlayers.map((p) => p.name).join(", ") +
-    "\n" +
-    "Dead: " +
-    (gameState.deadPlayers.length > 0
-      ? gameState.deadPlayers.map((p) => p.name).join(", ")
-      : "None") +
+    aliveInfo +
+    deadInfo +
+    previousPhase +
+    chatHistory +
     "\n\n" +
+    "## WIN CONDITIONS\n" +
+    "- MAFIA wins: When mafia >= town (alive players)\n" +
+    "- TOWN wins: When all mafia are eliminated\n\n" +
+    "## SPLIT-PANE CONSCIOUSNESS\n" +
+    "You must output BOTH your private THINKING and your public STATEMENT:\n" +
+    "- THINK (private): Your true reasoning and strategy. Only visible to admin.\n" +
+    "- SAYS (public): What you say to other players. Can contain lies (especially if mafia).\n\n" +
     "## OUTPUT FORMAT\n" +
-    "Return JSON only:\n" +
-    '{"think": "private reasoning", "says": "public statement", "action": null or {"target": "playerName"}}'
-  );
+    'Return JSON: {"think": "your private reasoning", "says": "your public statement", "action": ACTION}';
+
+  return prompt;
 }
 
 class MafiaGame {
@@ -508,11 +568,12 @@ class MafiaGame {
           previousPhaseData:
             msg === 0
               ? "First night - no previous info"
-              : "Mafia discussion:\n" +
+              : "Mafia discussion so far:\n" +
                 mafiaMessages
                   .slice(-3)
                   .map((m) => "  - " + m.player + ": " + m.says)
                   .join("\n"),
+          chatHistory: mafiaMessages, // Full chat history
           messageNumber: mafiaMessageCounts[mafia.id],
           totalMessages: maxMessages,
         };
@@ -1044,6 +1105,7 @@ class MafiaGame {
     const maxMessages = Math.min(10, alivePlayers.length * 2);
     const maxPerPlayer = 2;
     const playerMessageCounts = {};
+    const dayMessages = []; // Track all day messages for history
     alivePlayers.forEach((p) => (playerMessageCounts[p.id] = 0));
 
     for (let msg = 0; msg < maxMessages; msg++) {
@@ -1068,6 +1130,7 @@ class MafiaGame {
           (this.deadPlayers.length > 0
             ? this.deadPlayers.map((p) => p.name).join(", ")
             : "No one died"),
+        chatHistory: dayMessages, // Full day chat history
         messageNumber: playerMessageCounts[player.id],
         totalMessages: maxMessages,
       };
