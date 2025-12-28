@@ -1,4 +1,9 @@
 // ============================================
+// LOAD ENVIRONMENT VARIABLES
+// ============================================
+require("dotenv").config();
+
+// ============================================
 // ENHANCED PERSONA GENERATION SYSTEM
 // Using "Simulated Self" Meta-Prompt Template (v2)
 // ============================================
@@ -1059,13 +1064,29 @@ class MafiaGame {
     this.players.forEach((p) => {
       const mafiaMark = p.isMafia ? " " + E.MAFIATEAM : "";
       console.log(
-        "  " + p.emoji + " " + p.name + " (" + p.persona.archetype + ")",
+        "  " +
+          p.emoji +
+          " " +
+          p.name +
+          " (" +
+          (p.persona.archetype || p.persona.cognitiveStyle || "Unknown") +
+          ")",
       );
       console.log("      Role: " + p.role + mafiaMark);
       console.log("      Seed: " + (p.persona.seed || "Generated"));
-      console.log("      Traits: " + p.persona.traits.join(", "));
-      console.log("      Communication: " + p.persona.communicationStyle);
-      console.log("      Flaw: " + p.persona.flaw);
+      console.log(
+        "      Traits: " +
+          (p.persona.coreTraits || p.persona.traits || []).join(", "),
+      );
+      console.log(
+        "      Communication: " +
+          (p.persona.communicationCadence ||
+            p.persona.communicationStyle ||
+            "Direct"),
+      );
+      console.log(
+        "      Flaw: " + (p.persona.keyFlaw || p.persona.flaw || "Unknown"),
+      );
       console.log("");
     });
 
