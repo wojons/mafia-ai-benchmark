@@ -5,6 +5,8 @@
  * Events are the core of the event-sourced game state.
  */
 
+import { RoleType, GamePhase, Agent } from '../types/index.js';
+
 // Event visibility levels
 export type EventVisibility = 'PUBLIC' | 'PRIVATE' | 'ADMIN';
 
@@ -601,5 +603,4 @@ export function getEventsByDay(events: GameEvent[], dayNumber: number): GameEven
   return events.filter(event => event.metadata.dayNumber === dayNumber);
 }
 
-// Export all event types for easy importing
-export * from './schemas.js';
+// All event types are exported above

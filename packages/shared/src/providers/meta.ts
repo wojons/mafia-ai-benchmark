@@ -260,7 +260,7 @@ export class MetaProvider implements LLMProviderAdapter {
     const status = response.status;
     const data = await response.json().catch(() => ({}));
     
-    let code = ERROR_CODES.SERVER_ERROR;
+    let code: keyof typeof ERROR_CODES = 'SERVER_ERROR';
     let message = `HTTP ${status}: ${response.statusText}`;
     
     if (data.error) {
@@ -291,7 +291,7 @@ export class MetaProvider implements LLMProviderAdapter {
     if (response.usage) {
       this.stats.totalTokens += response.usage.totalTokens;
       const cost = calculateCost('META', this.config.model, response.usage.promptTokens, response.usage.completionTokens);
-      this.stats.totalCost += cost;
+      this.stats.totalCost += cost.cost;
     }
   }
   

@@ -20,6 +20,15 @@ import {
 
 export class XAIProvider implements LLMProviderAdapter {
   readonly provider: LLMProvider = 'XAI';
+  readonly capabilities: ProviderCapabilities = {
+    streaming: true,
+    functionCalling: false,
+    systemPrompt: true,
+    maxContextLength: 131072,
+    maxOutputLength: 8192,
+    supportsTemperature: true,
+    supportsStopTokens: true,
+  };
   
   private config: ProviderConfig;
   private stats: ProviderStats;
@@ -56,7 +65,7 @@ export class XAIProvider implements LLMProviderAdapter {
       const response = await this.makeRequest(payload);
       
       const latency = Date.now() - startTime;
-      this.updateStats(response, latency);
+      await this.updateStats(response, latency);
       
       return response;
     } catch (error) {
@@ -240,16 +249,16 @@ export class XAIProvider implements LLMProviderAdapter {
     const status = response.status;
     const data = await response.json().catch(() => ({}));
     
-    let code = ERROR_CODES.SERVER_ERROR;
+    let code: keyof typeof ERROR_CODES = 'SERVER_ERROR';
     let message = `HTTP ${status}: ${response.statusText}`;
     
     if (data.error) {
       const error = data.error as { message?: string };
       message = error.message || message;
       
-      if (status === 401) code = ERROR_CODES.AUTHENTICATION_FAILED;
-      else if (status === 429) code = ERROR_CODES.RATE_LIMITED;
-      else if (status === 400) code = ERROR_CODES.INVALID_REQUEST;
+      if (status === 401) code = 'AUTHENTICATION_FAILED';
+      else if (status === 429) code = 'RATE_LIMITED';
+      else if (status === 400) code = 'INVALID_REQUEST';
     }
     
     throw new LLMError(message, code, 'XAI', status, data);
@@ -264,20 +273,21 @@ export class XAIProvider implements LLMProviderAdapter {
     throw new LLMError(error instanceof Error ? error.message : 'Unknown error', ERROR_CODES.UNKNOWN_ERROR, 'XAI');
   }
   
-  private updateStats(response: ChatResponse, latency: number): void {
+  private async updateStats(response: ChatResponse, latency: number): Promise<void> {
     this.stats.lastUsed = new Date();
     this.stats.avgLatency = (this.stats.avgLatency * (this.stats.totalRequests - 1) + latency) / this.stats.totalRequests;
     
     if (response.usage) {
       this.stats.totalTokens += response.usage.totalTokens;
-      const cost = calculateCost('XAI', this.config.model, response.usage.promptTokens, response.usage.completionTokens);
-      this.stats.totalCost += cost;
+      const costResult = calculateCost(this.config.model, response.usage.promptTokens, response.usage.completionTokens);
+      this.stats.totalCost += costResult.cost;
     }
   }
   
   countTokens(text: string): number { return Math.ceil(text.length / 4); }
   estimateCost(promptTokens: number, completionTokens: number): number {
-    return calculateCost('XAI', this.config.model, promptTokens, completionTokens);
+    const result = calculateCost(this.config.model, promptTokens, completionTokens);
+    return result.cost;
   }
   validateConfig(): boolean { return !!(this.config.apiKey && this.config.model); }
   getStats(): ProviderStats { return { ...this.stats }; }
