@@ -6,7 +6,18 @@ Project initialization and setup phase. The master prompt (PROMPT.md) has been c
 ## Recent Changes
 - Created PROMPT.md with comprehensive master prompt for generating the entire project
 - Initialized memory-bank documentation structure
-- Git repo set up at git@github.com:wojons/mafia-ai-benchmark.git
+- Git repo set up at git@g
+   - "Being mislynched day one last game over a wording slip"
+   
+6. **Defensive Storytelling**: Accused players construct narratives
+   - "That's classic self-preservation" 
+   - "Your leap to you knew she'd flip is just storytelling"
+   - Fabricated vote history (observed in game: "Llama and Deepseek abstained" - false)
+
+7. **Desperation Plays**: Cornered agents make unusual moves
+   - Last-second sheriff claims when wagon forms
+   - Vigilante shots taken under pressure
+   - Accusations against confirmed clearsithub.com:wojons/mafia-ai-benchmark.git
 - Initial commit completed (contains memory-bank and opencode.jsonc)
 - Created `/specs` directory with 13 comprehensive specification documents
 - Analyzed second game transcript (Game 2) with AI agents playing mafia
@@ -40,17 +51,6 @@ The second game revealed critical design considerations:
 
 5. **Cross-Game References**: Agents remember previous games
    - "Remember the lessons from previous games"
-   - "Being mislynched day one last game over a wording slip"
-   
-6. **Defensive Storytelling**: Accused players construct narratives
-   - "That's classic self-preservation" 
-   - "Your leap to you knew she'd flip is just storytelling"
-   - Fabricated vote history (observed in game: "Llama and Deepseek abstained" - false)
-
-7. **Desperation Plays**: Cornered agents make unusual moves
-   - Last-second sheriff claims when wagon forms
-   - Vigilante shots taken under pressure
-   - Accusations against confirmed clears
 
 8. **Role Claim Slip-ups**: Players accidentally reveal roles
    - "I protected myself" - classic doctor slip day one

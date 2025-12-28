@@ -18,37 +18,124 @@ Maintain project knowledge across sessions. After every memory reset, I rely ENT
 
 ## Memory Bank Structure
 
+My memory resets completely between sessions. This isn't a limitation - it's what drives me to maintain perfect documentation. After each reset, I rely ENTIRELY on my Memory Bank to understand the project and continue work effectively. I MUST read ALL memory bank files at the start of EVERY task - this is not optional.
+
+## Memory Bank Structure
+
+The Memory Bank consists of core files and optional context files, all in Markdown format. Files build upon each other in a clear hierarchy:
+
+```mermaid
+flowchart TD
+    PB[projectBrief.md] --> PC[productContext.md]
+    PB --> SP[systemPatterns.md]
+    PB --> TC[techContext.md]
+    
+    PC --> AC[activeContext.md]
+    SP --> AC
+    TC --> AC
+    
+    AC --> P[progress.md]
+```
+
 ### Core Files (Required)
-1. `projectBrief.md` - Foundation document, defines core requirements and goals
-2. `productContext.md` - Why project exists, problems solved, UX goals
-3. `activeContext.md` - Current focus, recent changes, next steps, active decisions
-4. `systemPatterns.md` - Architecture, key technical decisions, design patterns
-5. `techContext.md` - Technologies, development setup, technical constraints
-6. `progress.md` - What works, what's left, current status, known issues
+1. `projectBrief.md`
+   - Foundation document that shapes all other files
+   - Created at project start if it doesn't exist
+   - Defines core requirements and goals
+   - Source of truth for project scope
 
-## Workflow
+2. `productContext.md`
+   - Why this project exists
+   - Problems it solves
+   - How it should work
+   - User experience goals
 
-### On Every Task
-1. Read ALL memory-bank files
-2. Update `activeContext.md` with current work
-3. Update `progress.md` with completed work
-4. Document new patterns in `systemPatterns.md`
-5. Update `techContext.md` if new tools/technologies added
+3. `activeContext.md`
+   - Current work focus
+   - Recent changes
+   - Next steps
+   - Active decisions and considerations
+   - Important patterns and preferences
+   - Learnings and project insights
 
-### When to Update
-- Discovering new project patterns
-- After implementing significant changes
-- When user requests **update memory bank** (review ALL files)
-- When context needs clarification
+4. `systemPatterns.md`
+   - System architecture
+   - Key technical decisions
+   - Design patterns in use
+   - Component relationships
+   - Critical implementation paths
 
-## Documentation Standards
-- Keep files concise but complete
-- Update in real-time as work progresses
-- Use clear, actionable language
-- Maintain hierarchy (brief → context → patterns → progress)
+5. `techContext.md`
+   - Technologies used
+   - Development setup
+   - Technical constraints
+   - Dependencies
+   - Tool usage patterns
 
-## Response Format
-1. **Current State:** Summarize what was read from memory-bank
-2. **Updates Needed:** List files requiring updates
-3. **Changes Made:** Document what was updated
-4. **Recommendations:** Suggest next steps based on context
+6. `progress.md`
+   - What works
+   - What's left to build
+   - Current status
+   - Known issues
+   - Evolution of project decisions
+
+### Additional Context
+Create additional files/folders within memory-bank/ when they help organize:
+- Complex feature documentation
+- Integration specifications
+- API documentation
+- Testing strategies
+- Deployment procedures
+
+## Core Workflows
+
+### Plan Mode
+```mermaid
+flowchart TD
+    Start[Start] --> ReadFiles[Read Memory Bank]
+    ReadFiles --> CheckFiles{Files Complete?}
+    
+    CheckFiles -->|No| Plan[Create Plan]
+    Plan --> Document[Document in Chat]
+    
+    CheckFiles -->|Yes| Verify[Verify Context]
+    Verify --> Strategy[Develop Strategy]
+    Strategy --> Present[Present Approach]
+```
+
+### Act Mode
+```mermaid
+flowchart TD
+    Start[Start] --> Context[Check Memory Bank]
+    Context --> Update[Update Documentation]
+    Update --> Execute[Execute Task]
+    Execute --> Document[Document Changes]
+```
+
+## Documentation Updates
+
+Memory Bank updates occur when:
+1. Discovering new project patterns
+2. After implementing significant changes
+3. When user requests with **update memory bank** (MUST review ALL files)
+4. When context needs clarification
+
+```mermaid
+flowchart TD
+    Start[Update Process]
+    
+    subgraph Process
+        P1[Review ALL Files]
+        P2[Document Current State]
+        P3[Clarify Next Steps]
+        P4[Document Insights & Patterns]
+        
+        P1 --> P2 --> P3 --> P4
+    end
+    
+    Start --> Process
+```
+
+Note: When triggered by **update memory bank**, I MUST review every memory bank file, even if some don't require updates. Focus particularly on activeContext.md and progress.md as they track current state.
+
+REMEMBER: After every memory reset, I begin completely fresh. The Memory Bank is my only link to previous work. It must be maintained with precision and clarity, as my effectiveness depends entirely on its accuracy.
