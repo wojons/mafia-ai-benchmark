@@ -68,7 +68,7 @@ export class QwenProvider implements LLMProviderAdapter {
       const response = await this.makeRequest(payload);
       
       const latency = Date.now() - startTime;
-      this.updateStats(response, latency);
+      await this.updateStats(response, latency);
       
       return response;
     } catch (error) {
@@ -252,7 +252,7 @@ export class QwenProvider implements LLMProviderAdapter {
     const status = response.status;
     const data = await response.json().catch(() => ({}));
     
-    let code = ERROR_CODES.SERVER_ERROR;
+    let code: keyof typeof ERROR_CODES = 'SERVER_ERROR';
     let message = `HTTP ${status}: ${response.statusText}`;
     
     if (data.error) {
@@ -276,20 +276,21 @@ export class QwenProvider implements LLMProviderAdapter {
     throw new LLMError(error instanceof Error ? error.message : 'Unknown error', ERROR_CODES.UNKNOWN_ERROR, 'QWEN');
   }
   
-  private updateStats(response: ChatResponse, latency: number): void {
+  private async updateStats(response: ChatResponse, latency: number): Promise<void> {
     this.stats.lastUsed = new Date();
     this.stats.avgLatency = (this.stats.avgLatency * (this.stats.totalRequests - 1) + latency) / this.stats.totalRequests;
     
     if (response.usage) {
       this.stats.totalTokens += response.usage.totalTokens;
-      const cost = calculateCost('QWEN', this.config.model, response.usage.promptTokens, response.usage.completionTokens);
-      this.stats.totalCost += cost;
+      const costResult = calculateCost(this.config.model, response.usage.promptTokens, response.usage.completionTokens);
+      this.stats.totalCost += costResult.cost;
     }
   }
   
   countTokens(text: string): number { return Math.ceil(text.length / 4); }
   estimateCost(promptTokens: number, completionTokens: number): number {
-    return calculateCost('QWEN', this.config.model, promptTokens, completionTokens);
+    const result = calculateCost(this.config.model, promptTokens, completionTokens);
+    return result.cost;
   }
   validateConfig(): boolean { return !!(this.config.apiKey && this.config.model); }
   getStats(): ProviderStats { return { ...this.stats }; }

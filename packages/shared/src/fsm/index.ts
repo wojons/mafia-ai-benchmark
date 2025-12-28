@@ -856,6 +856,3 @@ class GameOverState implements FSMState {
 export function createGameFSM(game: Game): GameFSM {
   return new GameFSM(game);
 }
-
-// Export state types for external use
-export type { FSMState, FSMContext };

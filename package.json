@@ -7,6 +7,10 @@
     "packages/*",
     "apps/*"
   ],
+  "imports": {
+    "#game-engine": "./game-engine.cjs",
+    "#shared/*": "./packages/shared/src/[pathname].js"
+  },
   "scripts": {
     "dev": "turbo run dev",
     "build": "turbo run build",

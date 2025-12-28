@@ -724,6 +724,4 @@ export function createAgent(
   return agent;
 }
 
-// Export all agent utilities
-export * from './factory.js';
-export * from './memory.js';
+// All agent utilities are defined in this file for simplicity

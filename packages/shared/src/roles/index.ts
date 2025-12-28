@@ -5,7 +5,8 @@
  * Defines behavior, capabilities, and prompts for each role.
  */
 
-import { RoleType, Player, Game, GameEvent, AgentMemory, InternalMonologue } from '../types/index.js';
+import { RoleType, Player, Game, AgentMemory, InternalMonologue } from '../types/index.js';
+import { GameEvent } from '../events/index.js';
 
 // Role configuration
 export interface RoleConfig {
@@ -457,9 +458,5 @@ function updateVigilanteMemory(memory: AgentMemory, game: Game, event: GameEvent
   return memory;
 }
 
-// Export all role utilities
-export * from './mafia.js';
-export * from './doctor.js';
-export * from './sheriff.js';
-export * from './vigilante.js';
-export * from './villager.js';
+// All role utilities are defined in this file
+// Role-specific modules would be in separate files for a larger codebase

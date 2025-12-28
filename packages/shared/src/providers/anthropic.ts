@@ -278,7 +278,7 @@ export class AnthropicProvider implements LLMProviderAdapter {
     const status = response.status;
     const data = await response.json().catch(() => ({}));
     
-    let code = ERROR_CODES.SERVER_ERROR;
+    let code: keyof typeof ERROR_CODES = 'SERVER_ERROR';
     let message = `HTTP ${status}: ${response.statusText}`;
     
     if (data.error) {
@@ -329,13 +329,13 @@ export class AnthropicProvider implements LLMProviderAdapter {
     if (response.usage) {
       this.stats.totalTokens += response.usage.totalTokens;
       
-      const cost = calculateCost(
+      const costResult = calculateCost(
         'ANTHROPIC',
         this.config.model,
         response.usage.promptTokens,
         response.usage.completionTokens
       );
-      this.stats.totalCost += cost;
+      this.stats.totalCost += costResult.cost;
     }
   }
   
@@ -344,7 +344,8 @@ export class AnthropicProvider implements LLMProviderAdapter {
   }
   
   estimateCost(promptTokens: number, completionTokens: number): number {
-    return calculateCost('ANTHROPIC', this.config.model, promptTokens, completionTokens);
+    const result = calculateCost('ANTHROPIC', this.config.model, promptTokens, completionTokens);
+    return result.cost;
   }
   
   validateConfig(): boolean {

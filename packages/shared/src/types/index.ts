@@ -359,3 +359,6 @@ export interface ModelStats {
   avgCostPerGame: number;
   avgDuration: number;
 }
+
+// Re-export GameEvent from events module for backward compatibility
+export type { GameEvent } from '../events/index.js';
