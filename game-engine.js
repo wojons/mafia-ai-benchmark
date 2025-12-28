@@ -69,10 +69,10 @@ The character should feel authentic and consistent. Use the seed description as 
 // PERSONA GENERATION FROM SEED
 // ============================================
 
-async function generatePersonaFromSeed(seedDescription, role) {
+async function generatePersona(seed = undefined) {
   if (!API_KEY) {
     // Fallback to procedural generation if no API key
-    return generateProceduralPersona(seedDescription, role);
+    return generateProceduralPersona(seed);
   }
 
   try {
@@ -89,24 +89,34 @@ async function generatePersonaFromSeed(seedDescription, role) {
         body: JSON.stringify({
           model: "openai/gpt-4o-mini",
           messages: [
-            { role: "system", content: PERSONA_SYSTEM_PROMPT },
+            {
+              role: "system",
+              content: `You are creating a persona for a social deduction game.
+
+ ${seed ? `Use this as inspiration: "${seed}"` : `Choose ANY character you want. No constraints or descriptions. You can choose from: fictional (books, movies, TV, anime, comics, games), historical figures, original characters, or real people.`}
+
+Provide:
+ 1. A realistic name (diverse cultures, NOT stereotypical Italian mobster names)
+   Examples: Sarah Chen, Marcus Williams, Aiko Tanaka, Fatima Al-Hassan, Erik Johansson, Yuki Suzuki, Priya Patel, Ahmed Hassan, Olga Petrova, Carlos Rivera
+   AVOID: Giovanni, Marco, Vincenzo, Giuseppe, or any stereotypical mobster-sounding names
+
+ 2. A brief personality description (2-3 sentences)
+ 3. Core traits (3-5 keywords)
+ 4. Communication style (1 sentence)
+ 5. A notable flaw or quirk
+
+Return JSON: { "name": "...", "personality": "...", "traits": [...], "communicationStyle": "...", "flaw": "..."}`,
+            },
             {
               role: "user",
-              content: `Create a detailed persona for a Mafia game player.
-
-SEED DESCRIPTION: "${seedDescription}"
-
-IMPORTANT NAME RULES:
-- Generate DIVERSE names from various cultures (NOT Italian/stereotypical)
-- Examples: Sarah Chen, Marcus Williams, Aiko Tanaka, Fatima Al-Hassan, Erik Johansson
-- AVOID: Giovanni, Marco, Vincenzo, Giuseppe, or mobster-sounding names
-- Names should NOT reveal the character's role
-
-Return complete JSON with all fields populated.`,
+              content: seed
+                ? `${seed}\n\nCreate a persona inspired by this description. Feel free to expand on it!`
+                : "Generate a persona for me. Choose ANY character - fictional, historical, or original. The more diverse and interesting, the better!",
             },
           ],
-          temperature: 0.8,
-          max_tokens: 600,
+          temperature: seed ? 0.8 : 0.9,
+          max_tokens: 400,
+          response_format: { type: "json_object" },
         }),
       },
     );
@@ -120,14 +130,14 @@ Return complete JSON with all fields populated.`,
       const persona = JSON.parse(jsonMatch[0]);
 
       // Generate unique name if not provided
-      const name = persona.name || generateNameFromSeed(seedDescription);
+      const name = persona.name || generateNameFromSeed(seed);
 
       return {
         // Core Identity
         name: name,
-        seed: seedDescription,
+        seed: seed,
         physicalForm: persona.physicalForm || "A person in town",
-        backstory: persona.backstory || seedDescription,
+        backstory: persona.backstory || seed,
 
         // Psychological Profile
         coreTraits: persona.coreTraits || ["Strategic", "Cautious"],
@@ -139,7 +149,7 @@ Return complete JSON with all fields populated.`,
         communicationCadence: persona.communicationCadence || "Direct",
         verbalTics: persona.verbalTics || [],
         humorStyle: persona.humorStyle || "dry",
-        socialTendency: persona.socialTendency || "Ambiverted",
+        socialTendency: persona.socialTendency || "Ambivert",
         conflictStyle: persona.conflictStyle || "Collaborative",
 
         // Relational Profile
@@ -154,8 +164,7 @@ Return complete JSON with all fields populated.`,
         anger: persona.anger || 2,
 
         // Metadata
-        origin: "seed",
-        role: role,
+        origin: seed ? "seed" : "ai-generated",
       };
     }
   } catch (error) {
@@ -163,7 +172,7 @@ Return complete JSON with all fields populated.`,
   }
 
   // Fallback to procedural
-  return generateProceduralPersona(seedDescription, role);
+  return generateProceduralPersona(seed);
 }
 
 // ============================================
@@ -217,18 +226,20 @@ function generateNameFromSeed(seed) {
     "White",
   ];
 
-  // Try to extract name hints from seed
-  const seedWords = seed.split(" ");
-  const potentialFirst = seedWords.find((w) =>
-    firstNames.some((fn) => fn.toLowerCase() === w.toLowerCase()),
-  );
+  // Try to extract name hints from seed (if provided)
+  if (seed) {
+    const seedWords = seed.split(" ");
+    const potentialFirst = seedWords.find((w) =>
+      firstNames.some((fn) => fn.toLowerCase() === w.toLowerCase()),
+    );
 
-  if (potentialFirst) {
-    const first =
-      potentialFirst.charAt(0).toUpperCase() +
-      potentialFirst.slice(1).toLowerCase();
-    const last = lastNames[Math.floor(Math.random() * lastNames.length)];
-    return `${first} ${last}`;
+    if (potentialFirst) {
+      const first =
+        potentialFirst.charAt(0).toUpperCase() +
+        potentialFirst.slice(1).toLowerCase();
+      const last = lastNames[Math.floor(Math.random() * lastNames.length)];
+      return `${first} ${last}`;
+    }
   }
 
   // Random name
@@ -241,12 +252,12 @@ function generateNameFromSeed(seed) {
 // PROCEDURAL PERSONA FALLBACK
 // ============================================
 
-function generateProceduralPersona(seedDescription, role) {
-  // Parse seed for hints
-  const seedLower = seedDescription.toLowerCase();
+function generateProceduralPersona(seed = undefined) {
+  // Parse seed for hints (if provided)
+  const seedLower = seed ? seed.toLowerCase() : "";
 
   // Extract potential name from seed if it looks like a name
-  const nameMatch = seedDescription.match(/^([A-Z][a-z]+)/);
+  const nameMatch = seed ? seed.match(/^([A-Z][a-z]+)/) : null;
   const baseName = nameMatch
     ? nameMatch[1]
     : ["Alex", "Morgan", "Jordan", "Casey", "Taylor"][
@@ -437,7 +448,7 @@ function generateProceduralPersona(seedDescription, role) {
   const flaw = flawPool[Math.floor(Math.random() * flawPool.length)];
 
   // Backstory based on seed
-  const backstory = `A ${archetype.toLowerCase()} figure known for being ${traits[0].toLowerCase()}. ${seedDescription}`;
+  const backstory = `A ${archetype.toLowerCase()} figure known for being ${traits[0].toLowerCase()}. ${seed || "A mysterious background"}`;
 
   return {
     name: baseName + " " + (Math.floor(Math.random() * 100) + 1),
@@ -450,8 +461,8 @@ function generateProceduralPersona(seedDescription, role) {
     flaw: flaw,
     backstory: backstory,
     speakingStyle: communicationStyle,
-    origin: "seed",
-    seed: seedDescription,
+    origin: seed ? "seed" : "random",
+    seed: seed,
   };
 }
 
@@ -1002,67 +1013,44 @@ class MafiaGame {
     console.log(E.GAME + " Starting Mafia Game v3");
     console.log("=".repeat(70));
 
-    // Default seeds if none provided - rich personality descriptions
+    // If no personaSeeds provided, create array of undefined for LLM freedom
+    // If personaSeeds provided, use them as guidance
     if (!personaSeeds) {
-      personaSeeds = [
-        "A quiet accountant who loves solving puzzles, works with numbers all day, very analytical",
-        "A community organizer who helps neighbors, volunteers at the clinic, believes in community",
-        "A former security consultant who distrusts authority, has a practical approach",
-        "A local business owner who knows everyone in town, always has an alibi",
-        "A retired teacher who loves book clubs, very friendly but observant",
-        "A sports journalist who travels a lot, easy-going, asks about people's day",
-        "A skeptical lawyer who questions everyone's motives, cross-examines witnesses",
-        "A charismatic politician who speaks smoothly, always has a smile, never commits",
-        "A nosy neighbor who knows everyone's business, loves gossip, harmless looking",
-        "A brooding artist who rarely speaks, observes everything, keeps to themselves",
-      ];
+      personaSeeds = new Array(numPlayers).fill(undefined);
+      console.log(E.LOCK + " No seeds provided - LLM will choose freely");
     }
 
     // Generate roles dynamically based on player count
     const roles = this.calculateRoles(numPlayers);
 
-    // Ensure we have enough seeds for all players (cycle if needed)
+    // Ensure we have enough seeds for all players (use undefined if not enough)
     while (personaSeeds.length < numPlayers) {
-      const moreSeeds = [
-        "A suspicious lawyer who questions everyone's motives",
-        "A quiet observer who watches everything",
-        "A charismatic leader who commands respect",
-        "A brilliant scientist who analyzes data",
-        "A mysterious stranger who just arrived in town",
-        "A local barista who hears everyone's conversations",
-        "A retired detective who can't stop investigating",
-        "A enthusiastic baker who brings treats for everyone",
-        "A withdrawn librarian who reads people like books",
-        "A confident coach who reads team dynamics",
-      ];
-      personaSeeds.push(...moreSeeds);
+      personaSeeds.push(undefined);
     }
 
-    console.log(E.LOCK + " Generating personas from seeds...");
+    console.log(E.LOCK + " Generating personas...");
 
-    // Generate personas for all players
+    // STEP 1: Generate all personas first (WITHOUT roles)
+    // This is critical: persona created BEFORE knowing the role
     for (let i = 0; i < numPlayers; i++) {
       const seed = personaSeeds[i];
-      const role = roles[i] || "VILLAGER";
+      const seedDisplay = seed
+        ? `"${seed.substring(0, 40)}${seed.length > 40 ? "..." : ""}"`
+        : "LLM choosing freely";
 
-      console.log(
-        `  [${i + 1}/${numPlayers}] Seed: "${seed}" -> Role: ${role}`,
-      );
+      console.log(`  [${i + 1}/${numPlayers}] Seed: ${seedDisplay}`);
 
-      // Generate persona from seed
-      const persona = await generatePersonaFromSeed(seed, role);
-      persona.gameRole = role;
+      // Generate persona (role not known yet)
+      const persona = await generatePersona(seed);
       persona.playerId = "p" + Date.now() + i;
 
-      // Assign emoji based on role
-      const emoji = roleEmojis[role];
-
+      // Temporary store without role
       this.players.push({
         id: persona.playerId,
         name: persona.name,
-        emoji: emoji,
-        role: role,
-        isMafia: role === "MAFIA",
+        role: null, // Role assigned AFTER persona generated
+        emoji: null, // Emoji assigned after role
+        isMafia: false, // Will be set after role assignment
         isAlive: true,
         persona: persona,
       });
@@ -1071,6 +1059,20 @@ class MafiaGame {
       if (API_KEY && i < numPlayers - 1) {
         await new Promise((r) => setTimeout(r, 100));
       }
+    }
+
+    // STEP 2: Assign roles AFTER personas generated
+    console.log(E.LOCK + " Assigning roles to personas...");
+    for (let i = 0; i < numPlayers; i++) {
+      const role = roles[i] || "VILLAGER";
+      this.players[i].role = role;
+      this.players[i].isMafia = role === "MAFIA";
+      this.players[i].emoji = roleEmojis[role];
+      this.players[i].persona.gameRole = role;
+
+      console.log(
+        `  ${this.players[i].emoji} ${this.players[i].name} -> ${role}`,
+      );
     }
 
     const gameId = simpleUUID();
@@ -1131,6 +1133,49 @@ class MafiaGame {
     const aliveVigilante = alivePlayers.filter(
       (p) => p.role === "VIGILANTE" && p.isAlive && !this.vigilanteShotUsed,
     );
+
+    // WIN CONDITION CHECK - At START of night phase
+    console.log(E.WIN + " WIN CONDITION CHECK (Start of Night):");
+    const aliveTown = alivePlayers.filter((p) => !p.isMafia).length;
+    console.log("  Mafia: " + aliveMafia.length + ", Town: " + aliveTown);
+
+    if (aliveMafia.length === 0) {
+      console.log("\n" + E.TOWN + " TOWN WINS! All mafia eliminated!");
+      this.gameEvents.push(
+        createGameEvent(
+          gameId,
+          this.round,
+          "GAME_OVER",
+          null,
+          "STATE_CHANGE",
+          "PUBLIC",
+          { winner: "TOWN", mafiaAlive: 0, townAlive: aliveTown },
+        ),
+      );
+      this.printEventLog();
+      return;
+    }
+
+    if (aliveMafia.length >= aliveTown) {
+      console.log("\n" + E.MAFIAWIN + " MAFIA WINS! Mafia controls the town!");
+      this.gameEvents.push(
+        createGameEvent(
+          gameId,
+          this.round,
+          "GAME_OVER",
+          null,
+          "STATE_CHANGE",
+          "PUBLIC",
+          {
+            winner: "MAFIA",
+            mafiaAlive: aliveMafia.length,
+            townAlive: aliveTown,
+          },
+        ),
+      );
+      this.printEventLog();
+      return;
+    }
 
     console.log("\n" + "=".repeat(70));
     console.log(E.NIGHT + " NIGHT " + this.round + " - Round " + this.round);
@@ -1495,50 +1540,62 @@ class MafiaGame {
     console.log("-".repeat(50));
 
     if (aliveSheriff.length > 0) {
-      const sheriff = aliveSheriff[0];
+      for (const sheriff of aliveSheriff) {
+        const gameState = {
+          round: this.round,
+          phase: "SHERIFF_INVESTIGATION",
+          alivePlayers,
+          deadPlayers: this.deadPlayers,
+          previousPhaseData:
+            "Previous night: " +
+            (this.deadPlayers.length > 0
+              ? this.deadPlayers.map((p) => p.name).join(", ")
+              : "No deaths"),
+          messageNumber: 1,
+          totalMessages: 1,
+        };
 
-      const gameState = {
-        round: this.round,
-        phase: "SHERIFF_INVESTIGATION",
-        alivePlayers,
-        deadPlayers: this.deadPlayers,
-        previousPhaseData:
-          "Previous night: " +
-          (this.deadPlayers.length > 0
-            ? this.deadPlayers.map((p) => p.name).join(", ")
-            : "No deaths"),
-        messageNumber: 1,
-        totalMessages: 1,
-      };
+        const response = await this.getAIResponse(sheriff, gameState);
 
-      const response = await this.getAIResponse(sheriff, gameState);
+        const targetName =
+          response.action?.target ||
+          alivePlayers[Math.floor(Math.random() * alivePlayers.length)].name;
+        const target =
+          alivePlayers.find((p) =>
+            p.name.toLowerCase().includes(targetName.toLowerCase()),
+          ) || alivePlayers[Math.floor(Math.random() * alivePlayers.length)];
 
-      const targetName =
-        response.action?.target ||
-        alivePlayers[Math.floor(Math.random() * alivePlayers.length)].name;
-      const target =
-        alivePlayers.find((p) =>
-          p.name.toLowerCase().includes(targetName.toLowerCase()),
-        ) || alivePlayers[Math.floor(Math.random() * alivePlayers.length)];
+        console.log(sheriff.emoji + " " + sheriff.name + " (SHERIFF):");
+        console.log("  " + E.THINK + " THINK: " + response.think);
+        console.log("  " + E.SAYS + ' SAYS:  "' + response.says + '"');
+        console.log(
+          "  " +
+            E.SHERIFF +
+            " 🔍 INVESTIGATES: " +
+            target.name +
+            " -> " +
+            target.role +
+            "\n",
+        );
 
-      console.log(sheriff.emoji + " " + sheriff.name + " (SHERIFF):");
-      console.log("  " + E.THINK + " THINK: " + response.think);
-      console.log("  " + E.SAYS + ' SAYS:  "' + response.says + '"');
-      console.log("  🔍 INVESTIGATES: " + target.name + "\n");
+        this.gameEvents.push(
+          createGameEvent(
+            gameId,
+            this.round,
+            "SHERIFF_INVESTIGATION",
+            sheriff,
+            "ACTION",
+            "ADMIN_ONLY",
+            {
+              targetId: target.id,
+              targetName: target.name,
+              result: target.role,
+            },
+          ),
+        );
 
-      this.gameEvents.push(
-        createGameEvent(
-          gameId,
-          this.round,
-          "SHERIFF_INVESTIGATION",
-          sheriff,
-          "ACTION",
-          "ADMIN_ONLY",
-          { targetId: target.id, targetName: target.name, result: target.role },
-        ),
-      );
-
-      sheriff.nightTarget = target;
+        sheriff.nightTarget = target;
+      }
     }
 
     // STEP 4: VIGILANTE ACTION
