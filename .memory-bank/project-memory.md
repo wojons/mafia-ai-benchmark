@@ -26,7 +26,7 @@
 - **REAL LLM CALLS via OpenRouter** ✅
 - **Server loads game engine module** ✅
 
-### ✅ Test Suites (272+ API tests passing)
+### ✅ Test Suites (409+ API tests passing)
 
 1. `packages/shared/src/__tests__/fsm/fsm.test.ts` - 51 tests
 2. `packages/shared/src/__tests__/roles/roles.test.ts` - 58 tests
@@ -35,6 +35,10 @@
 5. `packages/shared/src/__tests__/events/events.test.ts` - 28 tests
 6. `packages/shared/src/__tests__/types/types.test.ts` - 24 tests
 7. `packages/shared/src/__tests__/integration/real-game.test.ts` - 7 tests
+8. `packages/shared/src/__tests__/personas/persona-generator.test.js` - 13 tests ⭐ **NEW**
+9. `apps/server/src/services/event-bus.test.ts` - 30 tests ⭐ **NEW**
+10. `apps/server/src/integration.test.js` - 63 tests ⭐ **NEW**
+11. `apps/cli/src/integration.test.js` - 31 tests ⭐ **NEW**
 
 ## Core Architecture
 
