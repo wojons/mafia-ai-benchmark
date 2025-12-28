@@ -2,12 +2,40 @@
 
 This directory contains detailed technical specifications for the Mafia AI Benchmark project.
 
-## Specification Files (18 total)
+## ⭐ START HERE - Recommended Reading Order
+
+1. **[Architecture Flows](./architecture-flows.md)** - Comprehensive Mermaid flowcharts showing all system flows
+2. **[Split-Pane Consciousness](./split-pane-consciousness.md)** - Core innovation: THINK vs SAYS streams
+3. **[Multi-Agent AI Architecture](./multi-agent-ai-architecture.md)** - Complete system architecture
+
+## Specification Files (20 total)
+
+### ⭐ Core Innovation - Split-Pane Consciousness
+- **`split-pane-consciousness.md`** - Core architecture enabling:
+  - Private THINK stream (internal reasoning, admin only)
+  - Public SAYS stream (external statements, all players)
+  - Strategic deception (mafia lies in SAYS)
+  - Evidence accumulation and case building
+  - Behavioral analysis and tracking
+
+### ⭐ Visual Architecture Flows
+- **`architecture-flows.md`** - **11 comprehensive Mermaid flowcharts**:
+  - High-level game flow
+  - Split-pane consciousness flow
+  - Night phase flow
+  - Day phase flow
+  - Voting phase flow
+  - Evidence & case building flow
+  - Mafia coordination flow
+  - Agent decision flow
+  - State machine transitions
+  - Event sourcing flow
+  - Visualization flow
 
 ### Core Specifications
 - `event-schemas.md` - Event schema definitions with visibility levels (public/private/admin)
 - `api-specs.md` - REST API and WebSocket endpoint specifications
-- `agent-interface.md` - AgentPolicy interface and behavior contracts
+- `agent-interface.md` - AgentPolicy interface and behavior contracts (updated for split-pane)
 - `database-schema.md` - SQLite schema for game storage
 - `cli-interface.md` - CLI command specifications and usage
 
@@ -19,6 +47,7 @@ This directory contains detailed technical specifications for the Mafia AI Bench
 
 ### AI & Multi-Agent Architecture
 - `multi-agent-ai-architecture.md` - Complete AI architecture with:
+  - **Split-pane consciousness integration** (THINK/SAYS)
   - Role-specific prompts (mafia, doctor, sheriff, vigilante, villager)
   - Agent memory and context management
   - Multi-agent communication protocols
@@ -40,7 +69,7 @@ This directory contains detailed technical specifications for the Mafia AI Bench
   - Configuration: Environment variables + config files
 
 ### Benchmark & Stats System
-- `stats-and-scoring-system.md` - **NEW** Complete stats and benchmarking:
+- `stats-and-scoring-system.md` - Complete stats and benchmarking:
   - Real-time metrics tracking (tokens, API calls, data transfer)
   - Post-game performance scoring (role-specific, action quality, strategy)
   - Model comparison system (win rates, head-to-head, trends)
@@ -68,10 +97,68 @@ This directory contains detailed technical specifications for the Mafia AI Bench
 | **Vigilante** | **1** | **One shot** | **Any night, unblockable** |
 | Villagers | 4 | Vote/Discuss | No special abilities |
 
+## Key Concept: Split-Pane Consciousness
+
+The fundamental innovation enabling sophisticated AI behavior:
+
+```
+┌─────────────────────────────────────────┐
+│         AGENT CONSCIOUSNESS             │
+├─────────────────────────────────────────┤
+│                                         │
+│  [THINK]  Private Reasoning             │
+│  ───────────────────────────────────   │
+│  • True beliefs about other players     │
+│  • Private knowledge (role, results)    │
+│  • Strategic planning                  │
+│  • Fears and concerns                 │
+│                                         │
+│  Visibility: Admin only                │
+│                                         │
+├─────────────────────────────────────────┤
+│                                         │
+│  [SAYS]   Public Statements            │
+│  ───────────────────────────────────   │
+│  • What agent tells other players      │
+│  • Can contain TRUTH or LIES          │
+│  • Drives social deduction gameplay    │
+│  • Evidence for case building         │
+│                                         │
+│  Visibility: All players               │
+│                                         │
+└─────────────────────────────────────────┘
+
+The "insane" part: Agents actively lie in public
+while reasoning privately!
+```
+
+### Example: Mafia Agent
+
+```
+[THINK - Private]
+"Player X is actually town, but accusing them will
+create confusion and redirect suspicion from our team.
+We should coordinate to eliminate Player Y tonight."
+
+[SAYS - Public]  
+"I've been watching Player X closely and their
+behavior seems suspicious. They asked specific
+questions about night actions."
+```
+
 ## Usage
 
-These specifications are designed to work with the `PROMPT.md` master prompt. They provide additional implementation details including:
+These specifications provide complete implementation details including:
 
+### New Features (v3.0)
+- **Split-pane consciousness system** with THINK/SAYS streams
+- **11 comprehensive Mermaid flowcharts** in `architecture-flows.md`
+- **Evidence accumulation** and case building system
+- **Mafia coordination** with private chat and busing strategies
+- **Enhanced voting** with strategic timing and abstention
+- **Behavioral analysis** with suspicion scoring
+
+### Game Insights
 - **Game 2 Insights**: Analysis from a second game transcript showing vigilante mechanics, vote history disputes, mafia busing, and last-minute role reveals
 - **Advanced Agent Behaviors**: Vote tracking, defensive storytelling, cross-game memory references
 - **Double-Kill Resolution**: How mafia and vigilante actions interact on the same night
@@ -86,6 +173,7 @@ These specifications are designed to work with the `PROMPT.md` master prompt. Th
 - `AGENT_THINK_CHUNK` (private), `AGENT_SAY_CHUNK` (public)
 - `VOTE_CAST`, `VOTE_CORRECTION` (from Game 2)
 - `PLAYER_ELIMINATED`, `GAME_ENDED`
+- `EVIDENCE_COLLECTED`, `CASE_BUILT` (new!)
 
 ### States
 ```
@@ -95,6 +183,62 @@ SETUP → NIGHT_ACTIONS → MORNING_REVEAL → DAY_DISCUSSION → DAY_VOTING →
 ```
 
 ### View Modes
-- **Admin**: Sees all events including THINK streams
-- **Town**: Only public events, SAYS statements
+- **Admin**: Sees all events including THINK streams and evidence
+- **Town**: Only public events, SAYS statements, shared evidence
 - **Replay**: Can toggle reveal to see all
+
+### New Flow Phases (v3.0)
+1. **Evidence Collection**: Agents collect evidence from observations
+2. **Case Building**: Agents build cases against players
+3. **Case Presentation**: Agents present cases in SAYS stream
+4. **Case Response**: Other agents analyze and respond to cases
+5. **Behavioral Tracking**: System tracks voting patterns, statement consistency
+
+## Document Relationships
+
+```
+architecture-flows.md (⭐ Visual Overview - START HERE)
+    ↓
+split-pane-consciousness.md (⭐ Core Innovation)
+    ↓
+multi-agent-ai-architecture.md (Complete Architecture)
+    ↓
+    ├── fsm-states.md (State Machine)
+    ├── event-schemas.md (Events)
+    ├── role-mechanics.md (Roles)
+    └── agent-interface.md (Implementation)
+    
+api-specs.md ↔ cli-interface.md (Interfaces)
+    ↓
+database-schema.md (Data Storage)
+    ↓
+permission-model.md (Access Control)
+    ↓
+streaming-protocol.md (Real-time)
+    ↓
+ui-components.md (Visualization)
+    ↓
+stats-and-scoring-system.md (Analytics)
+```
+
+## Next Steps for Implementation
+
+1. ⭐ **Read**: `architecture-flows.md` for visual understanding
+2. ⭐ **Understand**: `split-pane-consciousness.md` for core innovation
+3. **Explore**: `multi-agent-ai-architecture.md` for complete details
+4. **Implement**: Start with `api-specs.md` and `database-schema.md`
+5. **Test**: Build evidence system per `split-pane-consciousness.md`
+6. **Benchmark**: Use `stats-and-scoring-system.md` for metrics
+
+## Summary
+
+The Mafia AI Benchmark system v3.0 enables sophisticated multi-agent gameplay with:
+
+✅ **Split-pane consciousness** (THINK private vs SAYS public)  
+✅ **Evidence accumulation** and case building  
+✅ **Mafia coordination** with private chat and busing  
+✅ **Strategic deception** (mafia can lie in SAYS)  
+✅ **Behavioral analysis** with suspicion scoring  
+✅ **Complete replay** including private reasoning  
+✅ **11 visual flowcharts** for easy understanding  
+✅ **Comprehensive specifications** for full implementation

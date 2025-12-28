@@ -1,0 +1,47 @@
+{
+  "name": "mafia-ai-benchmark",
+  "version": "1.0.0",
+  "description": "Multi-agent AI Mafia game benchmark system with THINK vs SAYS split-pane consciousness",
+  "private": true,
+  "workspaces": [
+    "packages/*",
+    "apps/*"
+  ],
+  "scripts": {
+    "dev": "turbo run dev",
+    "build": "turbo run build",
+    "test": "turbo run test",
+    "lint": "turbo run lint",
+    "format": "prettier --write \"**/*.{ts,tsx,json,md}\"",
+    "server": "npm run dev --workspace=apps/server",
+    "web": "npm run dev --workspace=apps/web",
+    "cli": "npm run dev --workspace=apps/cli",
+    "shared": "npm run build --workspace=packages/shared",
+    "db:migrate": "npm run db:migrate --workspace=apps/server",
+    "game:run": "npm run game:run --workspace=apps/cli",
+    "game:watch": "npm run game:watch --workspace=apps/cli"
+  },
+  "devDependencies": {
+    "@types/node": "^25.0.3",
+    "dotenv": "^17.2.3",
+    "prettier": "^3.2.0",
+    "turbo": "^1.13.0",
+    "typescript": "^5.4.0"
+  },
+  "engines": {
+    "node": ">=20.0.0"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git@github.com:wojons/mafia-ai-benchmark.git"
+  },
+  "keywords": [
+    "mafia",
+    "social-deduction",
+    "multi-agent",
+    "ai-benchmark",
+    "llm-games"
+  ],
+  "author": "Mafia AI Benchmark Team",
+  "license": "MIT"
+}

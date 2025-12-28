@@ -1,0 +1,78 @@
+{
+  "id": "game-1766883920254-qq0bib550",
+  "createdAt": "2025-12-28T01:05:20.254Z",
+  "round": 0,
+  "phase": "LOBBY",
+  "players": [
+    {
+      "id": "player-1",
+      "name": "Alice",
+      "role": "DOCTOR",
+      "isMafia": false,
+      "isAlive": true,
+      "nightTarget": null
+    },
+    {
+      "id": "player-2",
+      "name": "Bob",
+      "role": "VIGILANTE",
+      "isMafia": false,
+      "isAlive": true,
+      "nightTarget": null
+    },
+    {
+      "id": "player-3",
+      "name": "Charlie",
+      "role": "SHERIFF",
+      "isMafia": false,
+      "isAlive": true,
+      "nightTarget": null
+    },
+    {
+      "id": "player-4",
+      "name": "Diana",
+      "role": "VILLAGER",
+      "isMafia": false,
+      "isAlive": true,
+      "nightTarget": null
+    },
+    {
+      "id": "player-5",
+      "name": "Eve",
+      "role": "MAFIA",
+      "isMafia": true,
+      "isAlive": true,
+      "nightTarget": null
+    },
+    {
+      "id": "player-6",
+      "name": "Frank",
+      "role": "MAFIA",
+      "isMafia": true,
+      "isAlive": true,
+      "nightTarget": null
+    },
+    {
+      "id": "player-7",
+      "name": "Grace",
+      "role": "VILLAGER",
+      "isMafia": false,
+      "isAlive": true,
+      "nightTarget": null
+    },
+    {
+      "id": "player-8",
+      "name": "Henry",
+      "role": "VILLAGER",
+      "isMafia": false,
+      "isAlive": true,
+      "nightTarget": null
+    }
+  ],
+  "gameEvents": [],
+  "metadata": {
+    "lastDoctorProtection": null,
+    "vigilanteShotUsed": false,
+    "mafiaKillTarget": null
+  }
+}
