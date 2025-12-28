@@ -1,12 +1,316 @@
-// Mafia Game Demo - CORRECT GAME FLOW v3 WITH PERSONAS
-// Fixed: Emoji variables instead of inline template literals
+// ============================================
+// PERSONA GENERATION SYSTEM
+// ============================================
 
-// Load .env for API key
-try {
-  require("dotenv").config();
-} catch (e) {
-  // dotenv not installed, use env vars directly
+const PERSONA_SYSTEM_PROMPT = `You are a creative character designer for a Mafia game. 
+Generate a detailed persona based on the user's seed description.
+
+Return JSON with this exact structure:
+{
+  "name": "First Last",
+  "archetype": "Archetype Name",
+  "traits": ["Trait1", "Trait2", "Trait3", "Trait4"],
+  "communicationStyle": "Style description",
+  "humor": "humor type",
+  "moralAlignment": "Alignment",
+  "coreValues": ["Value1", "Value2", "Value3"],
+  "flaw": "Character flaw",
+  "backstory": "2-3 sentences about their background",
+  "speakingStyle": "How they phrase things"
 }
+
+Choose from these archetypes: Leader, Diplomat, Detective, Survivor, Scientist, 
+Strategist, Defender, Hero, Liberator, Tactician, Inventor, Conqueror.
+
+Choose from: dry, witty, quiet, serious, subtle, gentle, sharp, ironic, 
+rare, warm, bold, comedic, proud, dark, playful, awkward, confident, random
+
+Alignments: Lawful Good, Neutral Good, Chaotic Good, Lawful Neutral, True Neutral, 
+Chaotic Neutral, Lawful Evil, Neutral Evil, Chaotic Evil
+
+Values: Family, Friendship, Justice, Freedom, Power, Knowledge, Honesty, Wealth, Peace, Glory
+
+Flaws: Trusting, Arrogant, Obsessive, Impulsive, Cynical, Naive, Stubborn, Greedy`;
+
+async function generatePersonaFromSeed(seedDescription, role) {
+  if (!API_KEY) {
+    // Fallback to procedural generation if no API key
+    return generateProceduralPersona(seedDescription, role);
+  }
+
+  try {
+    const response = await fetch(
+      "https://openrouter.ai/api/v1/chat/completions",
+      {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: "Bearer " + API_KEY,
+          "HTTP-Referer": "http://mafia-ai-benchmark.local",
+          "X-Title": "Mafia AI Benchmark",
+        },
+        body: JSON.stringify({
+          model: "openai/gpt-4o-mini",
+          messages: [
+            { role: "system", content: PERSONA_SYSTEM_PROMPT },
+            {
+              role: "user",
+              content: `Create a persona for a Mafia game player with this seed: "${seedDescription}". Their game role will be: ${role}. Expand this into a full, unique character.`,
+            },
+          ],
+          temperature: 0.8,
+          max_tokens: 400,
+        }),
+      },
+    );
+
+    const data = await response.json();
+    const text = data.choices?.[0]?.message?.content || "";
+
+    // Parse JSON from response
+    const jsonMatch = text.match(/\{[\s\S]*\}/);
+    if (jsonMatch) {
+      const persona = JSON.parse(jsonMatch[0]);
+      return {
+        name: persona.name || "Unknown",
+        archetype: persona.archetype || "Survivor",
+        traits: persona.traits || ["Strategic", "Cautious"],
+        communicationStyle: persona.communicationStyle || "Direct",
+        humor: persona.humor || "dry",
+        moralAlignment: persona.moralAlignment || "True Neutral",
+        coreValues: persona.coreValues || ["Survival", "Loyalty"],
+        flaw: persona.flaw || "Cautious",
+        backstory: persona.backstory || "A mysterious figure in town.",
+        speakingStyle: persona.speakingStyle || persona.communicationStyle,
+        origin: "custom",
+        seed: seedDescription,
+      };
+    }
+  } catch (error) {
+    console.error("[WARN] Persona generation failed:", error.message);
+  }
+
+  // Fallback to procedural
+  return generateProceduralPersona(seedDescription, role);
+}
+
+function generateProceduralPersona(seedDescription, role) {
+  // Parse seed for hints
+  const seedLower = seedDescription.toLowerCase();
+
+  // Extract potential name from seed if it looks like a name
+  const nameMatch = seedDescription.match(/^([A-Z][a-z]+)/);
+  const baseName = nameMatch
+    ? nameMatch[1]
+    : ["Alex", "Morgan", "Jordan", "Casey", "Taylor"][
+        Math.floor(Math.random() * 5)
+      ];
+
+  // Determine archetype hints from seed
+  let archetypeHints = [];
+  if (seedLower.includes("leader") || seedLower.includes("boss"))
+    archetypeHints.push("Leader");
+  if (
+    seedLower.includes("detective") ||
+    seedLower.includes("investigate") ||
+    seedLower.includes("question")
+  )
+    archetypeHints.push("Detective");
+  if (
+    seedLower.includes("doctor") ||
+    seedLower.includes("heal") ||
+    seedLower.includes("help")
+  )
+    archetypeHints.push("Healer");
+  if (
+    seedLower.includes("quiet") ||
+    seedLower.includes("shy") ||
+    seedLower.includes("observe")
+  )
+    archetypeHints.push("Observer");
+  if (
+    seedLower.includes("loud") ||
+    seedLower.includes("aggressive") ||
+    seedLower.includes("attack")
+  )
+    archetypeHints.push("Conqueror");
+  if (
+    seedLower.includes("smart") ||
+    seedLower.includes("clever") ||
+    seedLower.includes("think")
+  )
+    archetypeHints.push("Scientist");
+  if (
+    seedLower.includes("charm") ||
+    seedLower.includes("persuade") ||
+    seedLower.includes("convince")
+  )
+    archetypeHints.push("Diplomat");
+
+  // Select archetype
+  const allArchetypes = [
+    "Leader",
+    "Diplomat",
+    "Detective",
+    "Survivor",
+    "Scientist",
+    "Strategist",
+    "Defender",
+    "Hero",
+    "Tactician",
+  ];
+  const archetype =
+    archetypeHints.length > 0
+      ? archetypeHints[Math.floor(Math.random() * archetypeHints.length)]
+      : allArchetypes[Math.floor(Math.random() * allArchetypes.length)];
+
+  // Generate traits based on seed and archetype
+  const traitPool = {
+    Leader: ["Charismatic", "Strategic", "Decisive", "Confident", "Ambitious"],
+    Diplomat: ["Charming", "Cunning", "Persuasive", "Tactical", "Eloquent"],
+    Detective: [
+      "Observant",
+      "Analytical",
+      "Skeptical",
+      "Methodical",
+      "Intuitive",
+    ],
+    Survivor: [
+      "Resourceful",
+      "Cautious",
+      "Adaptable",
+      "Resilient",
+      "Protective",
+    ],
+    Scientist: ["Brilliant", "Logical", "Curious", "Precise", "Objective"],
+    Strategist: [
+      "Calculating",
+      "Patient",
+      "Methodical",
+      "Insightful",
+      "Calculating",
+    ],
+    Defender: ["Protective", "Loyal", "Courageous", "Principled", "Empathetic"],
+    Hero: ["Brave", "Idealistic", "Altruistic", "Bold", "Inspiring"],
+    Tactician: ["Strategic", "Analytical", "Patient", "Measured", "Observant"],
+  };
+
+  const traits = traitPool[archetype] || traitPool["Survivor"];
+  const selectedTraits = traits.slice(0, 3 + Math.floor(Math.random() * 2));
+
+  // Communication style based on archetype
+  const commStyles = {
+    Leader: ["Authoritative", "Bold", "Direct"],
+    Diplomat: ["Elegant", "Tactful", "Charming"],
+    Detective: ["Clinical", "Questioning", "Analytical"],
+    Survivor: ["Cautious", "Direct", "Blunt"],
+    Scientist: ["Precise", "Analytical", "Technical"],
+    Strategist: ["Measured", "Calculated", "Strategic"],
+    Defender: ["Warm", "Protective", "Reassuring"],
+    Hero: ["Bold", "Inspiring", "Enthusiastic"],
+    Tactician: ["Measured", "Thoughtful", "Strategic"],
+  };
+
+  const communicationStyle = commStyles[archetype]?.[0] || "Direct";
+
+  // Humor based on seed hints
+  let humor = "dry";
+  if (
+    seedLower.includes("funny") ||
+    seedLower.includes("joke") ||
+    seedLower.includes("humor")
+  )
+    humor = "witty";
+  else if (
+    seedLower.includes("serious") ||
+    seedLower.includes("sad") ||
+    seedLower.includes("dark")
+  )
+    humor = "dark";
+  else if (seedLower.includes("happy") || seedLower.includes("optimistic"))
+    humor = "warm";
+  else if (seedLower.includes("awkward") || seedLower.includes("weird"))
+    humor = "awkward";
+  else
+    humor = ["dry", "witty", "quiet", "serious"][Math.floor(Math.random() * 4)];
+
+  // Moral alignment based on role hints
+  let alignment = "True Neutral";
+  if (
+    seedLower.includes("good") ||
+    seedLower.includes("hero") ||
+    seedLower.includes("justice")
+  )
+    alignment = "Neutral Good";
+  else if (
+    seedLower.includes("evil") ||
+    seedLower.includes("bad") ||
+    seedLower.includes("villain")
+  )
+    alignment = "Neutral Evil";
+  else if (
+    seedLower.includes("chaos") ||
+    seedLower.includes("random") ||
+    seedLower.includes("wild")
+  )
+    alignment = "Chaotic Neutral";
+  else if (
+    seedLower.includes("law") ||
+    seedLower.includes("order") ||
+    seedLower.includes("rule")
+  )
+    alignment = "Lawful Neutral";
+
+  // Core values
+  const valuePool = [
+    "Family",
+    "Friendship",
+    "Justice",
+    "Freedom",
+    "Power",
+    "Knowledge",
+    "Honesty",
+    "Wealth",
+    "Peace",
+    "Glory",
+  ];
+  const coreValues = valuePool.slice(0, 3).sort(() => Math.random() - 0.5);
+
+  // Flaw
+  const flawPool = [
+    "Trusting",
+    "Arrogant",
+    "Obsessive",
+    "Impulsive",
+    "Cynical",
+    "Naive",
+    "Stubborn",
+    "Greedy",
+  ];
+  const flaw = flawPool[Math.floor(Math.random() * flawPool.length)];
+
+  // Backstory based on seed
+  const backstory = `A ${archetype.toLowerCase()} figure known for being ${traits[0].toLowerCase()}. ${seedDescription}`;
+
+  return {
+    name: baseName + " " + (Math.floor(Math.random() * 100) + 1),
+    archetype: archetype,
+    traits: selectedTraits,
+    communicationStyle: communicationStyle,
+    humor: humor,
+    moralAlignment: alignment,
+    coreValues: coreValues,
+    flaw: flaw,
+    backstory: backstory,
+    speakingStyle: communicationStyle,
+    origin: "seed",
+    seed: seedDescription,
+  };
+}
+
+// ============================================
+// GAME ENGINE
+// ============================================
 
 const E = {
   GAME: "🎮",
@@ -397,6 +701,30 @@ function createPrompt(player, gameState, phase) {
       "\n## PREVIOUS PHASE\n" + gameState.previousPhaseData + "\n";
   }
 
+  // Persona context - full integration
+  const personaContext = `
+## YOUR CHARACTER PERSONA
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+${persona.backstory ? "📖 BACKSTORY: " + persona.backstory + "\n" : ""}
+🎭 ARCHETYPE: ${persona.archetype}
+💡 TRAITS: ${persona.traits.join(", ")}
+🗣️  COMMUNICATION: ${persona.communicationStyle} (${persona.humor} humor)
+⚖️  MORAL ALIGNMENT: ${persona.moralAlignment}
+💎 CORE VALUES: ${persona.coreValues.join(", ")}
+⚠️  CHARACTER FLAW: ${persona.flaw}
+🎤 SPEAKING STYLE: ${persona.speakingStyle || persona.communicationStyle}
+${persona.seed ? `🌱 SEED INSPIRATION: "${persona.seed}"` : ""}
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+PERSONA PLAYING INSTRUCTIONS:
+- Roleplay according to your ARCHETYPE and TRAITS
+- Speak in your CHARACTERISTIC COMMUNICATION STYLE
+- Your SPEAKING STYLE should reflect your ${persona.speakingStyle || persona.communicationStyle} nature
+- Let your FLAW influence your decisions (${persona.flaw})
+- Your CORE VALUES guide what you care about most
+- Your MORAL ALIGNMENT affects ethical choices: ${persona.moralAlignment}
+- Your backstory influences how you view other players`;
+
   const prompt =
     "You are " +
     player.name +
@@ -405,18 +733,7 @@ function createPrompt(player, gameState, phase) {
     " in a Mafia game.\n\n" +
     roleInstructions[player.role] +
     "\n\n" +
-    "## YOUR PERSONA\n" +
-    "Name: " +
-    persona.name +
-    "\n" +
-    "Archetype: " +
-    persona.archetype +
-    "\n" +
-    "Traits: " +
-    persona.traits.join(", ") +
-    "\n" +
-    "Communication: " +
-    persona.communicationStyle +
+    personaContext +
     "\n\n" +
     "## GAME STATE\n" +
     "Round: " +
@@ -434,10 +751,19 @@ function createPrompt(player, gameState, phase) {
     "- TOWN wins: When all mafia are eliminated\n\n" +
     "## SPLIT-PANE CONSCIOUSNESS\n" +
     "You must output BOTH your private THINKING and your public STATEMENT:\n" +
-    "- THINK (private): Your true reasoning and strategy. Only visible to admin.\n" +
-    "- SAYS (public): What you say to other players. Can contain lies (especially if mafia).\n\n" +
+    "- THINK (private): Your true reasoning and strategy. Be honest about your ${persona.archetype} mindset. Consider your ${persona.flaw} flaw affecting your judgment.\n" +
+    "- SAYS (public): What you say to other players. Speak in your ${persona.communicationStyle} style with ${persona.humor} humor. Be authentic to your ${persona.archetype} archetype.\n\n" +
     "## OUTPUT FORMAT\n" +
-    'Return JSON: {"think": "your private reasoning", "says": "your public statement", "action": ACTION}';
+    'Return JSON: {"think": "your private reasoning", "says": "your public statement", "action": ACTION}\n\n' +
+    "Remember: You are " +
+    player.name +
+    ", a " +
+    persona.archetype +
+    " with a " +
+    persona.moralAlignment +
+    " alignment. Your flaw (" +
+    persona.flaw +
+    ") may cloud your judgment. Act accordingly.";
 
   return prompt;
 }
@@ -453,26 +779,65 @@ class MafiaGame {
     this.mafiaKillTarget = null;
   }
 
-  async startGame(numPlayers = 5) {
+  async startGame(numPlayers = 5, personaSeeds = null) {
     console.log(E.GAME + " Starting Mafia Game v3");
     console.log("=".repeat(70));
 
-    // Generate personas for all players
-    const personas = generateGamePersonas(numPlayers);
+    // Default seeds if none provided
+    if (!personaSeeds) {
+      personaSeeds = [];
+      for (let i = 0; i < numPlayers; i++) {
+        personaSeeds.push("Mysterious townsperson");
+      }
+    }
 
+    // Generate roles first
+    const roleAssignment = [
+      "MAFIA",
+      "MAFIA",
+      "MAFIA",
+      "DOCTOR",
+      "SHERIFF",
+      "VIGILANTE",
+      "VILLAGER",
+      "VILLAGER",
+      "VILLAGER",
+      "VILLAGER",
+    ];
+
+    console.log(E.LOCK + " Generating personas from seeds...");
+
+    // Generate personas for all players
     for (let i = 0; i < numPlayers; i++) {
-      const persona = personas[i];
-      const role = persona.gameRole;
+      const seed = personaSeeds[i] || "Mysterious townsperson";
+      const role = roleAssignment[i] || "VILLAGER";
+
+      console.log(
+        `  [${i + 1}/${numPlayers}] Seed: "${seed}" -> Role: ${role}`,
+      );
+
+      // Generate persona from seed
+      const persona = await generatePersonaFromSeed(seed, role);
+      persona.gameRole = role;
+      persona.playerId = "p" + Date.now() + i;
+
+      // Assign emoji based on role
+      const emoji = roleEmojis[role];
 
       this.players.push({
         id: persona.playerId,
         name: persona.name,
-        emoji: roleEmojis[role],
+        emoji: emoji,
         role: role,
         isMafia: role === "MAFIA",
         isAlive: true,
         persona: persona,
       });
+
+      // Small delay between API calls to avoid rate limits
+      if (API_KEY && i < numPlayers - 1) {
+        await new Promise((r) => setTimeout(r, 100));
+      }
     }
 
     const gameId = simpleUUID();
@@ -486,8 +851,10 @@ class MafiaGame {
         "  " + p.emoji + " " + p.name + " (" + p.persona.archetype + ")",
       );
       console.log("      Role: " + p.role + mafiaMark);
+      console.log("      Seed: " + (p.persona.seed || "Generated"));
       console.log("      Traits: " + p.persona.traits.join(", "));
       console.log("      Communication: " + p.persona.communicationStyle);
+      console.log("      Flaw: " + p.persona.flaw);
       console.log("");
     });
 
@@ -1459,8 +1826,52 @@ class MafiaGame {
 
 // Only auto-run when executed directly, not when imported as module
 if (require.main === module) {
+  // Example: Custom persona seeds for more dynamic gameplay
+  const customSeeds = [
+    "Suspicious lawyer who questions everyone",
+    "Quiet bookstore owner who observes everything",
+    "Charismatic politician who persuasive and ambitious",
+    "Retired detective skeptical of everyone",
+    "New in town mysterious stranger",
+    "Friendly neighbor who is too trusting",
+    "Arrogant businessperson who thinks they're always right",
+    "Wise old teacher who mediates conflicts",
+    "Impulsive young activist who rushes to judgment",
+    "Cynical journalist investigating the truth",
+  ];
+
+  // Run with custom personas
   const game = new MafiaGame();
-  game.startGame(5).catch(console.error);
+
+  // Parse command line for custom seeds
+  const args = process.argv.slice(2);
+  if (args.length > 0 && args[0] === "--custom") {
+    // Use custom seeds
+    console.log(E.GAME + " Starting with CUSTOM PERSONA SEEDS");
+    console.log(
+      "Seeds:",
+      customSeeds
+        .slice(0, 5)
+        .map((s) => `"${s}"`)
+        .join(", "),
+    );
+    game.startGame(5, customSeeds.slice(0, 5)).catch(console.error);
+  } else if (args.length > 0 && args[0] === "--demo") {
+    // Use minimal seeds for quick demo
+    const demoSeeds = [
+      "Suspicious character",
+      "Mysterious figure",
+      "Quiet observer",
+      "Charismatic leader",
+      "Cynical skeptic",
+    ];
+    console.log(E.GAME + " Starting with DEMO seeds (fast)");
+    game.startGame(5, demoSeeds).catch(console.error);
+  } else {
+    // Default: auto-generate interesting seeds
+    console.log(E.GAME + " Starting with AUTO-GENERATED personas");
+    game.startGame(5).catch(console.error);
+  }
 }
 
 // Export for module usage
