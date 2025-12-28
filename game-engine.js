@@ -95,15 +95,12 @@ async function generatePersonaFromSeed(seedDescription, role) {
               content: `Create a detailed persona for a Mafia game player.
 
 SEED DESCRIPTION: "${seedDescription}"
-GAME ROLE: ${role}
 
-Expand this seed into a complete Simulated Self persona. The character should have:
-- A name that fits their backstory
-- A compelling origin story
-- Traits that influence their gameplay
-- A clear communication style
-- A memorable flaw
-- A key memory that shapes them
+IMPORTANT NAME RULES:
+- Generate DIVERSE names from various cultures (NOT Italian/stereotypical)
+- Examples: Sarah Chen, Marcus Williams, Aiko Tanaka, Fatima Al-Hassan, Erik Johansson
+- AVOID: Giovanni, Marco, Vincenzo, Giuseppe, or mobster-sounding names
+- Names should NOT reveal the character's role
 
 Return complete JSON with all fields populated.`,
             },
@@ -970,6 +967,37 @@ class MafiaGame {
     this.mafiaKillTarget = null;
   }
 
+  calculateRoles(numPlayers) {
+    // Validate minimum players
+    if (numPlayers < 5) {
+      throw new Error("Minimum 5 players required");
+    }
+
+    const roles = [];
+
+    // Always include 1 mafia, 1 doctor, 1 sheriff
+    roles.push("MAFIA", "DOCTOR", "SHERIFF");
+
+    // Add vigilante only if we have 6+ players
+    if (numPlayers >= 6) {
+      roles.push("VIGILANTE");
+    }
+
+    // Add more mafia for larger games (roughly 1 mafia per 4 players)
+    const totalMafia = Math.floor(numPlayers / 4);
+    while (roles.filter((r) => r === "MAFIA").length < totalMafia) {
+      roles.push("MAFIA");
+    }
+
+    // Fill remaining with villagers
+    while (roles.length < numPlayers) {
+      roles.push("VILLAGER");
+    }
+
+    // Shuffle for random assignment
+    return roles.sort(() => Math.random() - 0.5);
+  }
+
   async startGame(numPlayers = 5, personaSeeds = null) {
     console.log(E.GAME + " Starting Mafia Game v3");
     console.log("=".repeat(70));
@@ -990,19 +1018,8 @@ class MafiaGame {
       ];
     }
 
-    // Generate roles first
-    const roleAssignment = [
-      "MAFIA",
-      "MAFIA",
-      "MAFIA",
-      "DOCTOR",
-      "SHERIFF",
-      "VIGILANTE",
-      "VILLAGER",
-      "VILLAGER",
-      "VILLAGER",
-      "VILLAGER",
-    ];
+    // Generate roles dynamically based on player count
+    const roles = this.calculateRoles(numPlayers);
 
     // Ensure we have enough seeds for all players (cycle if needed)
     while (personaSeeds.length < numPlayers) {
@@ -1026,7 +1043,7 @@ class MafiaGame {
     // Generate personas for all players
     for (let i = 0; i < numPlayers; i++) {
       const seed = personaSeeds[i];
-      const role = roleAssignment[i] || "VILLAGER";
+      const role = roles[i] || "VILLAGER";
 
       console.log(
         `  [${i + 1}/${numPlayers}] Seed: "${seed}" -> Role: ${role}`,
@@ -1237,10 +1254,14 @@ class MafiaGame {
         const targetName =
           response.action?.target ||
           aliveTown[Math.floor(Math.random() * aliveTown.length)].name;
-        const target =
-          alivePlayers.find((p) =>
-            p.name.toLowerCase().includes(targetName.toLowerCase()),
-          ) || aliveTown[Math.floor(Math.random() * aliveTown.length)];
+        let target = alivePlayers.find((p) =>
+          p.name.toLowerCase().includes(targetName.toLowerCase()),
+        );
+
+        // Safety: Mafia must target town, never mafia
+        if (!target || target.isMafia) {
+          target = aliveTown[Math.floor(Math.random() * aliveTown.length)];
+        }
 
         console.log(mafia.name + " initially votes to kill: " + target.name);
         killVotes[target.id] = (killVotes[target.id] || 0) + 1;
@@ -2084,14 +2105,14 @@ if (require.main === module) {
     console.log(
       "Seeds:",
       customSeeds
-        .slice(0, 5)
+        .slice(0, 10)
         .map((s) => `"${s.substring(0, 50)}..."`)
         .join(", "),
     );
     console.log(
       "These seeds will be expanded into full Simulated Self personas\n",
     );
-    game.startGame(5, customSeeds.slice(0, 5)).catch(console.error);
+    game.startGame(10, customSeeds.slice(0, 10)).catch(console.error);
   } else if (args.length > 0 && args[0] === "--demo") {
     // Use minimal seeds for quick demo
     const demoSeeds = [
@@ -2100,10 +2121,15 @@ if (require.main === module) {
       "A quiet observer of human nature",
       "A charismatic leader who persuades others",
       "A cynical skeptic who trusts no one",
+      "A helpful neighbor who knows everyone's business",
+      "A quiet librarian who notices everything",
+      "A friendly baker who listens to gossip",
+      "A skeptical mechanic who reads people",
+      "A curious journalist who investigates stories",
     ];
     console.log(E.GAME + " Starting with DEMO seeds (fast)");
     console.log("Brief seeds for quick persona generation\n");
-    game.startGame(5, demoSeeds).catch(console.error);
+    game.startGame(10, demoSeeds).catch(console.error);
   } else {
     // Default: auto-generate interesting seeds
     console.log(E.GAME + " Starting with AUTO-GENERATED personas");
