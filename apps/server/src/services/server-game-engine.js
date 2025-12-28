@@ -1,6 +1,6 @@
 /**
  * Server Game Engine Bridge
- * 
+ *
  * This module bridges the standalone game-engine.js with the production server.
  * It imports the MafiaGame class and connects it to:
  * - SSE for real-time event streaming
@@ -8,10 +8,10 @@
  * - Stats collection
  */
 
-import { dirname, join } from 'path';
-import { fileURLToPath } from 'url';
-import { existsSync } from 'fs';
-import { EventEmitter } from 'events';
+import { dirname, join } from "path";
+import { fileURLToPath } from "url";
+import { existsSync } from "fs";
+import { EventEmitter } from "events";
 
 // ============================================
 // PORTABLE IMPORT STRATEGY
@@ -23,71 +23,122 @@ import { EventEmitter } from 'events';
 async function loadMafiaGame() {
   // STRATEGY 1: Try import maps first
   try {
-    console.log('[GameEngineBridge] Loading via import maps...');
-    const gameEngine = await import('#game-engine');
-    const { createCostTracker } = await import('#shared/providers/cost-tracking.js');
-    
+    console.log("[GameEngineBridge] Loading via import maps...");
+    const gameEngine = await import("#game-engine");
+    const { createCostTracker } =
+      await import("#shared/providers/cost-tracking.js");
+
     // Dynamically import PersonaGenerator for use in the wrapper
-    const { PersonaGenerator } = await import('#shared/persona/persona-generator.js');
-    
+    const { PersonaGenerator } =
+      await import("#shared/persona/persona-generator.js");
+
     return {
       MafiaGame: gameEngine.MafiaGame,
       createCostTracker,
-      PersonaGenerator
+      PersonaGenerator,
     };
   } catch (importError) {
-    console.log('[GameEngineBridge] Import maps failed, using fallback...');
-    
+    console.log("[GameEngineBridge] Import maps failed, using fallback...");
+
     // STRATEGY 2: Fallback - find project root dynamically
     const __dirname = dirname(fileURLToPath(import.meta.url));
-    
+
     // Find git repository root (works from any directory depth)
     function findProjectRoot(startDir) {
       let dir = startDir;
-      while (dir !== '/' && dir !== dir.replace(/[\\/][^\\/]+$/, '')) {
-        if (existsSync(join(dir, '.git'))) {
+      while (dir !== "/" && dir !== dir.replace(/[\\/][^\\/]+$/, "")) {
+        if (existsSync(join(dir, ".git"))) {
           return dir;
         }
         dir = dirname(dir);
       }
-      
+
       // Last resort: check if we're already at a known location
       // Check if game-engine.js is nearby
       const checkPaths = [
-        join(__dirname, 'game-engine.js'),
-        join(__dirname, '..', 'game-engine.js'),
-        join(__dirname, '../../', 'game-engine.js'),
-        join(__dirname, '../../../', 'game-engine.js'),
-        join(__dirname, '../../../../', 'game-engine.js'),
+        join(__dirname, "game-engine.js"),
+        join(__dirname, "..", "game-engine.js"),
+        join(__dirname, "../../", "game-engine.js"),
+        join(__dirname, "../../../", "game-engine.js"),
+        join(__dirname, "../../../../", "game-engine.js"),
       ];
-      
+
       for (const checkPath of checkPaths) {
         if (existsSync(checkPath)) {
           console.log(`[GameEngineBridge] Found game-engine at: ${checkPath}`);
           return dirname(checkPath);
         }
       }
-      
-      throw new Error('Could not find project root - no .git directory or game-engine.js found');
+
+      throw new Error(
+        "Could not find project root - no .git directory or game-engine.js found",
+      );
     }
-    
+
     const PROJECT_ROOT = findProjectRoot(__dirname);
     console.log(`[GameEngineBridge] Project root: ${PROJECT_ROOT}`);
-    
-    // Create require for CommonJS modules
-    const { createRequire } = await import('module');
-    const require = createRequire(import.meta.url);
-    
-    // Load modules
-    const gameEngine = require(join(PROJECT_ROOT, 'game-engine.js'));
-    const shared = require(join(PROJECT_ROOT, 'packages/shared/src/providers/cost-tracking.js'));
-    const persona = require(join(PROJECT_ROOT, 'packages/shared/src/persona/persona-generator.js'));
-    
-    return {
-      MafiaGame: gameEngine.MafiaGame,
-      createCostTracker: shared.createCostTracker,
-      PersonaGenerator: persona.PersonaGenerator
-    };
+
+    // Use dynamic import for ES modules
+    try {
+      const gameEngineModule = await import(
+        join(PROJECT_ROOT, "game-engine.js")
+      );
+      const sharedModule = await import(
+        join(PROJECT_ROOT, "packages/shared/src/providers/cost-tracking.js")
+      );
+      const personaModule = await import(
+        join(PROJECT_ROOT, "packages/shared/src/persona/persona-generator.js")
+      );
+
+      return {
+        MafiaGame: gameEngineModule.MafiaGame,
+        createCostTracker: sharedModule.createCostTracker,
+        PersonaGenerator: personaModule.PersonaGenerator,
+      };
+    } catch (importError) {
+      console.log("[GameEngineBridge] ESM import failed, trying require...");
+
+      // Fallback to require for CommonJS
+      const { createRequire } = await import("module");
+      const require = createRequire(import.meta.url);
+
+      const gameEngine = require(join(PROJECT_ROOT, "game-engine.js"));
+
+      // Try to load cost-tracking as JS first, fallback to module
+      let createCostTracker = null;
+      try {
+        const shared = require(
+          join(PROJECT_ROOT, "packages/shared/src/providers/cost-tracking.js"),
+        );
+        createCostTracker = shared.createCostTracker;
+      } catch (e) {
+        console.log(
+          "[GameEngineBridge] cost-tracking.js not found, cost tracking disabled",
+        );
+      }
+
+      // Try to load persona-generator
+      let PersonaGenerator = null;
+      try {
+        const persona = require(
+          join(
+            PROJECT_ROOT,
+            "packages/shared/src/persona/persona-generator.js",
+          ),
+        );
+        PersonaGenerator = persona.PersonaGenerator;
+      } catch (e) {
+        console.log(
+          "[GameEngineBridge] persona-generator.js not found, personas disabled",
+        );
+      }
+
+      return {
+        MafiaGame: gameEngine.MafiaGame,
+        createCostTracker,
+        PersonaGenerator,
+      };
+    }
   }
 }
 
@@ -95,13 +146,13 @@ async function loadMafiaGame() {
 let MafiaGame, createCostTracker, PersonaGenerator;
 
 await loadMafiaGame()
-  .then(modules => {
+  .then((modules) => {
     MafiaGame = modules.MafiaGame;
     createCostTracker = modules.createCostTracker;
     PersonaGenerator = modules.PersonaGenerator;
   })
-  .catch(error => {
-    console.error('[GameEngineBridge] Failed to load game engine:', error);
+  .catch((error) => {
+    console.error("[GameEngineBridge] Failed to load game engine:", error);
     throw error;
   });
 
@@ -124,28 +175,28 @@ export class ServerGameEngine extends EventEmitter {
    */
   async startGame(gameId) {
     const game = this.server.games?.get(gameId);
-    
+
     if (!game) {
-      throw new Error('Game not found');
+      throw new Error("Game not found");
     }
 
-    if (game.status !== 'SETUP') {
-      throw new Error('Game already started');
+    if (game.status !== "SETUP") {
+      throw new Error("Game already started");
     }
 
     if (!game.players || game.players.length < 3) {
-      throw new Error('Need at least 3 players');
+      throw new Error("Need at least 3 players");
     }
 
     // Update game status
-    game.status = 'IN_PROGRESS';
+    game.status = "IN_PROGRESS";
     game.startedAt = new Date().toISOString();
 
     // Broadcast start event
     this.broadcast(gameId, {
-      type: 'game_started',
+      type: "game_started",
       gameId,
-      phase: 'NIGHT',
+      phase: "NIGHT",
       timestamp: new Date().toISOString(),
     });
 
@@ -158,24 +209,24 @@ export class ServerGameEngine extends EventEmitter {
       await wrappedGame.start();
     } catch (error) {
       console.error(`Game ${gameId} error:`, error);
-      this.endGame(gameId, 'error', error.message);
+      this.endGame(gameId, "error", error.message);
     }
   }
 
   /**
    * End the game
    */
-  endGame(gameId, reason = 'completed', details = null) {
+  endGame(gameId, reason = "completed", details = null) {
     const game = this.server.games?.get(gameId);
     if (game) {
-      game.status = 'ENDED';
+      game.status = "ENDED";
       game.endedAt = new Date().toISOString();
     }
 
     const wrappedGame = this.activeGames.get(gameId);
     if (wrappedGame) {
       this.broadcast(gameId, {
-        type: 'game_ended',
+        type: "game_ended",
         gameId,
         reason,
         details,
@@ -197,7 +248,7 @@ export class ServerGameEngine extends EventEmitter {
           gameId,
           timestamp: event.timestamp || new Date().toISOString(),
         })}\n\n`;
-        
+
         for (const client of connections) {
           try {
             client.write(data);
@@ -215,13 +266,16 @@ export class ServerGameEngine extends EventEmitter {
   getCostTracker(gameId) {
     if (!this.gameCostTrackers.has(gameId)) {
       if (!createCostTracker) {
-        console.warn('[GameEngineBridge] createCostTracker not loaded');
+        console.warn("[GameEngineBridge] createCostTracker not loaded");
         return null;
       }
-      this.gameCostTrackers.set(gameId, createCostTracker(gameId, {
-        warnThreshold: 0.50,
-        maxCostPerGame: 10,
-      }));
+      this.gameCostTrackers.set(
+        gameId,
+        createCostTracker(gameId, {
+          warnThreshold: 0.5,
+          maxCostPerGame: 10,
+        }),
+      );
     }
     return this.gameCostTrackers.get(gameId);
   }
@@ -232,11 +286,11 @@ export class ServerGameEngine extends EventEmitter {
   getGameStatus(gameId) {
     const wrappedGame = this.activeGames.get(gameId);
     const game = this.server.games?.get(gameId);
-    
+
     return {
       gameId,
       isActive: !!wrappedGame,
-      status: game?.status || 'UNKNOWN',
+      status: game?.status || "UNKNOWN",
       currentPhase: wrappedGame?.currentPhase || null,
       round: wrappedGame?.round || 0,
     };
@@ -260,51 +314,55 @@ class WrappedMafiaGame {
    */
   async start() {
     const originalPlayers = [...this.game.players];
-    
+
     // Broadcast phase change
-    this.broadcastPhase('NIGHT', 'Starting night phase...');
-    
+    this.broadcastPhase("NIGHT", "Starting night phase...");
+
     // Broadcast start event
     this.serverEngine.broadcast(this.gameId, {
-      type: 'game_phase_change',
+      type: "game_phase_change",
       gameId: this.gameId,
-      phase: 'NIGHT',
+      phase: "NIGHT",
       timestamp: new Date().toISOString(),
     });
-    
+
     // Generate personas
     if (!PersonaGenerator) {
-      console.warn('[WrappedMafiaGame] PersonaGenerator not loaded, using mock players');
+      console.warn(
+        "[WrappedMafiaGame] PersonaGenerator not loaded, using mock players",
+      );
       await this.runNightPhaseSimulation();
       return;
     }
-    
+
     const personaGenerator = new PersonaGenerator();
-    const personas = await personaGenerator.generateGamePersonas(this.game.players.length);
-    
+    const personas = await personaGenerator.generateGamePersonas(
+      this.game.players.length,
+    );
+
     // Update game with personas
     this.game.players = personas.map((persona, index) => ({
       ...originalPlayers[index],
       id: persona.playerId,
       name: persona.name,
       role: persona.gameRole,
-      isMafia: persona.gameRole === 'MAFIA',
+      isMafia: persona.gameRole === "MAFIA",
       isAlive: true,
       persona,
     }));
-    
+
     // Broadcast player assignments
     this.serverEngine.broadcast(this.gameId, {
-      type: 'players_assigned',
+      type: "players_assigned",
       gameId: this.gameId,
-      players: this.game.players.map(p => ({
+      players: this.game.players.map((p) => ({
         id: p.id,
         name: p.name,
         role: p.role,
       })),
       timestamp: new Date().toISOString(),
     });
-    
+
     // Run night phase (first)
     this.round = 1;
     await this.runNightPhaseSimulation();
@@ -314,40 +372,40 @@ class WrappedMafiaGame {
    * Run night phase (simulation for demo)
    */
   async runNightPhaseSimulation() {
-    this.currentPhase = 'NIGHT';
-    this.broadcastPhase('NIGHT', `Night ${this.round} begins`);
-    
+    this.currentPhase = "NIGHT";
+    this.broadcastPhase("NIGHT", `Night ${this.round} begins`);
+
     // Get alive players
-    const alivePlayers = this.game.players.filter(p => p.isAlive);
-    const aliveMafia = alivePlayers.filter(p => p.isMafia);
-    
+    const alivePlayers = this.game.players.filter((p) => p.isAlive);
+    const aliveMafia = alivePlayers.filter((p) => p.isMafia);
+
     // Broadcast mafia team
     if (aliveMafia.length > 0) {
       this.serverEngine.broadcast(this.gameId, {
-        type: 'mafia_team_revealed',
+        type: "mafia_team_revealed",
         gameId: this.gameId,
-        mafiaTeam: aliveMafia.map(p => p.id),
+        mafiaTeam: aliveMafia.map((p) => p.id),
         timestamp: new Date().toISOString(),
       });
     }
-    
+
     // Broadcast night actions
     this.serverEngine.broadcast(this.gameId, {
-      type: 'night_actions',
+      type: "night_actions",
       gameId: this.gameId,
       round: this.round,
-      alivePlayers: alivePlayers.map(p => p.id),
+      alivePlayers: alivePlayers.map((p) => p.id),
       timestamp: new Date().toISOString(),
     });
-    
+
     // Simulate some time passing
     await this.delay(2000);
-    
+
     // Check if game should continue
     if (!this.serverEngine.activeGames.has(this.gameId)) {
       return; // Game was stopped
     }
-    
+
     // Run day phase
     await this.runDayPhaseSimulation();
   }
@@ -356,65 +414,67 @@ class WrappedMafiaGame {
    * Run day phase (simulation for demo)
    */
   async runDayPhaseSimulation() {
-    this.currentPhase = 'DAY';
-    this.broadcastPhase('DAY', `Day ${this.round} - Discussion begins`);
-    
+    this.currentPhase = "DAY";
+    this.broadcastPhase("DAY", `Day ${this.round} - Discussion begins`);
+
     // Get alive players
-    const alivePlayers = this.game.players.filter(p => p.isAlive);
-    const aliveMafia = alivePlayers.filter(p => p.isMafia);
-    const aliveTown = alivePlayers.filter(p => !p.isMafia);
-    
+    const alivePlayers = this.game.players.filter((p) => p.isAlive);
+    const aliveMafia = alivePlayers.filter((p) => p.isMafia);
+    const aliveTown = alivePlayers.filter((p) => !p.isMafia);
+
     // Broadcast day start
     this.serverEngine.broadcast(this.gameId, {
-      type: 'day_started',
+      type: "day_started",
       gameId: this.gameId,
       round: this.round,
-      alivePlayers: alivePlayers.map(p => ({
+      alivePlayers: alivePlayers.map((p) => ({
         id: p.id,
         name: p.name,
         isAlive: true,
       })),
-      deadPlayers: this.game.players.filter(p => !p.isAlive).map(p => ({
-        id: p.id,
-        name: p.name,
-        role: p.role,
-      })),
+      deadPlayers: this.game.players
+        .filter((p) => !p.isAlive)
+        .map((p) => ({
+          id: p.id,
+          name: p.name,
+          role: p.role,
+        })),
       timestamp: new Date().toISOString(),
     });
-    
+
     // Simulate discussion
     await this.delay(3000);
-    
+
     // Check win conditions
     if (aliveMafia.length === 0) {
       this.serverEngine.broadcast(this.gameId, {
-        type: 'game_over',
+        type: "game_over",
         gameId: this.gameId,
-        winner: 'TOWN',
+        winner: "TOWN",
         mafiaAlive: 0,
         townAlive: aliveTown.length,
         timestamp: new Date().toISOString(),
       });
-      this.serverEngine.endGame(this.gameId, 'completed', { winner: 'TOWN' });
+      this.serverEngine.endGame(this.gameId, "completed", { winner: "TOWN" });
       return;
     }
-    
+
     if (aliveMafia.length >= aliveTown.length) {
       this.serverEngine.broadcast(this.gameId, {
-        type: 'game_over',
+        type: "game_over",
         gameId: this.gameId,
-        winner: 'MAFIA',
+        winner: "MAFIA",
         mafiaAlive: aliveMafia.length,
         townAlive: aliveTown.length,
         timestamp: new Date().toISOString(),
       });
-      this.serverEngine.endGame(this.gameId, 'completed', { winner: 'MAFIA' });
+      this.serverEngine.endGame(this.gameId, "completed", { winner: "MAFIA" });
       return;
     }
-    
+
     // Simulate voting
     await this.simulateVotingSimulation(alivePlayers);
-    
+
     // Continue to next night
     this.round++;
     await this.runNightPhaseSimulation();
@@ -424,16 +484,17 @@ class WrappedMafiaGame {
    * Simulate voting phase
    */
   async simulateVotingSimulation(alivePlayers) {
-    this.currentPhase = 'VOTING';
-    this.broadcastPhase('VOTING', 'Voting phase begins');
-    
+    this.currentPhase = "VOTING";
+    this.broadcastPhase("VOTING", "Voting phase begins");
+
     // Simulate votes
     const votes = {};
-    alivePlayers.forEach(player => {
-      const target = alivePlayers[Math.floor(Math.random() * alivePlayers.length)];
+    alivePlayers.forEach((player) => {
+      const target =
+        alivePlayers[Math.floor(Math.random() * alivePlayers.length)];
       votes[target.id] = (votes[target.id] || 0) + 1;
     });
-    
+
     // Find winner
     let maxVotes = 0;
     let winnerId = null;
@@ -443,15 +504,15 @@ class WrappedMafiaGame {
         winnerId = playerId;
       }
     }
-    
+
     // Eliminate player if not tie
     if (winnerId && maxVotes > alivePlayers.length / 2) {
-      const eliminated = this.game.players.find(p => p.id === winnerId);
+      const eliminated = this.game.players.find((p) => p.id === winnerId);
       if (eliminated) {
         eliminated.isAlive = false;
-        
+
         this.serverEngine.broadcast(this.gameId, {
-          type: 'player_eliminated',
+          type: "player_eliminated",
           gameId: this.gameId,
           playerId: eliminated.id,
           playerName: eliminated.name,
@@ -462,7 +523,7 @@ class WrappedMafiaGame {
       }
     } else {
       this.serverEngine.broadcast(this.gameId, {
-        type: 'vote_tie',
+        type: "vote_tie",
         gameId: this.gameId,
         votes,
         timestamp: new Date().toISOString(),
@@ -476,7 +537,7 @@ class WrappedMafiaGame {
   broadcastPhase(phase, message) {
     this.currentPhase = phase;
     this.serverEngine.broadcast(this.gameId, {
-      type: 'phase_change',
+      type: "phase_change",
       gameId: this.gameId,
       phase,
       round: this.round,
@@ -489,7 +550,7 @@ class WrappedMafiaGame {
    * Helper: delay
    */
   delay(ms) {
-    return new Promise(resolve => setTimeout(resolve, ms));
+    return new Promise((resolve) => setTimeout(resolve, ms));
   }
 }
 

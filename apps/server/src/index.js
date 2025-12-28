@@ -813,8 +813,392 @@ async function handleSSEStatus(req, res, [gameId]) {
   });
 }
 
-// ==================== ROUTER ====================
+// Night action submission
+async function handleNightAction(req, res, [gameId]) {
+  const game = games.get(gameId);
 
+  if (!game) {
+    return sendError(res, 404, "GAME_NOT_FOUND", "Game not found");
+  }
+
+  if (game.status !== "IN_PROGRESS") {
+    return sendError(res, 400, "INVALID_STATE", "Game is not in progress");
+  }
+
+  try {
+    const body = await parseBody(req);
+    const { playerId, action, targetId } = body;
+
+    if (!playerId) {
+      return sendError(res, 400, "INVALID_REQUEST", "playerId required");
+    }
+
+    if (!action) {
+      return sendError(res, 400, "INVALID_REQUEST", "action required");
+    }
+
+    // Validate action type
+    const validActions = [
+      "MAFIA_KILL",
+      "DOCTOR_PROTECT",
+      "SHERIFF_INVESTIGATE",
+      "VIGILANTE_KILL",
+    ];
+    if (!validActions.includes(action)) {
+      return sendError(res, 400, "INVALID_ACTION", `Invalid action: ${action}`);
+    }
+
+    // Store the night action
+    if (!game.nightActions) game.nightActions = [];
+
+    // Check for vigilante one-shot limit
+    if (action === "VIGILANTE_KILL") {
+      const existingVigilanteKill = game.nightActions?.find(
+        (a) => a.action === "VIGILANTE_KILL" && a.playerId === playerId,
+      );
+      if (existingVigilanteKill) {
+        return sendError(
+          res,
+          400,
+          "INVALID_ACTION",
+          "Vigilante already used their one-time kill",
+        );
+      }
+    }
+
+    game.nightActions.push({
+      playerId,
+      action,
+      targetId,
+      timestamp: Date.now(),
+    });
+
+    // If this is an investigation, return result immediately
+    if (action === "SHERIFF_INVESTIGATE" && targetId) {
+      const target = game.players.find((p) => p.id === targetId);
+      if (target) {
+        broadcastSSE(gameId, {
+          type: "sheriff_investigation",
+          gameId,
+          playerId,
+          targetId,
+          targetRole: target.role,
+          timestamp: new Date().toISOString(),
+        });
+
+        return sendJSON(res, 200, {
+          success: true,
+          data: {
+            message: "Investigation complete",
+            targetRole: target.role,
+          },
+        });
+      }
+    }
+
+    // Process night actions immediately (for demo mode)
+    processNightActions(gameId);
+
+    // Broadcast the action
+    broadcastSSE(gameId, {
+      type: "night_action",
+      gameId,
+      playerId,
+      action,
+      targetId: targetId || null,
+      timestamp: new Date().toISOString(),
+    });
+
+    sendJSON(res, 200, {
+      success: true,
+      data: {
+        message: "Night action received",
+        action,
+      },
+    });
+  } catch (error) {
+    if (error.message === "Invalid JSON") {
+      return sendError(res, 400, "INVALID_REQUEST", "Invalid JSON body");
+    }
+    sendError(res, 500, "INTERNAL_ERROR", error.message);
+  }
+}
+
+// Process night actions and apply effects
+function processNightActions(gameId) {
+  const game = games.get(gameId);
+  if (!game || !game.nightActions || game.nightActions.length === 0) return;
+
+  const actions = game.nightActions;
+  const deaths = [];
+  const protections = [];
+
+  // Find doctor protection
+  const doctorProtect = actions.find((a) => a.action === "DOCTOR_PROTECT");
+  const protectedId = doctorProtect?.targetId;
+
+  // Find vigilante kill
+  const vigilanteKill = actions.find((a) => a.action === "VIGILANTE_KILL");
+  const vigilanteTargetId = vigilanteKill?.targetId;
+
+  // Find mafia kill
+  const mafiaKill = actions.find((a) => a.action === "MAFIA_KILL");
+  const mafiaTargetId = mafiaKill?.targetId;
+
+  // Apply vigilante kill
+  if (vigilanteTargetId && vigilanteTargetId !== protectedId) {
+    const vigilanteTarget = game.players.find(
+      (p) => p.id === vigilanteTargetId,
+    );
+    if (vigilanteTarget && vigilanteTarget.isAlive) {
+      vigilanteTarget.isAlive = false;
+      deaths.push({
+        playerId: vigilanteTargetId,
+        name: vigilanteTarget.name,
+        role: vigilanteTarget.role,
+        killer: "VIGILANTE",
+      });
+    }
+  }
+
+  // Apply mafia kill (if vigilante didn't kill same target)
+  if (
+    mafiaTargetId &&
+    mafiaTargetId !== vigilanteTargetId &&
+    mafiaTargetId !== protectedId
+  ) {
+    const mafiaTarget = game.players.find((p) => p.id === mafiaTargetId);
+    if (mafiaTarget && mafiaTarget.isAlive) {
+      mafiaTarget.isAlive = false;
+      deaths.push({
+        playerId: mafiaTargetId,
+        name: mafiaTarget.name,
+        role: mafiaTarget.role,
+        killer: "MAFIA",
+      });
+    }
+  }
+
+  // Track protection
+  if (protectedId) {
+    const protectedPlayer = game.players.find((p) => p.id === protectedId);
+    if (protectedPlayer) {
+      protections.push({ playerId: protectedId, name: protectedPlayer.name });
+    }
+  }
+
+  // Broadcast night resolution
+  broadcastSSE(gameId, {
+    type: "night_resolved",
+    gameId,
+    deaths,
+    protections,
+    timestamp: new Date().toISOString(),
+  });
+
+  // Record event
+  if (!game.events) game.events = [];
+  game.events.push({
+    type: "night_resolved",
+    deaths,
+    protections,
+    timestamp: Date.now(),
+  });
+
+  // Check win conditions
+  checkWinConditions(gameId);
+}
+
+// Vote submission
+async function handleVote(req, res, [gameId]) {
+  const game = games.get(gameId);
+
+  if (!game) {
+    return sendError(res, 404, "GAME_NOT_FOUND", "Game not found");
+  }
+
+  if (game.status !== "IN_PROGRESS") {
+    return sendError(res, 400, "INVALID_STATE", "Game is not in progress");
+  }
+
+  try {
+    const body = await parseBody(req);
+    const { voterId, targetId } = body;
+
+    if (!voterId) {
+      return sendError(res, 400, "INVALID_REQUEST", "voterId required");
+    }
+
+    if (!targetId) {
+      return sendError(res, 400, "INVALID_REQUEST", "targetId required");
+    }
+
+    // Check if voter is alive
+    const voter = game.players.find((p) => p.id === voterId);
+    if (!voter || !voter.isAlive) {
+      return sendError(res, 400, "INVALID_REQUEST", "Voter is not alive");
+    }
+
+    // Store the vote
+    if (!game.votes) game.votes = [];
+    game.votes.push({ voterId, targetId, timestamp: Date.now() });
+
+    // Broadcast the vote
+    broadcastSSE(gameId, {
+      type: "vote",
+      gameId,
+      voterId,
+      targetId,
+      timestamp: new Date().toISOString(),
+    });
+
+    // Process votes if all alive players have voted
+    processVotes(gameId);
+
+    sendJSON(res, 200, {
+      success: true,
+      data: {
+        message: "Vote received",
+      },
+    });
+  } catch (error) {
+    if (error.message === "Invalid JSON") {
+      return sendError(res, 400, "INVALID_REQUEST", "Invalid JSON body");
+    }
+    sendError(res, 500, "INTERNAL_ERROR", error.message);
+  }
+}
+
+// Process votes and apply elimination
+function processVotes(gameId) {
+  const game = games.get(gameId);
+  if (!game || !game.votes || game.votes.length === 0) return;
+
+  const alivePlayers = game.players.filter((p) => p.isAlive);
+  const voteCount = game.votes.length;
+
+  // Check if all alive players have voted (for simplicity, process when > 50% have voted)
+  if (voteCount < Math.ceil(alivePlayers.length / 2)) return;
+
+  // Count votes
+  const voteCounts = {};
+  for (const vote of game.votes) {
+    if (vote.targetId) {
+      voteCounts[vote.targetId] = (voteCounts[vote.targetId] || 0) + 1;
+    }
+  }
+
+  // Find player with most votes
+  let maxVotes = 0;
+  let eliminatedId = null;
+  for (const [playerId, count] of Object.entries(voteCounts)) {
+    if (count > maxVotes) {
+      maxVotes = count;
+      eliminatedId = playerId;
+    }
+  }
+
+  // Check for tie
+  const voteValues = Object.values(voteCounts);
+  const isTie = voteValues.filter((v) => v === maxVotes).length > 1;
+
+  if (isTie) {
+    broadcastSSE(gameId, {
+      type: "vote_tie",
+      gameId,
+      votes: voteCounts,
+      message: "Vote resulted in a tie - no elimination",
+      timestamp: new Date().toISOString(),
+    });
+  } else if (maxVotes > 0 && eliminatedId) {
+    // Eliminate player
+    const eliminated = game.players.find((p) => p.id === eliminatedId);
+    if (eliminated && eliminated.isAlive) {
+      eliminated.isAlive = false;
+
+      broadcastSSE(gameId, {
+        type: "player_eliminated",
+        gameId,
+        playerId: eliminatedId,
+        playerName: eliminated.name,
+        role: eliminated.role,
+        votes: maxVotes,
+        cause: "lynching",
+        timestamp: new Date().toISOString(),
+      });
+
+      // Record event
+      if (!game.events) game.events = [];
+      game.events.push({
+        type: "player_eliminated",
+        playerId: eliminatedId,
+        playerName: eliminated.name,
+        role: eliminated.role,
+        votes: maxVotes,
+        timestamp: Date.now(),
+      });
+
+      // Check win conditions
+      checkWinConditions(gameId);
+    }
+  }
+
+  // Clear votes for next round
+  game.votes = [];
+}
+
+// Check win conditions
+function checkWinConditions(gameId) {
+  const game = games.get(gameId);
+  if (!game) return;
+
+  const alivePlayers = game.players.filter((p) => p.isAlive);
+  const aliveMafia = alivePlayers.filter(
+    (p) => p.role === "MAFIA" || p.isMafia,
+  ).length;
+  const aliveTown = alivePlayers.length - aliveMafia;
+
+  // Check for mafia win (mafia >= town)
+  if (aliveMafia >= aliveTown && aliveMafia > 0) {
+    endGame(gameId, "MAFIA", { mafiaAlive: aliveMafia, townAlive: aliveTown });
+    return;
+  }
+
+  // Check for town win (no mafia left)
+  if (aliveMafia === 0) {
+    endGame(gameId, "TOWN", { mafiaAlive: 0, townAlive: aliveTown });
+    return;
+  }
+}
+
+// End game with winner
+function endGame(gameId, winner, details) {
+  const game = games.get(gameId);
+  if (!game) return;
+
+  game.status = "ENDED";
+  game.endedAt = new Date().toISOString();
+  game.winner = winner;
+  game.winDetails = details;
+
+  broadcastSSE(gameId, {
+    type: "game_over",
+    gameId,
+    winner,
+    ...details,
+    timestamp: new Date().toISOString(),
+  });
+
+  if (!game.events) game.events = [];
+  game.events.push({
+    type: "game_over",
+    winner,
+    ...details,
+    timestamp: Date.now(),
+  });
+}
+
+// Vote submission
 const routes = {
   GET: {
     "/health": handleHealth,
@@ -891,6 +1275,22 @@ const paramRoutes = [
     method: "GET",
     pattern: /^\/api\/v1\/games\/([^/]+)\/engine-status$/,
     handler: handleGameEngineStatus,
+  },
+  {
+    method: "POST",
+    pattern: /^\/api\/v1\/games\/([^/]+)\/night-action$/,
+    handler: handleNightAction,
+  },
+  {
+    method: "POST",
+    pattern: /^\/api\/v1\/games\/([^/]+)\/vote$/,
+    handler: handleVote,
+  },
+  {
+    method: "POST",
+  },
+  {
+    method: "POST",
   },
 ];
 
