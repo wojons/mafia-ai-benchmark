@@ -6,15 +6,16 @@
 **Stack**: Node.js, Express, WebSocket, SQLite, TypeScript
 **Location**: `/config/workspace/mafia`
 **Repository**: github.com:wojons/mafia-ai-benchmark.git
-**Status**: REAL LLM CALLS WORKING ✅ ALL CRITICAL + QUALITY FIXES COMPLETE ✅
-**Version**: 4.2
-**Last Commit**: fddbdd7 - "feat: Complete all quality improvements with ULTRATHINK analysis"
+**Status**: REAL LLM CALLS WORKING ✅ ALL CRITICAL + QUALITY + ULTRATHINK FEATURES COMPLETE ✅
+**Version**: 4.3
+**Last Commit**: a8cfb35 - "feat: ULTRATHINK analysis - 4 major enhancements"
 
 ## Current Status (Dec 28, 2025)
 
-### 🎉 ALL CRITICAL AND QUALITY ISSUES RESOLVED
+### 🎉 FULLY PRODUCTION READY
 
-**COMMIT: 98fa51d + fddbdd7** - Complete resolution of all 8 priority issues:
+**BLOCKER + QUALITY (8 tasks):** Completed via commits 98fa51d + fddbdd7
+**ULTRATHINK FEATURES (4 tasks):** Completed via commit a8cfb35
 
 ✅ **BLOCKER-1: Seeds Now Optional** - LLM chooses freely when no seed provided
 ✅ **BLOCKER-2: Persona First, Role After** - Personas generated before knowing role
@@ -24,6 +25,48 @@
 ✅ **QUALITY-6: Think→Speak Pattern Complete** - All phases show reasoning (voting was missing)
 ✅ **QUALITY-7: Mafia Memory Complete** - Shows ALL messages (was only last 3)
 ✅ **QUALITY-8: Villager Base Prompt Added** - Everyone gets villager behavior foundation
+
+### 🚀 ULTRATHINK Enhancements (COMMIT: a8cfb35)
+
+Deep multi-dimensional analysis of 4 major features:
+
+**ULTRA-1: Sheriff Self-Verification Fix + Multi-Role Configuration**
+
+- Sheriff skips self-investigation (auto-selects different target)
+- Game configuration system with options parameter
+- Experimental multi-role support (`allowMultiRole`)
+- Enables "mole" scenarios: Sheriff+Mafia, Doctor+Mafia, etc.
+- Anti-stacking rules: multiple mafia can't all be doctor/sheriff
+- Full documentation in `specs/role-mechanics.md`
+
+**ULTRA-2: JSON Parse Retry Logic (No Mock Fallback)**
+
+- parseJSONResponse returns `{valid: true/false, ...}` struct
+- getAIResponse retries on parse failures (not just network errors)
+- Configurable maxRetries (3) and retryDelay (1000ms)
+- Progressive retry with warning messages
+- Prevents mock data from ruining real games
+- Handles both parse errors and network failures
+
+**ULTRA-3: Configurable Context Window Management**
+
+- `maxContextChars` setting (default: 100,000 characters)
+- gameHistory tracks all events with intelligent trimming
+- trimGameHistory() removes oldest COMPLETE messages (never splits partial messages)
+- Maintains most recent context by removing from beginning
+- Prevents context overflow during long games
+- Preserves message integrity (incomplete messages dropped entirely)
+
+**ULTRA-4: Persona Generation Diversity Fix**
+
+- `personaTemperature` config (default: 1.0, higher = more diverse)
+- Enhanced LLM prompt with explicit diversity instructions
+- Fixed identical "Logical-Sequential" issue
+- generateProceduralPersona() now creates diverse personas:
+  - 10 cognitive styles: Visual-Spatial, Intuitive-Holistic, Emotional-Expressive, etc.
+  - 10 communication cadences: Direct, Eloquent, Whimsical, Diplomatic, etc.
+  - 3 social tendencies, 3 conflict styles, 4 primary goals, 4 key memories
+  - Random verbal tics, dynamic states (happiness, stress, curiosity, anger)
 
 ### 🔮 Remaining Future Improvements (Lower Priority)
 
