@@ -7,26 +7,31 @@
 **Location**: `/config/workspace/mafia`
 **Repository**: github.com:wojons/mafia-ai-benchmark.git
 **Status**: REAL LLM CALLS WORKING ✅
-**Version**: 4.0
-**Last Commit**: b4e706e - "feat: Game engine now runs real LLM calls"
+**Version**: 4.1
+**Last Commit**: 98fa51d - "feat: Fix all critical blocker issues"
 
 ## Current Status (Dec 28, 2025)
 
-### ❌ Critical Issues Blocking Implementation
+### ✅ Completed Critical Issues (Dec 28, 2025)
 
-The game engine (game-engine.js) has 11 critical issues identified in `specs/AUDIT_RESULTS.md`:
+**COMMIT: 98fa51d** - All BLOCKER and CRITICAL issues fixed:
 
-1. **Win Condition Wrong Location** - Only checked at start of day, should also check at start of night
-2. **Seeds STILL Being Used** - Despite explicit requirement: "Shut the fuck up with this seed concept"
-3. **Role Assigned During Persona Generation** - Persona knows it's playing Mafia before being told
-4. **Think→Speak Missing in Many Places** - Doctor, sheriff, vigilante, voting prompts don't require thinking first
-5. **Mafia Memory Incomplete** - Only last 3 messages, should see ALL
-6. **Vigilante Can Shoot Every Night** - One-shot flag created but never checked
-7. **Multiple Doctors/Sheriffs Ignored** - Only first one acts, others do nothing
-8. **No Villager Base Prompt** - Everyone should get base villager behavior
-9. **Sequential API Calls With Artificial Delays** - Should be parallel for efficiency
-10. **No Statistics Tracking** - Zero stats collection for winners, model performance, costs
-11. **Monolithic 2100+ Line File** - Impossible to maintain, causes circular debugging
+✅ **BLOCKER-1: Seeds Now Optional** - LLM chooses freely when no seed provided, uses as guidance when provided
+✅ **BLOCKER-2: Persona First, Role After** - Personas generated before knowing role
+✅ **CRITICAL-3: Win Condition at Start of Night** - Game can now end during night phase
+✅ **CRITICAL-4: Vigilante One-Shot Working** - Flag checked and enforced
+✅ **CRITICAL-5: Multiple Doctors/Sheriffs** - All doctors and sheriffs now act independently
+
+### 🟡 Remaining Issues (High Priority)
+
+The game engine (game-engine.js) has 6 remaining issues from `specs/AUDIT_RESULTS.md`:
+
+1. **Think→Speak Missing in Many Places** - Doctor, sheriff, vigilante, voting prompts don't require thinking first (QUALITY-6)
+2. **Mafia Memory Incomplete** - Only last 3 messages, should see ALL (QUALITY-7)
+3. **No Villager Base Prompt** - Everyone should get base villager behavior (QUALITY-8)
+4. **Sequential API Calls With Artificial Delays** - Should be parallel for efficiency
+5. **No Statistics Tracking** - Zero stats collection for winners, model performance, costs
+6. **Monolithic 2100+ Line File** - Impossible to maintain, causes circular debugging
 
 ### 🔍 Implementation Specs
 
