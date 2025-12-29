@@ -1600,6 +1600,184 @@ class MafiaGame {
   // ==========================================
 
   /**
+   * Calculate whether vigilante should shoot and at whom
+   * Returns { shouldShoot: boolean, target: Player, confidence: number, reasons: string[] } | null
+   */
+  calculateVigilanteShotDecision(alivePlayers, vigilanteId, gameState) {
+    if (this.vigilanteShotUsed) {
+      return {
+        shouldShoot: false,
+        target: null,
+        confidence: 0,
+        reasons: ["Already used one-shot ability"],
+      };
+    }
+
+    const priorities = [];
+    const decisions = {
+      shouldShoot: false,
+      target: null,
+      confidence: 0,
+      reasons: [],
+    };
+
+    for (const player of alivePlayers) {
+      // Skip self
+      if (player.id === vigilanteId) {
+        continue;
+      }
+
+      let suspicionScore = 0;
+      const reasons = [];
+
+      // Factor 1: Recent accusations against this player
+      const recentAccusations =
+        this.gameHistory?.filter?.(
+          (g) =>
+            g.playerId !== null &&
+            g.content?.targetId === player.id &&
+            g.visibility === "PUBLIC",
+        ) || [];
+
+      if (recentAccusations.length >= 3) {
+        suspicionScore += 50;
+        reasons.push("Accused by multiple players");
+      } else if (recentAccusations.length >= 2) {
+        suspicionScore += 30;
+        reasons.push("Accused by 2 people");
+      } else if (recentAccusations.length >= 1) {
+        suspicionScore += 15;
+        reasons.push("Accused once");
+      }
+
+      // Factor 2: Player voted for innocent town members
+      const recentVotes = gameState?.votingHistory?.slice(-5) || [];
+      let guiltyVotes = 0;
+      for (const voteRound of recentVotes) {
+        const votes = voteRound.votes || [];
+        if (votes.includes(player.id)) {
+          // Check if the target of this vote round was an innocent town member
+          const targetId = voteRound.eliminated || voteRound.targetId;
+          const target = alivePlayers.find((p) => p.id === targetId);
+          if (target && target.role === "VILLAGER") {
+            guiltyVotes++;
+          }
+        }
+      }
+
+      if (guiltyVotes >= 2) {
+        suspicionScore += 40;
+        reasons.push("Voted for multiple innocent town members");
+      } else if (guiltyVotes >= 1) {
+        suspicionScore += 20;
+        reasons.push("Voted for an innocent");
+      }
+
+      // Factor 3: Confirmed mafia from sheriff investigations
+      if (this.sheriffInvestigations) {
+        const investigation = this.sheriffInvestigations[player.id];
+        if (investigation && investigation.result === "MAFIA") {
+          suspicionScore += 100; // Highest priority - confirmed mafia!
+          reasons.push("CONFIRMED MAFIA by sheriff investigation");
+        }
+      }
+
+      // Factor 4: Behavior patterns
+      const messagesByPlayer =
+        this.gameHistory?.filter?.(
+          (g) => g.playerId === player.id && g.visibility === "PUBLIC",
+        ) || [];
+
+      // Active but vague messages (suspicious)
+      if (messagesByPlayer.length >= 4) {
+        const avgLength =
+          messagesByPlayer.reduce((sum, m) => sum + (m.says?.length || 0), 0) /
+          messagesByPlayer.length;
+        if (avgLength < 50) {
+          suspicionScore += 25;
+          reasons.push("Active but gives vague responses");
+        }
+      }
+
+      // Very quiet (suspicious for active players)
+      if (messagesByPlayer.length === 0 && this.round > 2) {
+        suspicionScore += 20;
+        reasons.push("No public messages at all");
+      }
+
+      priorities.push({
+        playerId: player.id,
+        player: player,
+        suspicionScore,
+        reasons,
+      });
+    }
+
+    // Sort by suspicion score descending
+    priorities.sort((a, b) => b.suspicionScore - a.suspicionScore);
+
+    // Get top suspect
+    const topSuspect = priorities[0];
+
+    if (!topSuspect || topSuspect.suspicionScore < 30) {
+      return {
+        shouldShoot: false,
+        target: null,
+        confidence: topSuspect?.suspicionScore || 0,
+        reasons: ["Not confident enough - insufficient suspicion"],
+      };
+    }
+
+    // Calculate confidence (0-100)
+    let confidence = Math.min(topSuspect.suspicionScore * 1.2, 100);
+
+    // Factor 2: Game timing assessment
+    const aliveMafia = alivePlayers.filter((p) => p.isMafia).length;
+    const aliveTown = alivePlayers.filter((p) => !p.isMafia).length;
+    const isLateGame = aliveMafia + aliveTown <= 4;
+    const dayNumber = this.dayNumber;
+
+    // Factor 3: Decision logic
+    const shootReasons = [...topSuspect.reasons];
+
+    if (topSuspect.suspicionScore >= 100) {
+      // Confirmed mafia - shoot regardless of timing
+      decisions.shouldShoot = true;
+      decisions.target = topSuspect.player;
+      decisions.confidence = 100;
+      decisions.reasons = shootReasons;
+    } else if (isLateGame && confidence >= 70) {
+      // Late game with high confidence
+      decisions.shouldShoot = true;
+      decisions.target = topSuspect.player;
+      decisions.confidence = confidence;
+      decisions.reasons = [...shootReasons, "Late game - need to act"];
+    } else if (dayNumber <= 2 && confidence >= 85) {
+      // Early game with very high confidence
+      decisions.shouldShoot = true;
+      decisions.target = topSuspect.player;
+      decisions.confidence = confidence;
+      decisions.reasons = [
+        ...shootReasons,
+        "Early game - can afford to take the shot",
+      ];
+    } else {
+      // Hold fire - not confident enough
+      decisions.shouldShoot = false;
+      decisions.target = null;
+      decisions.confidence = confidence;
+      decisions.reasons = [
+        "Not confident enough to shoot",
+        `Score: ${topSuspect.suspicionScore}, Confidence: ${Math.floor(confidence)}%`,
+        dayNumber > 2 ? "Early-to-mid game - one-shot is precious" : "",
+        !isLateGame ? "Plenty of players left - more time to gather info" : "",
+      ].filter(Boolean);
+    }
+
+    return decisions;
+  }
+
+  /**
    * Calculate priority scores for potential sheriff investigation targets
    * Higher score = higher priority to investigate
    * Returns Array<{player, score, reasons}>
@@ -2605,6 +2783,65 @@ class MafiaGame {
     if (aliveVigilante.length > 0) {
       const vig = aliveVigilante[0];
 
+      // Calculate strategic shot decision
+      const shotDecision = this.calculateVigilanteShotDecision(
+        alivePlayers,
+        vig.id,
+        {
+          votingHistory: this.votingHistory || [],
+        },
+      );
+
+      // Re-calculate priorities for display (extracted from shotDecision logic)
+      const priorities = [];
+      for (const player of alivePlayers) {
+        if (player.id === vig.id) continue;
+        const recentAccusations =
+          this.gameHistory?.filter?.(
+            (g) =>
+              g.playerId !== null &&
+              g.content?.targetId === player.id &&
+              g.visibility === "PUBLIC",
+          ) || [];
+        let score =
+          recentAccusations.length >= 3
+            ? 50
+            : recentAccusations.length >= 2
+              ? 30
+              : recentAccusations.length >= 1
+                ? 15
+                : 0;
+        if (this.sheriffInvestigations?.[player.id]?.result === "MAFIA") {
+          score += 100;
+        }
+        if (score > 0) {
+          priorities.push({ player, suspicionScore: score });
+        }
+      }
+      priorities.sort((a, b) => b.suspicionScore - a.suspicionScore);
+
+      // Log strategic decision
+      console.log(
+        "\n[STRATEGIC AI] Vigilante Shot Decision:\n" +
+          `  Should Shoot: ${shotDecision.shouldShoot ? "YES" : "NO"}\n` +
+          `  Confidence: ${shotDecision.confidence}%\n` +
+          `  Target: ${shotDecision.target?.name || "None"} (${shotDecision.target?.role || "N/A"})\n` +
+          `  Reasons: ${shotDecision.reasons.join(", ")}`,
+      );
+
+      // Build strategic guidance for the AI
+      const decisionGuidance = shotDecision.shouldShoot
+        ? `STRATEGIC SHOT RECOMMENDATION:\n` +
+          `  Confidence: ${shotDecision.confidence}%\n` +
+          `  Target: ${shotDecision.target.name} (${shotDecision.target.role})\n` +
+          `  Reasons: ${shotDecision.reasons.join(", ")}\n` +
+          `\nYou have ONE SHOT. Use it wisely!`
+        : `STRATEGIC SHOT ANALYSIS:\n` +
+          `  Confidence: ${shotDecision.confidence}%\n` +
+          `  Top Suspect: ${priorities[0]?.player?.name || "None"}\n` +
+          `  Reasons to HOLD FIRE: ${shotDecision.reasons.join(", ")}\n` +
+          `\nYour one-shot ability is PRECIOUS. Only use it when highly confident!`;
+
       const gameState = {
         round: this.round,
         phase: "VIGILANTE_ACTION",
@@ -2614,9 +2851,12 @@ class MafiaGame {
           "Previous night: " +
           (this.deadPlayers.length > 0
             ? this.deadPlayers.map((p) => p.name).join(", ")
-            : "No deaths"),
+            : "No deaths") +
+          "\n\n" +
+          decisionGuidance,
         messageNumber: 1,
         totalMessages: 1,
+        shotDecision: shotDecision,
       };
 
       const response = await this.getAIResponse(vig, gameState);

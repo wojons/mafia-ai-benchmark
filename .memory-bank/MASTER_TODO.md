@@ -128,19 +128,21 @@
   - **Spec Lines**: 60-99
   - **Implementation**: calculateMafiaKillPriority() with scoring based on role and behavior
 
-- [ ] **AI-HIGH-2**: Implement doctor protection strategy
+- [x] **AI-HIGH-2**: Implement doctor protection strategy ✅ COMPLETED
   - Self-protection logic
   - Sheriff protection priority
   - Pattern variation to avoid detection
   - **Effort**: Medium
   - **Spec Lines**: 185-224
+  - **Implementation**: calculateDoctorProtectionPriority() with risk assessment
 
-- [ ] **AI-HIGH-3**: Implement sheriff investigation strategy
+- [x] **AI-HIGH-3**: Implement sheriff investigation strategy ✅ COMPLETED
   - Investigate most suspicious
   - Track already-investigated players
   - Re-check strategy verification
   - **Effort**: Medium
   - **Spec Lines**: 284-319
+  - **Implementation**: calculateSheriffInvestigationPriority() with investigation tracking
 
 - [ ] **AI-HIGH-4**: Implement vigilante shot timing logic
   - Confidence level calculation
