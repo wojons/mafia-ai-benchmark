@@ -4,7 +4,7 @@
 
 require("dotenv").config();
 
-const { getRandomName } = require("../../../src/core-systems/name-database");
+const { getRandomName } = require("../../src/core-systems/name-database");
 
 // ============================================
 // PERSONA SYSTEM PROMPT
