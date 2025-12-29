@@ -18,6 +18,11 @@ const {
   coreValues,
   flaws,
   archetypes,
+  // Game flow
+  gamePhases,
+  gameMessages,
+  priorityScores,
+  gameLimits,
 } = require("./utils");
 
 // Persona generation

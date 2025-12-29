@@ -340,6 +340,87 @@ const archetypes = {
 };
 
 // ============================================
+// GAME FLOW CONSTANTS
+// ============================================
+
+const gamePhases = {
+  MAFIA_CHAT: "MAFIA_CHAT",
+  MAFIA_KILL_VOTE: "MAFIA_KILL_VOTE",
+  DOCTOR_ACTION: "DOCTOR_ACTION",
+  SHERIFF_INVESTIGATION: "SHERIFF_INVESTIGATION",
+  VIGILANTE_ACTION: "VIGILANTE_ACTION",
+  VOTING: "VOTING",
+  DISCUSSION: "DISCUSSION",
+  DAY_DISCUSSION: "DAY_DISCUSSION",
+  DAY_VOTE: "DAY_VOTE",
+};
+
+const gameMessages = {
+  NIGHT_START: "NIGHT_STARTED",
+  MAFIA_CHAT_START: "MAFIA_CHAT_STARTED",
+  MAFIA_CONSENSUS: "MAFIA_CONSENSUS",
+  DOCTOR_PROTECTION: "DOCTOR_PROTECTION",
+  SHERIFF_INVESTIGATION: "SHERIFF_INVESTIGATION",
+  VIGILANTE_SHOT: "VIGILANTE_SHOT",
+  DAY_START: "DAY_STARTED",
+  DISCUSSION_END: "DISCUSSION_ENDED",
+  LYNCHING: "LYNCHING",
+  GAME_OVER: "GAME_OVER",
+};
+
+const priorityScores = {
+  // Sheriff investigation priorities
+  SHERIFF: 120,
+  MAFIA_LEADER: 100,
+  DOCTOR: 80,
+  VIGILANTE_ACTIVE: 70,
+  VIGILANTE_INACTIVE: 50,
+  MAFIA_MEMBER: 40,
+  VILLAGER: 30,
+
+  // Doctor protection priorities
+  DOCTOR_SELF: 150,
+  SHERIFF: 120,
+  VIGILANTE_ACTIVE: 110,
+  MAFIA_MEMBER: 100,
+  VIGILANTE_INACTIVE: 90,
+  LEADER: 80,
+
+  // Vigilante shot priorities
+  SHERIFF: 150,
+  MAFIA_BOSS: 140,
+  DOCTOR: 130,
+  VIGILANTE: 120,
+  LEADER: 110,
+
+  // Mafia kill priorities
+  SHERIFF: 100,
+  DOCTOR: 80,
+  VIGILANTE_ACTIVE: 60,
+  VIGILANTE_INACTIVE: 30,
+  TOWN_LEADER: 20,
+  VILLAGER: 10,
+};
+
+const gameLimits = {
+  // Discussion limits
+  MAFIA_MAX_MESSAGES: 6,
+  MAFIA_MAX_PER_PLAYER: 2,
+  DAY_MAX_MESSAGES: 10,
+  DAY_MAX_PER_PLAYER: 2,
+
+  // Game flow limits
+  CONTEXT_CHARS_DEFAULT: 100000,
+  RETRIES_DEFAULT: 3,
+  RETRY_DELAY_MS: 1000,
+
+  // Priority calculations
+  INVESTIGATION_WEIGHT: 0.5,
+  RANDOM_VARIATION: 9,
+  RANDOM_OFFSET: 4,
+};
+
+// ============================================
 // RANDOM UTILITIES
 // ============================================
 
@@ -383,4 +464,9 @@ module.exports = {
   coreValues,
   flaws,
   archetypes,
+  // Game flow
+  gamePhases,
+  gameMessages,
+  priorityScores,
+  gameLimits,
 };
