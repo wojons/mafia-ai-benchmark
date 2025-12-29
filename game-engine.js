@@ -1407,6 +1407,119 @@ class MafiaGame {
     await this.runNightPhase(gameId);
   }
 
+  // ==========================================
+  // STRATEGIC AI HELPERS
+  // ==========================================
+
+  /**
+   * Calculate priority scores for potential mafia targets
+   * Higher score = higher priority to kill
+   * Returns Map<playerId, score>
+   */
+  calculateMafiaKillPriority(alivePlayers, gameState) {
+    const priorities = {};
+
+    for (const player of alivePlayers) {
+      // Skip mafia teammates
+      if (player.isMafia) {
+        priorities[player.id] = -1; // Never kill teammates
+        continue;
+      }
+
+      // Skip dead players (just in case)
+      if (!player.isAlive) {
+        priorities[player.id] = -999;
+        continue;
+      }
+
+      let score = 0;
+      const reasons = [];
+
+      // Priority 1: Sheriff (highest priority - 100 points)
+      if (player.role === "SHERIFF") {
+        score += 100;
+        reasons.push("Confirmed Sheriff - eliminates night investigation");
+      }
+
+      // Priority 2: Doctor (very high - 80 points)
+      if (player.role === "DOCTOR") {
+        score += 80;
+        reasons.push("Confirmed Doctor - prevents protection of town");
+      }
+
+      // Priority 3: Vigilante (high - 60 points, especially if shot not used)
+      if (player.role === "VIGILANTE" && !this.vigilanteShotUsed) {
+        score += 60;
+        reasons.push("Vigilante with shot remaining - dangerous threat");
+      } else if (player.role === "VIGILANTE") {
+        score += 30;
+        reasons.push("Vigilante (shot already used) - lower threat");
+      }
+
+      // Priority 4: Town leaders based on behavior patterns
+      // Check if player is active in discussions (potential danger)
+      const messagesByPlayer =
+        this.gameHistory?.filter?.(
+          (g) => g.playerId === player.id && g.visibility === "PUBLIC",
+        ) || [];
+
+      if (messagesByPlayer.length > 3) {
+        // Active players are threats
+        score += 20;
+        reasons.push("Active in discussions - likely town leader");
+      }
+
+      // Check if player has voted correctly against mafia
+      const mafiaMembers = alivePlayers.filter((p) => p.isMafia);
+      const recentVotes = gameState?.votingHistory?.slice(-5) || [];
+      let antiMafiaVotes = 0;
+
+      for (const vote of recentVotes) {
+        if (vote.voterId === player.id) {
+          const votedTarget = alivePlayers.find((p) => p.id === vote.targetId);
+          if (votedTarget && !votedTarget.isMafia) {
+            // Targeted non-mafia (voted against town)
+            antiMafiaVotes++;
+          }
+        }
+      }
+
+      if (antiMafiaVotes >= 2) {
+        score += 15;
+        reasons.push(
+          "Has voted against town multiple times - mislynching threat",
+        );
+      }
+
+      // Priority 5: Villagers (lower priority - baseline 10)
+      if (player.role === "VILLAGER") {
+        score += 10;
+        reasons.push("Villager - eliminates potential power roles");
+      }
+
+      // Random variation to make it less predictable (±5 points)
+      score += Math.floor(Math.random() * 11) - 5;
+
+      priorities[player.id] = {
+        score: score,
+        player: player,
+        reasons: reasons,
+      };
+    }
+
+    // Sort by score descending
+    const sorted = Object.entries(priorities)
+      .filter(([_, data]) => data.score > 0)
+      .sort((a, b) => b[1].score - a[1].score);
+
+    return sorted.map(([playerId, data]) => ({
+      playerId,
+      player: data.player,
+      score: data.score,
+      reasons: data.reasons,
+    }));
+  }
+
   async runNightPhase(gameId) {
     this.round++;
     const alivePlayers = this.players.filter((p) => p.isAlive);
@@ -1565,15 +1678,46 @@ class MafiaGame {
       const killVoteReasons = {};
 
       for (const mafia of aliveMafia) {
+        // Calculate strategic target priorities
+        const targetPriorities = this.calculateMafiaKillPriority(alivePlayers, {
+          votingHistory: this.votingHistory || [],
+        });
+
+        // Log strategic priorities (only for first mafia to avoid spam)
+        if (mafia === aliveMafia[0]) {
+          console.log(
+            "\n[STRATEGIC AI] Target Priorities for Mafia Kill:\n" +
+              targetPriorities
+                .slice(0, 5)
+                .map((t, idx) => {
+                  return `  ${idx + 1}. ${t.player.name} (${t.player.role}) - Score: ${t.score}`;
+                })
+                .join("\n"),
+          );
+        }
+
+        // Build priority suggestions for the AI
+        const prioritySuggestions = targetPriorities
+          .slice(0, 3)
+          .map((t, idx) => {
+            const rank =
+              idx === 0 ? "🎯 HIGHEST PRIORITY" : `${idx + 1} priority`;
+            return `${rank}: ${t.player.name} (${t.player.role}) - Score: ${t.score}\n  Reasons: ${t.reasons.join(", ")}`;
+          })
+          .join("\n");
+
         const gameState = {
           round: this.round,
           phase: "MAFIA_KILL_VOTE",
           alivePlayers,
           deadPlayers: this.deadPlayers,
           previousPhaseData:
-            "Mafia chat complete. Time to vote for our target.",
+            "Mafia chat complete. Time to vote for our target.\n\n" +
+            "STRATEGIC TARGET PRIORITIES (guidance for kill decision):\n" +
+            prioritySuggestions,
           messageNumber: 1,
           totalMessages: aliveMafia.length,
+          strategicTargets: targetPriorities.slice(0, 5), // Send full priority list
         };
 
         const response = await this.getAIResponse(mafia, gameState);
