@@ -4,12 +4,11 @@
 // ============================================
 
 // Constants and utilities
-const { E, roleEmojis, simpleUUID } = require("./utils");
+const { E, roleEmojis, simpleUUID, generateNameFromSeed } = require("./utils");
 
 // Persona generation
 const {
   generatePersona,
-  generateNameFromSeed,
   generateProceduralPersona,
   PERSONA_SYSTEM_PROMPT,
 } = require("./persona/generator");
@@ -61,7 +60,6 @@ module.exports = {
 
   // Persona
   generatePersona,
-  generateNameFromSeed,
   generateProceduralPersona,
   PERSONA_SYSTEM_PROMPT,
 
