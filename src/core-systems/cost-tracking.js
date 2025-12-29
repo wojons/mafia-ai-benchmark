@@ -3,7 +3,7 @@
 // Mafia AI Benchmark
 // ============================================
 
-const { getDatabase } = require("./modules/database");
+const { getDatabase } = require("./database");
 
 /**
  * Cost Tracking System
@@ -398,12 +398,23 @@ Budget Status for ${playerId}:
     const state = this.tracking.get(gameId);
     if (!state) return true;
 
-    // Check budget limits
-    const perPlayerRemaining =
-      this.budgetLimits.perPlayerPerTurn *
-      state.playerTracking.get(playerId)?.totalTurns;
+    const playerState = state.playerTracking.get(playerId);
+
+    // Calculate remaining budget for this player
+    // Total budget for this player = perPlayerPerTurn * (number of turns taken so far)
+    // But if they haven't taken a turn yet, they can take at least 1 turn
+    let perPlayerTotalBudget = this.budgetLimits.perPlayerPerTurn;
+    if (playerState && playerState.totalTurns > 0) {
+      perPlayerTotalBudget =
+        this.budgetLimits.perPlayerPerTurn * playerState.totalTurns;
+    }
+
+    const playerCostSoFar = playerState ? playerState.totalCost : 0;
+    const perPlayerRemaining = perPlayerTotalBudget - playerCostSoFar;
+
     const gameRemaining = this.budgetLimits.perGameTotal - state.totalCost;
 
+    // Allow action if there's room in either budget
     return (
       estimatedCost.totalCost <= perPlayerRemaining &&
       estimatedCost.totalCost <= gameRemaining
@@ -434,13 +445,12 @@ Budget Status for ${playerId}:
     }
 
     const playerState = state.playerTracking.get(playerId);
+    const totalTurns = playerState.totalTurns;
+    const totalPlayerBudget =
+      this.budgetLimits.perPlayerPerTurn * Math.max(1, totalTurns);
 
     return {
-      remainingPerTurn: Math.max(
-        0,
-        this.budgetLimits.perPlayerPerTurn * playerState.totalTurns -
-          playerState.totalCost,
-      ),
+      remainingPerTurn: Math.max(0, totalPlayerBudget - playerState.totalCost),
       remainingPerGame: Math.max(
         0,
         this.budgetLimits.perGameTotal - state.totalCost,
