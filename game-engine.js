@@ -622,6 +622,61 @@ if (require.main === module) {
 }
 const API_KEY = process.env.OPENAI_API_KEY;
 
+// Player Model Configuration System (flexible, scalable model assignment)
+let playerModelConfig = null;
+function getPlayerModelConfig() {
+  if (!playerModelConfig) {
+    // Lazy load to avoid import order issues
+    try {
+      const {
+        PlayerModelConfig,
+      } = require("./packages/shared/src/providers/player-model-config");
+      playerModelConfig = new PlayerModelConfig({
+        defaultModel: process.env.DEFAULT_MODEL || "openai/gpt-4o-mini",
+        defaultProvider: "openai",
+        temperature: 0.7,
+        maxTokens: 800, // Increased from 200 for better JSON responses
+      });
+
+      // Apply role-specific model overrides from environment
+      const roleModels = {
+        MAFIA: process.env.MAFIA_MODEL,
+        DOCTOR: process.env.DOCTOR_MODEL,
+        SHERIFF: process.env.SHERIFF_MODEL,
+        VIGILANTE: process.env.VIGILANTE_MODEL,
+        VILLAGER: process.env.VILLAGER_MODEL,
+      };
+
+      for (const [role, model] of Object.entries(roleModels)) {
+        if (model) {
+          const [provider, modelName] = model.split("/");
+          playerModelConfig.setRoleModel(role, {
+            provider: provider || "openai",
+            model: modelName || model,
+          });
+          console.log(`[CONFIG] ${role} role using model: ${model}`);
+        }
+      }
+
+      console.log(`[CONFIG] Default model: ${playerModelConfig.defaultModel}`);
+    } catch (error) {
+      console.warn("[CONFIG] Failed to load PlayerModelConfig:", error.message);
+      // Fallback to simple object
+      playerModelConfig = {
+        defaultModel: process.env.DEFAULT_MODEL || "openai/gpt-4o-mini",
+        getPlayerConfig: () => ({
+          provider: "openai",
+          model: process.env.DEFAULT_MODEL || "openai/gpt-4o-mini",
+          temperature: 0.7,
+          maxTokens: 800,
+          assignmentType: "default",
+        }),
+      };
+    }
+  }
+  return playerModelConfig;
+}
+
 // Database integration
 let gameDatabase = null;
 const DB_PATH = process.env.DB_PATH || "./data/mafia.db";
@@ -968,6 +1023,188 @@ function createGameEvent(
   }
 
   return event;
+}
+
+// ==========================================
+// JSON SCHEMA SYSTEM FOR STRUCTURED OUTPUTS
+// ==========================================
+
+/**
+ * Base JSON schema for all AI responses
+ * Defines the minimum required fields for all phases
+ */
+function getBaseResponseSchema() {
+  return {
+    type: "object",
+    additionalProperties: false,
+    properties: {
+      think: {
+        type: "string",
+        description: "Your private reasoning and strategic thoughts",
+        minLength: 10,
+        maxLength: 500,
+      },
+      says: {
+        type: "string",
+        description: "Your public statement to other players",
+        minLength: 10,
+        maxLength: 300,
+      },
+      action: {
+        type: ["object", "null"],
+        description:
+          "Your action (null if no action or object with action details)",
+        additionalProperties: false,
+        properties: {
+          target: {
+            type: "string",
+            description: "Target player name (if applicable)",
+          },
+          reasoning: {
+            type: "string",
+            description: "Reasoning for your action",
+            minLength: 5,
+            maxLength: 300,
+          },
+          shouldShoot: {
+            type: "boolean",
+            description: "Whether to shoot (vigilante only)",
+          },
+        },
+        required: [],
+      },
+    },
+    required: ["think", "says"],
+  };
+}
+
+/**
+ * Get JSON schema for a specific phase
+ * Different phases may require different action formats
+ */
+function getPhaseSchema(phase) {
+  const baseSchema = getBaseResponseSchema();
+
+  switch (phase) {
+    case "MAFIA_CHAT":
+    case "DAY_DISCUSSION":
+      // Chat/Discussion: No action needed
+      baseSchema.properties.action = { type: "null" };
+      baseSchema.properties.action.description =
+        "No action (null for discussion phases)";
+      break;
+
+    case "MAFIA_KILL_VOTE":
+    case "MAFIA_PERSUADE":
+    case "DAY_VOTE":
+    case "DOCTOR_ACTION":
+    case "SHERIFF_INVESTIGATION":
+      // Action phases with target selection
+      baseSchema.properties.action = {
+        type: "object",
+        additionalProperties: false,
+        properties: {
+          target: {
+            type: "string",
+            description: "Target player name",
+            minLength: 1,
+          },
+          reasoning: {
+            type: "string",
+            description: "Reasoning for your action",
+            minLength: 5,
+            maxLength: 300,
+          },
+        },
+        required: ["target", "reasoning"],
+      };
+      break;
+
+    case "VIGILANTE_ACTION":
+      // Vigilante may shoot or pass
+      baseSchema.properties.action = {
+        type: "object",
+        additionalProperties: false,
+        properties: {
+          target: {
+            type: "string",
+            description: "Target to shoot (omit if not shooting)",
+          },
+          reasoning: {
+            type: "string",
+            description: "Reasoning for shoot or pass decision",
+            minLength: 5,
+            maxLength: 300,
+          },
+          shouldShoot: {
+            type: "boolean",
+            description: "true to shoot, false to pass",
+          },
+        },
+        required: ["reasoning", "shouldShoot"],
+      };
+      break;
+
+    default:
+      // Unknown phase: use base schema
+      break;
+  }
+
+  return baseSchema;
+}
+
+/**
+ * Generate json_schema object for OpenAI/LM Studio API calls
+ * Returns formatted structure for response_format.json_schema
+ */
+function getResponseFormat(phase) {
+  const schema = getPhaseSchema(phase);
+
+  return {
+    type: "json_schema",
+    json_schema: {
+      name: `mafia_response_${phase.replace(/[^a-z0-9]/gi, "_").toLowerCase()}`,
+      description: `Structured response for Mafia game ${phase} phase`,
+      strict: true,
+      schema: schema,
+    },
+  };
+}
+
+/**
+ * Get JSON schema as plain text for prompt (fallback)
+ * Used when model doesn't support structured outputs
+ */
+function getJSONSchemaText(phase) {
+  const schema = getPhaseSchema(phase);
+
+  let schemaText = `\n## REQUIRED JSON OUTPUT FORMAT\n\n`;
+  schemaText += `You MUST respond with valid JSON. No exceptions.\n\n`;
+
+  schemaText += `\`\`\`json\n{\n`;
+  schemaText += `  "think": "string - Your private reasoning (10-500 chars)",\n`;
+  schemaText += `  "says": "string - Your public statement (10-300 chars)",\n`;
+
+  if (phase === "MAFIA_CHAT" || phase === "DAY_DISCUSSION") {
+    schemaText += `  "action": null\n`;
+  } else if (phase === "VIGILANTE_ACTION") {
+    schemaText += `  "action": {\n`;
+    schemaText += `    "target": "string? - Player name to shoot (omit if not shooting)",\n`;
+    schemaText += `    "reasoning": "string - Reasoning for decision (5-300 chars)",\n`;
+    schemaText += `    "shouldShoot": boolean - true to shoot, false to pass\n`;
+    schemaText += `  }\n`;
+  } else {
+    // Action phases with target
+    schemaText += `  "action": {\n`;
+    schemaText += `    "target": "string - Target player name",\n`;
+    schemaText += `    "reasoning": "string - Reasoning for action (5-300 chars)"\n`;
+    schemaText += `  }\n`;
+  }
+
+  schemaText += `}\n\`\`\`\n\n`;
+  schemaText += `IMPORTANT: Your entire response must be ONLY this JSON. No other text.`;
+
+  return schemaText;
 }
 
 function createPrompt(
@@ -1382,6 +1619,12 @@ class MafiaGame {
         options.enableDatabase !== undefined
           ? options.enableDatabase
           : process.env.ENABLE_DATABASE === "true",
+
+      // Structured outputs (OpenAI JSON schema enforcement)
+      disableStructuredOutputs:
+        options.disableStructuredOutputs !== undefined
+          ? options.disableStructuredOutputs
+          : process.env.DISABLE_STRUCTURED_OUTPUTS === "true",
     };
 
     // Database will be initialized in startGame() (async initialization)
@@ -4337,19 +4580,57 @@ class MafiaGame {
         multiRoleContext = this.getMultiRolePromptContext(player);
       }
 
-      const prompt = createPrompt(
-        player,
-        gameState,
-        gameState.phase,
-        evidenceSummary,
-        multiRoleContext,
+      // Get model configuration for this player
+      const modelConfig = getPlayerModelConfig().getPlayerConfig(
+        // Player index (1-based) - derive from player list position
+        this.players.findIndex((p) => p.id === player.id) + 1,
+        // Player role (primary role, or first role if multi)
+        Array.isArray(player.roles) ? player.roles[0] : player.role,
+        this.players.length,
       );
-      const requestBodySize = JSON.stringify({
-        model: "openai/gpt-4o-mini",
+
+      // Add JSON schema to prompt for models that don't support structured outputs
+      const jsonSchemaText = getJSONSchemaText(gameState.phase);
+
+      const prompt =
+        createPrompt(
+          player,
+          gameState,
+          gameState.phase,
+          evidenceSummary,
+          multiRoleContext,
+        ) + jsonSchemaText; // Append JSON schema to prompt
+
+      const requestBody = {
+        model: modelConfig.provider + "/" + modelConfig.model,
         messages: [{ role: "user", content: prompt }],
-        temperature: 0.7,
-        max_tokens: 200,
-      }).length; // Rough estimate in bytes
+        temperature: modelConfig.temperature,
+        max_tokens: modelConfig.maxTokens || 800, // Increased from 200 for better JSON
+      };
+
+      // Try structured outputs if model supports it (OpenAI models)
+      // Add response_format for models that support structured outputs
+      const isOpenAI =
+        modelConfig.provider === "openai" ||
+        modelConfig.model.includes("gpt-") ||
+        modelConfig.model.includes("o1-");
+
+      if (isOpenAI && !this.config.disableStructuredOutputs) {
+        try {
+          const responseFormat = getResponseFormat(gameState.phase);
+          requestBody.response_format = responseFormat;
+          console.log(
+            `[API] Using structured outputs for ${modelConfig.model} in ${gameState.phase}`,
+          );
+        } catch (error) {
+          console.warn(
+            `[API] Failed to generate response_format: ${error.message}`,
+          );
+          // Continue without structured outputs
+        }
+      }
+
+      const requestBodySize = JSON.stringify(requestBody).length; // Rough estimate in bytes
 
       const response = await fetch(
         "https://openrouter.ai/api/v1/chat/completions",
@@ -4361,12 +4642,7 @@ class MafiaGame {
             "HTTP-Referer": "http://mafia-ai-benchmark.local",
             "X-Title": "Mafia AI Benchmark",
           },
-          body: JSON.stringify({
-            model: "openai/gpt-4o-mini",
-            messages: [{ role: "user", content: prompt }],
-            temperature: 0.7,
-            max_tokens: 200,
-          }),
+          body: JSON.stringify(requestBody),
         },
       );
 
@@ -4411,8 +4687,9 @@ class MafiaGame {
             retryCount: retryCount,
             payloadSize: requestBodySize,
             responseSize: responseTextSize,
-            provider: "openrouter",
-            model: "openai/gpt-4o-mini",
+            provider: modelConfig.provider,
+            model: modelConfig.model,
+            assignmentType: modelConfig.assignmentType || "default",
           });
         } catch (statsError) {
           console.error(
@@ -4430,10 +4707,10 @@ class MafiaGame {
             actionType: this._getActionType(gameState.phase),
             promptTokens: tokenUsage.promptTokens || 0,
             completionTokens: tokenUsage.completionTokens || 0,
-            model: "openai/gpt-4o-mini",
-            provider: "openrouter",
+            model: modelConfig.model,
+            provider: modelConfig.provider,
             prices: {
-              promptPricePerMillion: 0.15,
+              promptPricePerMillion: 0.15, // TODO: Load dynamic pricing
               completionPricePerMillion: 0.6,
             },
           });
@@ -4456,8 +4733,8 @@ class MafiaGame {
                 actionType: this._getActionType(gameState.phase),
                 promptTokens: tokenUsage.promptTokens || 0,
                 completionTokens: tokenUsage.completionTokens || 0,
-                model: "openai/gpt-4o-mini",
-                provider: "openrouter",
+                model: modelConfig.model,
+                provider: modelConfig.provider,
                 prices: {
                   promptPricePerMillion: 0.15,
                   completionPricePerMillion: 0.6,
