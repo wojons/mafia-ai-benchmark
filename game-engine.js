@@ -1600,6 +1600,247 @@ class MafiaGame {
   // ==========================================
 
   /**
+   * Calculate priority scores for potential sheriff investigation targets
+   * Higher score = higher priority to investigate
+   * Returns Array<{player, score, reasons}>
+   */
+  calculateSheriffInvestigationPriority(alivePlayers, sheriffId, gameState) {
+    const priorities = [];
+    const alreadyInvestigated = this.sheriffInvestigations || {};
+
+    for (const player of alivePlayers) {
+      // Skip self-investigation
+      if (player.id === sheriffId) {
+        continue;
+      }
+
+      let score = 0;
+      const reasons = [];
+      const hasBeenInvestigated = alreadyInvestigated[player.id];
+
+      // Priority 1: High suspicion, never investigated (100+ points)
+      const recentAccusations =
+        this.gameHistory?.filter?.(
+          (g) =>
+            g.playerId !== null &&
+            g.content?.targetId === player.id &&
+            g.visibility === "PUBLIC",
+        ) || [];
+
+      if (!hasBeenInvestigated && recentAccusations.length >= 3) {
+        score += 120;
+        reasons.push(
+          "Highly suspicious - accused multiple times, never investigated",
+        );
+      } else if (!hasBeenInvestigated && recentAccusations.length >= 2) {
+        score += 100;
+        reasons.push("Suspicious - accused twice, never investigated");
+      } else if (!hasBeenInvestigated && recentAccusations.length >= 1) {
+        score += 80;
+        reasons.push("Accused once, never investigated");
+      }
+
+      // Priority 2: Moderate suspicion, investigated long ago (70 points)
+      if (hasBeenInvestigated) {
+        const daysSinceInvestigated =
+          this.dayNumber - (hasBeenInvestigated.day || 0);
+        if (daysSinceInvestigated >= 3) {
+          score += 70;
+          reasons.push(
+            `Investigated ${daysSinceInvestigated} days ago - worth re-checking`,
+          );
+        }
+      }
+
+      // Priority 3: Very active but quiet (50 points) - suspicious
+      const messagesByPlayer =
+        this.gameHistory?.filter?.(
+          (g) => g.playerId === player.id && g.visibility === "PUBLIC",
+        ) || [];
+      if (messagesByPlayer.length >= 4) {
+        // Check if messages are short/vague (suspicious)
+        const avgLength =
+          messagesByPlayer.reduce((sum, m) => sum + (m.says?.length || 0), 0) /
+          messagesByPlayer.length;
+        if (avgLength < 50) {
+          score += 50;
+          reasons.push("Active but vague messages - could be mafia");
+        }
+      }
+
+      // Priority 4: Voting patterns that are suspicious (40 points)
+      const recentVotes = gameState?.votingHistory?.slice(-5) || [];
+      let suspiciousVotes = 0;
+      for (const voteRound of recentVotes) {
+        const votes = voteRound.votes || [];
+        if (votes.includes(player.id)) {
+          // This player voted
+          // Check if they voted for a town player who died innocent
+          const deadFromRound = this.deadPlayers.filter(
+            (dp) =>
+              dp.round === voteRound.round &&
+              !dp.isMafia &&
+              dp.role !== "MAFIA",
+          );
+          if (deadFromRound.length > 0) {
+            suspiciousVotes++;
+          }
+        }
+      }
+      if (suspiciousVotes >= 2) {
+        score += 40;
+        reasons.push("Voted for multiple innocent town members - suspicious");
+      }
+
+      // Priority 5: Low activity but not dead (30 points) - could be mafia hiding
+      if (messagesByPlayer.length === 0) {
+        score += 30;
+        reasons.push("No public messages - mafia might be hiding");
+      }
+
+      // Penalty for already investigated (reduce priority)
+      if (hasBeenInvestigated && score > 0) {
+        score *= 0.5; // Reduce by half if already investigated recently
+        reasons.push(
+          "Already investigated - lower priority unless high suspicion",
+        );
+      }
+
+      // Random variation to make it less predictable (±4 points)
+      score += Math.floor(Math.random() * 9) - 4;
+
+      priorities.push({
+        playerId: player.id,
+        player: player,
+        score: Math.max(0, Math.floor(score)),
+        reasons: reasons,
+        alreadyInvestigated: !!hasBeenInvestigated,
+      });
+    }
+
+    // Sort by score descending
+    priorities.sort((a, b) => b.score - a.score);
+
+    return priorities;
+  }
+
+  /**
+   * Calculate priority scores for potential doctor protection targets
+   * Higher score = higher priority to protect
+   * Returns Array<{player, score, reasons}>
+   */
+  calculateDoctorProtectionPriority(alivePlayers, doctorId, gameState) {
+    const priorities = [];
+
+    for (const player of alivePlayers) {
+      // Skip self-protection (handled separately)
+      if (player.id === doctorId) {
+        continue;
+      }
+
+      let score = 0;
+      const reasons = [];
+
+      // Priority 1: Revealed Sheriff (100 points) - critical to keep alive
+      if (player.role === "SHERIFF") {
+        score += 100;
+        reasons.push("Confirmed Sheriff - keeps night investigation active");
+      }
+
+      // Priority 2: Revealed Doctor (doctor can protect self) (90 points)
+      if (player.role === "DOCTOR") {
+        score += 90;
+        reasons.push("Revealed Doctor - can self-protect");
+      }
+
+      // Priority 3: Vigilante with shot remaining (70 points)
+      if (player.role === "VIGILANTE" && !this.vigilanteShotUsed) {
+        score += 70;
+        reasons.push("Vigilante with shot - extra kill capability for town");
+      }
+
+      // Priority 4: Player who was targeted last night (60 points)
+      if (this.deadPlayers.length > 0) {
+        const lastKilled = this.deadPlayers[this.deadPlayers.length - 1];
+        if (lastKilled.deathType === "KILLED") {
+          // Someone was killed last night, protect likely next target
+          // Find who was voted against most
+          const recentVotes = gameState?.votingHistory?.slice(-2) || [];
+          let mostVoted = null;
+          let maxVotes = 0;
+          for (const voteRound of recentVotes) {
+            const votes = voteRound.votes || [];
+            const voteCounts = {};
+            votes.forEach((voterId) => {
+              voteCounts[voterId] = (voteCounts[voterId] || 0) + 1;
+            });
+            for (const [playerId, count] of Object.entries(voteCounts)) {
+              if (count > maxVotes) {
+                maxVotes = count;
+                mostVoted = playerId;
+              }
+            }
+          }
+          if (mostVoted === player.id) {
+            score += 60;
+            reasons.push("Most voted player - likely mafia target");
+          }
+        }
+      }
+
+      // Priority 5: Active town leaders (40 points)
+      const messagesByPlayer =
+        this.gameHistory?.filter?.(
+          (g) => g.playerId === player.id && g.visibility === "PUBLIC",
+        ) || [];
+      if (messagesByPlayer.length > 3) {
+        score += 40;
+        reasons.push("Active in discussions - likely town being targeted");
+      }
+
+      // Priority 6: Villagers in danger (30 points)
+      if (player.role === "VILLAGER") {
+        // Check if they've been accused recently
+        const recentAccusations =
+          this.gameHistory?.filter?.(
+            (g) =>
+              g.playerId !== null &&
+              g.content?.targetId === player.id &&
+              g.visibility === "PUBLIC",
+          ) || [];
+        if (recentAccusations.length >= 2) {
+          score += 30;
+          reasons.push("Recent accusations - likely mafia target");
+        }
+      }
+
+      // Priority 7: Self-protection (handled separately based on suspicion)
+      // Not scored here - added separately with special logic
+
+      // Random variation to make it less predictable (±3 points)
+      score += Math.floor(Math.random() * 7) - 3;
+
+      // Don't protect same person twice in a row (huge penalty)
+      if (this.lastDoctorProtection === player.id) {
+        score -= 999;
+        reasons.push("Cannot protect same person twice in a row");
+      }
+
+      priorities.push({
+        playerId: player.id,
+        player: player,
+        score: Math.max(0, score),
+        reasons: reasons,
+      });
+    }
+
+    // Sort by score descending
+    priorities.sort((a, b) => b.score - a.score);
+
+    return priorities;
+  }
+
+  /**
    * Calculate priority scores for potential mafia targets
    * Higher score = higher priority to kill
    * Returns Map<playerId, score>
@@ -2095,9 +2336,89 @@ class MafiaGame {
 
     if (aliveDoctor.length > 0) {
       for (const doctor of aliveDoctor) {
-        const canProtectSelf = this.round === 1;
+        // Calculate strategic protection priorities
+        const protectionPriorities = this.calculateDoctorProtectionPriority(
+          alivePlayers,
+          doctor.id,
+          {
+            votingHistory: this.votingHistory || [],
+          },
+        );
+
+        // Calculate self-protection priority
+        let selfProtectionScore = 0;
+        const selfProtectionReasons = [];
+        const canProtectSelf =
+          this.round === 1 || this.lastDoctorProtection !== doctor.id;
+
+        if (canProtectSelf) {
+          // Check if doctor is being targeted (high suspicion)
+          const recentAccusations =
+            this.gameHistory?.filter?.(
+              (g) =>
+                g.playerId !== null &&
+                g.content?.targetId === doctor.id &&
+                g.visibility === "PUBLIC",
+            ) || [];
+
+          if (recentAccusations.length >= 3) {
+            selfProtectionScore = 85;
+            selfProtectionReasons.push(
+              "Being accused multiple times - high risk",
+            );
+          } else if (recentAccusations.length >= 2) {
+            selfProtectionScore = 65;
+            selfProtectionReasons.push("Being accused - moderate risk");
+          } else if (recentAccusations.length >= 1) {
+            selfProtectionScore = 45;
+            selfProtectionReasons.push("Being accused - low risk");
+          }
+
+          // Add random variation
+          selfProtectionScore += Math.floor(Math.random() * 11) - 5;
+        }
+
+        // Add self-protection to priorities if score is valid
+        if (selfProtectionScore > 0) {
+          protectionPriorities.push({
+            playerId: doctor.id,
+            player: doctor,
+            score: selfProtectionScore,
+            reasons: ["SELF-PROTECTION", ...selfProtectionReasons],
+          });
+        }
+
+        // Sort all priorities including self-protection
+        protectionPriorities.sort((a, b) => b.score - a.score);
+
+        // Log strategic priorities
+        console.log(
+          "\n[STRATEGIC AI] Protection Priorities for Doctor:\n" +
+            protectionPriorities
+              .slice(0, 5)
+              .map((t, idx) => {
+                const isSelf = t.playerId === doctor.id ? " (SELF)" : "";
+                return `  ${idx + 1}. ${t.player.name} ${isSelf}- Score: ${t.score}`;
+              })
+              .join("\n"),
+        );
+
         const cannotProtectSame =
           !canProtectSelf && this.lastDoctorProtection === doctor.id;
+
+        // Build priority suggestions for the AI
+        const prioritySuggestions = protectionPriorities
+          .filter(
+            (t) => canProtectSelf || t.playerId !== this.lastDoctorProtection,
+          )
+          .slice(0, 3)
+          .map((t, idx) => {
+            const rank =
+              idx === 0 ? "🎯 HIGHEST PRIORITY" : `${idx + 1} priority`;
+            const isSelf = t.playerId === doctor.id ? " (YOURSELF)" : "";
+            return `${rank}: ${t.player.name}${isSelf} (${t.player.role}) - Score: ${t.score}\n  Reasons: ${t.reasons.join(", ")}`;
+          })
+          .join("\n");
 
         const gameState = {
           round: this.round,
@@ -2108,9 +2429,15 @@ class MafiaGame {
             "Previous night: " +
             (this.deadPlayers.length > 0
               ? this.deadPlayers.map((p) => p.name).join(", ")
-              : "No deaths"),
+              : "No deaths") +
+            "\n\n" +
+            "STRATEGIC PROTECTION PRIORITIES (guidance for protection decision):\n" +
+            prioritySuggestions,
           messageNumber: 1,
           totalMessages: 1,
+          protectionTargets: protectionPriorities.filter(
+            (t) => canProtectSelf || t.playerId !== this.lastDoctorProtection,
+          ),
         };
 
         const response = await this.getAIResponse(doctor, gameState);
@@ -2160,6 +2487,37 @@ class MafiaGame {
 
     if (aliveSheriff.length > 0) {
       for (const sheriff of aliveSheriff) {
+        // Calculate strategic investigation priorities
+        const investigationPriorities =
+          this.calculateSheriffInvestigationPriority(alivePlayers, sheriff.id, {
+            votingHistory: this.votingHistory || [],
+          });
+
+        // Log strategic priorities
+        console.log(
+          "\n[STRATEGIC AI] Investigation Priorities for Sheriff:\n" +
+            investigationPriorities
+              .slice(0, 5)
+              .map((t, idx) => {
+                const checked = t.alreadyInvestigated ? " [CHECKED]" : "";
+                return `  ${idx + 1}. ${t.player.name} (${t.player.role})${checked} - Score: ${t.score}`;
+              })
+              .join("\n"),
+        );
+
+        // Build priority suggestions for the AI
+        const prioritySuggestions = investigationPriorities
+          .slice(0, 3)
+          .map((t, idx) => {
+            const checked = t.alreadyInvestigated
+              ? " [Previously investigated]"
+              : " [Never investigated]";
+            const status =
+              idx === 0 ? "🎯 HIGHEST PRIORITY" : `${idx + 1} priority`;
+            return `${status}: ${t.player.name} (${t.player.role})${checked} - Score: ${t.score}\n  Reasons: ${t.reasons.join(", ")}`;
+          })
+          .join("\n");
+
         const gameState = {
           round: this.round,
           phase: "SHERIFF_INVESTIGATION",
@@ -2169,9 +2527,13 @@ class MafiaGame {
             "Previous night: " +
             (this.deadPlayers.length > 0
               ? this.deadPlayers.map((p) => p.name).join(", ")
-              : "No deaths"),
+              : "No deaths") +
+            "\n\n" +
+            "STRATEGIC INVESTIGATION PRIORITIES (guidance for investigation):\n" +
+            prioritySuggestions,
           messageNumber: 1,
           totalMessages: 1,
+          investigationTargets: investigationPriorities.slice(0, 5),
         };
 
         const response = await this.getAIResponse(sheriff, gameState);
@@ -2205,6 +2567,16 @@ class MafiaGame {
             target.role +
             "\n",
         );
+
+        // Track investigation for future priority calculation
+        if (!this.sheriffInvestigations) {
+          this.sheriffInvestigations = {};
+        }
+        this.sheriffInvestigations[target.id] = {
+          day: this.dayNumber,
+          round: this.round,
+          result: target.role,
+        };
 
         this.gameEvents.push(
           createGameEvent(
