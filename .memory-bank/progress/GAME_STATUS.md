@@ -7,7 +7,7 @@ The game now implements the **official Mafia game flow**:
 ```
 🌙 NIGHT PHASE
 ├── 😈 Mafia Team Chat → Kill Decision
-├── 💉 Doctor(s) → Protect (can't protect same person twice)  
+├── 💉 Doctor(s) → Protect (can't protect same person twice)
 ├── 👮 Sheriff → Investigate (gets exact role)
 ├── 🔫 Vigilante → Optional Shoot (one-time only)
 └── 🌅 Night Resolution → Deaths determined
@@ -24,6 +24,7 @@ The game now implements the **official Mafia game flow**:
 ## Live Demo Output
 
 ### Night 1 Flow (Working!)
+
 ```
 🌙 NIGHT 1
 ├── 😈 STEP 1: MAFIA TEAM CHAT
@@ -33,7 +34,7 @@ The game now implements the **official Mafia game flow**:
 ├── 💉 STEP 2: DOCTOR ACTION
 │   └── Charlie (DOCTOR): "I'll protect [target] because..."
 │
-├── 👮 STEP 3: SHERIFF INVESTIGATION  
+├── 👮 STEP 3: SHERIFF INVESTIGATION
 │   └── Bob (SHERIFF): "I investigate [target]"
 │   └── Result: "Target is MAFIA/VILLAGER/DOCTOR/SHERIFF/VIGILANTE"
 │
@@ -46,6 +47,7 @@ The game now implements the **official Mafia game flow**:
 ```
 
 ### Day 1 Discussion (Working!)
+
 ```
 ☀️ DAY 1
 ├── 👥 Alive: 10 players
@@ -65,28 +67,41 @@ The game now implements the **official Mafia game flow**:
 ## Key Features Implemented
 
 ### ✅ Correct Night Order
+
 1. **Mafia Chat** - Private team discussion
 2. **Doctor Action** - Protect (first night: anyone, later: not same person)
 3. **Sheriff Investigation** - Gets EXACT role (Mafia/Doctor/Sheriff/Vigilante/Villager)
 4. **Vigilante Decision** - Optional one-time shot
 5. **Resolution** - Apply all actions, show results
 
-### ✅ Correct Day Order  
+### ✅ Correct Day Order
+
 1. **Morning Report** - Show deaths, investigation results
 2. **Discussion Phase** - Limited messages per player
 3. **Voting Phase** - Tie = no death
 
 ### ✅ Split-Pane Consciousness
+
 ```javascript
 THINK: [Private reasoning, strategy, true beliefs - ADMIN ONLY]
 SAYS:  [Public statement, can lie (mafia) or tell truth (town)]
 ```
 
 ### ✅ Real AI Integration
+
 - Uses GPT-4o-mini via OpenRouter
 - Each player generates unique responses
 - Context-aware responses based on role
 - Real-time API calls during game
+
+### ✅ Database Persistence (NEW)
+
+- SQLite integration using sql.js (no native bindings)
+- Full event sourcing with sequence numbers
+- Privacy flags for event visibility
+- Automatic persistence to disk
+- Graceful degradation if database fails
+- Optional via ENABLE_DATABASE environment variable
 
 ## Running the Game
 
@@ -100,6 +115,12 @@ node demo-game.js
 
 # Or run split-pane consciousness demo
 node demo-game-split-pane.js
+
+# Run game with database enabled
+ENABLE_DATABASE=true node game-engine.js --demo
+
+# Test database integration
+node test-db.js
 ```
 
 ## Test Results
@@ -109,7 +130,7 @@ node demo-game-split-pane.js
 
 Night 1:
   ✅ Mafia chat functioning
-  ✅ Doctor protection working  
+  ✅ Doctor protection working
   ✅ Sheriff investigation working
   ✅ Vigilante decision working
   ✅ Night resolution working
@@ -138,23 +159,27 @@ The game is **fully functional** with correct mechanics! Next steps could be:
 
 ## Files Created
 
-| File | Purpose |
-|------|---------|
-| `demo-game-correct-flow.js` | Main game with correct flow |
-| `demo-game.js` | Original demo (simpler) |
-| `demo-game-split-pane.js` | Shows split-pane consciousness |
-| `specs/game-flow.md` | Complete game flow documentation |
-| `packages/shared/src/__tests__/integration/real-game.test.ts` | Integration tests |
+| File                                                          | Purpose                          |
+| ------------------------------------------------------------- | -------------------------------- |
+| `demo-game-correct-flow.js`                                   | Main game with correct flow      |
+| `demo-game.js`                                                | Original demo (simpler)          |
+| `demo-game-split-pane.js`                                     | Shows split-pane consciousness   |
+| `specs/game-flow.md`                                          | Complete game flow documentation |
+| `packages/shared/src/__tests__/integration/real-game.test.ts` | Integration tests                |
 
 ## Summary
 
-✅ **The Mafia AI Benchmark is working with correct game mechanics!**  
-✅ **Split-pane consciousness (THINK/SAYS) is demonstrated in real-time!**  
-✅ **Real AI agents (GPT-4o-mini) are playing the game!**  
+✅ **The Mafia AI Benchmark is working with correct game mechanics!**
+✅ **Split-pane consciousness (THINK/SAYS) is demonstrated in real-time!**
+✅ **Real AI agents (GPT-4o-mini) are playing the game!**
 ✅ **All game phases (Night → Day → Voting) are functioning correctly!**
+✅ **Database persistence is implemented and tested!**
 
 The system is ready for:
+
 - Testing and refinement
 - Adding more sophisticated AI strategies
 - Building visualization interfaces
 - Running benchmarks
+- Event replay and analysis
+- Cross-game statistics tracking

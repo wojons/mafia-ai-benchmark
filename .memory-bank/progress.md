@@ -1,10 +1,10 @@
 # Memory Bank - Current Progress Summary
 
-## 🎯 Project Status: REAL LLM CALLS WORKING
+## 🎯 Project Status: DATABASE INTEGRATION COMPLETED
 
-**Last Updated**: December 28, 2025
-**Version**: 4.0
-**Commit**: b4e706e
+**Last Updated**: December 29, 2025
+**Version**: 5.0
+**Commit**: 17efe3f
 
 ---
 
@@ -44,7 +44,17 @@
 - [x] Rich backstories and flaws
 - [x] AI prompt integration
 
-### 5. Testing - 272+ Tests
+### 5. Database Persistence (NEW) ✅
+
+- [x] SQLite integration using sql.js (no native bindings required)
+- [x] Full database schema implementation (games, events, snapshots tables)
+- [x] Event sourcing with auto-increment sequence numbers
+- [x] Privacy flags for event visibility (PUBLIC, PRIVATE_MAFIA, ADMIN_ONLY)
+- [x] Graceful degradation (game continues if database fails)
+- [x] Optional persistence via ENABLE_DATABASE environment variable
+- [x] Database tests passing
+
+### 6. Testing - 272+ Tests
 
 - [x] FSM tests (51)
 - [x] Role tests (58)

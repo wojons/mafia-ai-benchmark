@@ -114,6 +114,45 @@ class GameDatabase {
         "CREATE INDEX IF NOT EXISTS idx_games_winner ON games(winner)",
       );
 
+      // Create players table (per-game player tracking)
+      this.db.run(`
+        CREATE TABLE IF NOT EXISTS players (
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+
+          -- Game reference
+          game_id TEXT NOT NULL,
+
+          -- Player identification
+          player_id TEXT NOT NULL,
+          player_name TEXT NOT NULL,
+
+          -- Role information
+          assigned_role TEXT NOT NULL,
+          is_alive INTEGER NOT NULL DEFAULT 1,
+
+          -- AI model used
+          model TEXT,
+          provider TEXT,
+
+          -- Timing
+          joined_at INTEGER NOT NULL,
+
+          -- Foreign key
+          FOREIGN KEY (game_id) REFERENCES games(id) ON DELETE CASCADE
+        )
+      `);
+
+      // Players indexes
+      this.db.run(
+        "CREATE UNIQUE INDEX IF NOT EXISTS idx_players_game_id ON players(game_id, player_id)",
+      );
+      this.db.run(
+        "CREATE INDEX IF NOT EXISTS idx_players_role ON players(assigned_role)",
+      );
+      this.db.run(
+        "CREATE INDEX IF NOT EXISTS idx_players_model ON players(model)",
+      );
+
       // Create events table
       this.db.run(`
         CREATE TABLE IF NOT EXISTS events (
@@ -378,6 +417,110 @@ class GameDatabase {
       }));
     } catch (error) {
       console.error("[DB] Failed to list games:", error.message);
+      throw error;
+    }
+  }
+
+  // ==========================================
+  // PLAYERS OPERATIONS
+  // ==========================================
+
+  createPlayer(playerData) {
+    try {
+      const stmt = this.db.prepare(`
+        INSERT INTO players (
+          game_id, player_id, player_name, assigned_role, is_alive,
+          model, provider, joined_at
+        )
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+      `);
+
+      stmt.run([
+        playerData.gameId,
+        playerData.playerId,
+        playerData.playerName,
+        playerData.assignedRole,
+        playerData.isAlive !== undefined ? (playerData.isAlive ? 1 : 0) : 1,
+        playerData.model || null,
+        playerData.provider || null,
+        playerData.joinedAt || Date.now(),
+      ]);
+      stmt.free();
+      this.persist();
+
+      console.log(
+        `[DB] Created player: ${playerData.gameId}/${playerData.playerId}`,
+      );
+    } catch (error) {
+      console.error("[DB] Failed to create player:", error.message);
+      throw error;
+    }
+  }
+
+  getPlayers(gameId) {
+    try {
+      const stmt = this.db.prepare("SELECT * FROM players WHERE game_id = ?");
+      stmt.bind([gameId]);
+
+      const players = [];
+      while (stmt.step()) {
+        const p = stmt.getAsObject();
+        players.push({
+          ...p,
+          isAlive: p.is_alive === 1,
+        });
+      }
+      stmt.free();
+
+      return players;
+    } catch (error) {
+      console.error("[DB] Failed to get players:", error.message);
+      throw error;
+    }
+  }
+
+  updatePlayer(gameId, playerId, updates) {
+    try {
+      const fields = [];
+      const params = [];
+
+      if (updates.isAlive !== undefined) {
+        fields.push("is_alive = ?");
+        params.push(updates.isAlive ? 1 : 0);
+      }
+
+      if (updates.assignedRole !== undefined) {
+        fields.push("assigned_role = ?");
+        params.push(updates.assignedRole);
+      }
+
+      if (updates.model !== undefined) {
+        fields.push("model = ?");
+        params.push(updates.model);
+      }
+
+      if (updates.provider !== undefined) {
+        fields.push("provider = ?");
+        params.push(updates.provider);
+      }
+
+      if (fields.length === 0) {
+        console.warn("[DB] No fields to update in player");
+        return;
+      }
+
+      params.push(gameId, playerId);
+      const query = `UPDATE players SET ${fields.join(", ")} WHERE game_id = ? AND player_id = ?`;
+      const stmt = this.db.prepare(query);
+      stmt.run(params);
+      stmt.free();
+      this.persist();
+
+      console.log(
+        `[DB] Updated player: ${gameId}/${playerId} (${fields.length} fields)`,
+      );
+    } catch (error) {
+      console.error("[DB] Failed to update player:", error.message);
       throw error;
     }
   }
