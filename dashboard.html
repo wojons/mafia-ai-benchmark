@@ -1,0 +1,535 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Mafia AI - Real-Time Dashboard</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+      @keyframes pulse {
+        0%,
+        100% {
+          opacity: 1;
+        }
+        50% {
+          opacity: 0.5;
+        }
+      }
+      @keyframes slideIn {
+        from {
+          transform: translateX(-100%);
+          opacity: 0;
+        }
+        to {
+          transform: translateX(0);
+          opacity: 1;
+        }
+      }
+      .pulse {
+        animation: pulse 2s infinite;
+      }
+      .slide-in {
+        animation: slideIn 0.3s ease-out;
+      }
+      .dark-mode {
+        background: #0f172a;
+        color: #e2e8f0;
+      }
+      .card {
+        background: linear-gradient(135deg, #1e293b 0%, #0f172a 100%);
+        border: 1px solid #334155;
+      }
+      .mafia {
+        border-left: 4px solid #ef4444;
+      }
+      .town {
+        border-left: 4px solid #3b82f6;
+      }
+      .role-mafia {
+        color: #ef4444;
+      }
+      .role-town {
+        color: #3b82f6;
+      }
+      .role-special {
+        color: #10b981;
+      }
+      #chat-container::-webkit-scrollbar {
+        width: 8px;
+      }
+      #chat-container::-webkit-scrollbar-track {
+        background: #1e293b;
+      }
+      #chat-container::-webkit-scrollbar-thumb {
+        background: #475569;
+        border-radius: 4px;
+      }
+      .cost-warning {
+        background: #f59e0b;
+      }
+      .cost-stop {
+        background: #ef4444;
+      }
+    </style>
+  </head>
+  <body class="dark-mode min-h-screen">
+    <div class="container mx-auto p-4 max-w-7xl">
+      <!-- Header -->
+      <header class="mb-6 flex justify-between items-center">
+        <div>
+          <h1 class="text-3xl font-bold text-white">🎭 Mafia AI Dashboard</h1>
+          <p class="text-slate-400 mt-1">Real-time game monitoring & metrics</p>
+        </div>
+        <div class="flex items-center gap-4">
+          <div id="connection-status" class="flex items-center gap-2">
+            <span class="w-3 h-3 rounded-full bg-red-500"></span>
+            <span class="text-sm text-slate-400">Disconnected</span>
+          </div>
+          <button
+            onclick="toggleTheme()"
+            class="px-4 py-2 bg-slate-700 rounded-lg hover:bg-slate-600"
+          >
+            🌙 Theme
+          </button>
+        </div>
+      </header>
+
+      <!-- Main Grid -->
+      <div class="grid grid-cols-1 lg:grid-cols-3 gap-6">
+        <!-- Left Column: Game State & Players -->
+        <div class="lg:col-span-2 space-y-6">
+          <!-- Game Phase Card -->
+          <div class="card rounded-xl p-6">
+            <h2 class="text-xl font-semibold mb-4">📊 Game State</h2>
+            <div class="grid grid-cols-3 gap-4 mb-4">
+              <div class="bg-slate-800 rounded-lg p-4">
+                <p class="text-slate-400 text-sm">Round</p>
+                <p id="round" class="text-2xl font-bold text-white">-</p>
+              </div>
+              <div class="bg-slate-800 rounded-lg p-4">
+                <p class="text-slate-400 text-sm">Phase</p>
+                <p id="phase" class="text-xl font-bold text-white">-</p>
+              </div>
+              <div class="bg-slate-800 rounded-lg p-4">
+                <p class="text-slate-400 text-sm">Alive</p>
+                <p id="alive-count" class="text-2xl font-bold text-white">-</p>
+              </div>
+            </div>
+            <div
+              id="phase-info"
+              class="text-slate-400 text-sm bg-slate-800 rounded-lg p-3"
+            >
+              Waiting for game...
+            </div>
+          </div>
+
+          <!-- Players Grid -->
+          <div class="card rounded-xl p-6">
+            <h2 class="text-xl font-semibold mb-4">👥 Players</h2>
+            <div
+              id="players-grid"
+              class="grid grid-cols-2 md:grid-cols-3 gap-4"
+            >
+              <!-- Players will be injected here -->
+            </div>
+          </div>
+
+          <!-- Chat/Actions Feed -->
+          <div class="card rounded-xl p-6">
+            <h2 class="text-xl font-semibold mb-4">💬 Game Feed</h2>
+            <div
+              id="chat-container"
+              class="h-64 overflow-y-auto space-y-3 bg-slate-900 rounded-lg p-4"
+            >
+              <p class="text-slate-500 text-center">Waiting for messages...</p>
+            </div>
+          </div>
+        </div>
+
+        <!-- Right Column: Metrics & Stats -->
+        <div class="space-y-6">
+          <!-- Cost Tracking -->
+          <div class="card rounded-xl p-6">
+            <h2 class="text-xl font-semibold mb-4">💰 Cost Tracking</h2>
+            <div class="space-y-4">
+              <div>
+                <div class="flex justify-between mb-1">
+                  <span class="text-slate-400">Budget Used</span>
+                  <span id="budget-used" class="text-white">0.00%</span>
+                </div>
+                <div class="w-full bg-slate-700 rounded-full h-2">
+                  <div
+                    id="budget-bar"
+                    class="bg-blue-500 h-2 rounded-full transition-all"
+                    style="width: 0%"
+                  ></div>
+                </div>
+              </div>
+              <div class="grid grid-cols-2 gap-3">
+                <div class="bg-slate-800 rounded-lg p-3">
+                  <p class="text-slate-400 text-xs">Total Cost</p>
+                  <p id="total-cost" class="text-lg font-bold text-white">
+                    $0.00
+                  </p>
+                </div>
+                <div class="bg-slate-800 rounded-lg p-3">
+                  <p class="text-slate-400 text-xs">Tokens</p>
+                  <p id="total-tokens" class="text-lg font-bold text-white">
+                    0
+                  </p>
+                </div>
+                <div class="bg-slate-800 rounded-lg p-3">
+                  <p class="text-slate-400 text-xs">Remaining</p>
+                  <p id="Remaining" class="text-lg font-bold text-white">
+                    $10.00
+                  </p>
+                </div>
+                <div class="bg-slate-800 rounded-lg p-3">
+                  <p class="text-slate-400 text-xs">API Calls</p>
+                  <p id="api-calls" class="text-lg font-bold text-white">0</p>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <!-- Evidence & Suspects -->
+          <div class="card rounded-xl p-6">
+            <h2 class="text-xl font-semibold mb-4">🔍 Evidence & Suspects</h2>
+            <div id="suspect-meter" class="space-y-2">
+              <p class="text-slate-500 text-center text-sm">
+                No evidence yet...
+              </p>
+            </div>
+          </div>
+
+          <!-- Win Condition -->
+          <div class="card rounded-xl p-6">
+            <h2 class="text-xl font-semibold mb-4">🏆 Win Condition</h2>
+            <div class="space-y-3">
+              <div class="bg-red-900/30 rounded-lg p-3">
+                <p class="text-slate-400 text-sm">Mafia</p>
+                <p id="mafia-count" class="text-2xl font-bold text-red-400">
+                  0
+                </p>
+              </div>
+              <div class="bg-blue-900/30 rounded-lg p-3">
+                <p class="text-slate-400 text-sm">Town</p>
+                <p id="town-count" class="text-2xl font-bold text-blue-400">
+                  0
+                </p>
+              </div>
+            </div>
+            <p id="winner" class="text-lg font-bold text-center mt-4 hidden">
+              🎉 WINNER!
+            </p>
+          </div>
+
+          <!-- Recent Events -->
+          <div class="card rounded-xl p-6">
+            <h2 class="text-xl font-semibold mb-4">📋 Recent Events</h2>
+            <div
+              id="events-list"
+              class="space-y-2 text-sm max-h-48 overflow-y-auto"
+            >
+              <p class="text-slate-500 text-center">No events yet...</p>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <script>
+      // WebSocket connection
+      let ws = null;
+      let gameState = null;
+      let players = new Map();
+
+      // Initialize connection
+      function connect() {
+        const wsUrl = `ws://${window.location.hostname}:8080`;
+        ws = new WebSocket(wsUrl);
+
+        ws.onopen = () => {
+          console.log("Connected to dashboard server");
+          updateConnectionStatus(true);
+        };
+
+        ws.onmessage = (event) => {
+          const message = JSON.parse(event.data);
+          handleMessage(message);
+        };
+
+        ws.onclose = () => {
+          console.log("Disconnected from dashboard server");
+          updateConnectionStatus(false);
+          // Reconnect after 3 seconds
+          setTimeout(connect, 3000);
+        };
+
+        ws.onerror = (error) => {
+          console.error("WebSocket error:", error);
+          updateConnectionStatus(false);
+        };
+      }
+
+      function updateConnectionStatus(connected) {
+        const statusEl = document.getElementById("connection-status");
+        if (connected) {
+          statusEl.innerHTML =
+            '<span class="w-3 h-3 rounded-full bg-green-500 pulse"></span><span class="text-sm text-green-400">Connected</span>';
+        } else {
+          statusEl.innerHTML =
+            '<span class="w-3 h-3 rounded-full bg-red-500"></span><span class="text-sm text-red-400">Disconnected</span>';
+        }
+      }
+
+      function handleMessage(message) {
+        switch (message.type) {
+          case "connected":
+            console.log("Dashboard connected:", message.message);
+            break;
+
+          case "game_state":
+            gameState = message.data;
+            updateGameState(gameState);
+            break;
+
+          case "player_action":
+            logPlayerAction(message.data);
+            break;
+
+          case "chat_message":
+            logChatMessage(message.data);
+            updateChatFeed(message.data);
+            break;
+
+          case "phase_change":
+            updatePhase(message.data);
+            break;
+
+          case "player_death":
+            logPlayerDeath(message.data);
+            updatePlayers();
+            break;
+
+          case "voting_result":
+            logVotingResult(message.data);
+            break;
+
+          case "game_over":
+            showGameOver(message.data);
+            break;
+
+          case "cost_update":
+            updateCostMetrics(message.data);
+            break;
+
+          case "evidence_update":
+            updateEvidence(message.data);
+            break;
+
+          case "suspect_meter_update":
+            updateSuspectMeter(message.data);
+            break;
+        }
+      }
+
+      function updateGameState(state) {
+        if (state.round !== undefined) {
+          document.getElementById("round").textContent = state.round;
+        }
+        if (state.phase) {
+          document.getElementById("phase").textContent = state.phase;
+        }
+        if (state.alivePlayers) {
+          document.getElementById("alive-count").textContent =
+            state.alivePlayers.length;
+        }
+      }
+
+      function updatePhase(data) {
+        document.getElementById("phase").textContent =
+          data.phaseName || data.phase;
+        document.getElementById("round").textContent = data.round;
+        document.getElementById("phase-info").textContent =
+          `Round ${data.round} - ${data.phaseName || data.phase}`;
+      }
+
+      function logChatMessage(data) {
+        const container = document.getElementById("chat-container");
+        const time = new Date().toLocaleTimeString();
+
+        const isPrivate = data.visibility !== "PUBLIC";
+        const visibilityClass = isPrivate ? "opacity-50" : "";
+
+        const messageHTML = `
+        <div class="slide-in ${visibilityClass}">
+          <div class="flex justify-between items-start">
+            <div>
+              <span class="font-semibold ${isPrivate ? "text-slate-500" : "text-white"}">
+                ${data.playerName}
+              </span>
+              ${isPrivate ? '<span class="text-xs ml-2">🔒 Private</span>' : ""}
+            </div>
+            <span class="text-xs text-slate-500">${time}</span>
+          </div>
+          <p class="text-slate-300 mt-1">${data.message}</p>
+        </div>
+      `;
+
+        // Remove "waiting" message if exists
+        const waiting = container.querySelector(".text-center");
+        if (waiting) waiting.remove();
+
+        container.innerHTML += messageHTML;
+        container.scrollTop = container.scrollHeight;
+      }
+
+      function logPlayerAction(data) {
+        const container = document.getElementById("events-list");
+        const time = new Date().toLocaleTimeString();
+
+        const eventHTML = `
+        <div class="p-2 bg-slate-800 rounded slide-in">
+          <span class="text-slate-400 text-xs">${time}</span>
+          <p class="text-sm text-white mt-1">${data.playerName}: ${data.action}</p>
+        </div>
+      `;
+
+        const waiting = container.querySelector(".text-center");
+        if (waiting) waiting.remove();
+
+        container.insertAdjacentHTML("afterbegin", eventHTML);
+
+        // Keep only last 10 events
+        while (container.children.length > 10) {
+          container.removeChild(container.lastChild);
+        }
+      }
+
+      function logPlayerDeath(data) {
+        const container = document.getElementById("events-list");
+        const time = new Date().toLocaleTimeString();
+
+        const eventHTML = `
+        <div class="p-2 bg-red-900/30 rounded slide-in">
+          <span class="text-slate-400 text-xs">${time}</span>
+          <p class="text-sm text-red-400 mt-1">💀 ${data.playerName} (${data.role}) - ${data.deathType}</p>
+        </div>
+      `;
+
+        container.insertAdjacentHTML("afterbegin", eventHTML);
+      }
+
+      function logVotingResult(data) {
+        const container = document.getElementById("events-list");
+        if (data.eliminated) {
+          const eventHTML = `
+          <div class="p-2 bg-yellow-900/30 rounded slide-in">
+            <p class="text-sm text-yellow-400">🗳️ ${data.eliminated.name} lynched with ${data.voteCount} votes</p>
+          </div>
+        `;
+          container.insertAdjacentHTML("afterbegin", eventHTML);
+        }
+      }
+
+      function updateCostMetrics(data) {
+        document.getElementById("total-cost").textContent =
+          `$${(data.totalCost || 0).toFixed(6)}`;
+        document.getElementById("total-tokens").textContent = (
+          data.totalTokens || 0
+        ).toLocaleString();
+        document.getElementById("budget-used").textContent =
+          `${((data.budgetUsedPct || 0) * 100).toFixed(2)}%`;
+        document.getElementById("Remaining").textContent =
+          `$${(data.budgetRemaining || 10).toFixed(6)}`;
+        document.getElementById("budget-bar").style.width =
+          `${(data.budgetUsedPct || 0) * 100}%`;
+
+        // API calls estimate from turns or tokens
+        const apiCalls =
+          data.players?.reduce((sum, p) => sum + p.totalTurns, 0) || 0;
+        document.getElementById("api-calls").textContent = apiCalls;
+
+        // Color code budget bar
+        const budgetBar = document.getElementById("budget-bar");
+        if (data.budgetUsedPct >= 1) {
+          budgetBar.className = "h-2 rounded-full transition-all cost-stop";
+        } else if (data.budgetUsedPct >= 0.8) {
+          budgetBar.className = "h-2 rounded-full transition-all cost-warning";
+        }
+      }
+
+      function updatePlayers() {
+        const grid = document.getElementById("players-grid");
+        grid.innerHTML = players
+          .map(
+            ([id, player]) => `
+        <div class="bg-slate-800 rounded-lg p-3 ${!player.isAlive ? "opacity-50" : ""} ${player.isMafia ? "mafia" : "town"}">
+          <div class="text-2xl mb-1">${player.emoji || "👤"}</div>
+          <div class="font-semibold text-white text-sm truncate">${player.name}</div>
+          <div class="text-xs ${player.isMafia ? "role-mafia" : player.role === "VILLAGER" ? "role-town" : "role-special"}">
+            ${player.isMafia ? "🔴 " : ""}${player.role}
+          </div>
+          <div class="text-xs ${player.isAlive ? "text-green-400" : "text-red-400"}">
+            ${player.isAlive ? "✓ Alive" : "✗ Dead"}
+          </div>
+        </div>
+      `,
+          )
+          .join("");
+      }
+
+      function updateWinCondition(mafiaCount, townCount) {
+        document.getElementById("mafia-count").textContent = mafiaCount;
+        document.getElementById("town-count").textContent = townCount;
+      }
+
+      function showGameOver(data) {
+        const winnerEl = document.getElementById("winner");
+        winnerEl.textContent = `🎉 ${data.winner} WINS!`;
+        winnerEl.className = `text-lg font-bold text-center mt-4 ${data.winner === "Mafia" ? "text-red-400" : "text-blue-400"}`;
+        winnerEl.classList.remove("hidden");
+      }
+
+      function updateSuspectMeter(suspects) {
+        const container = document.getElementById("suspect-meter");
+        if (!suspects || suspects.length === 0) {
+          container.innerHTML =
+            '<p class="text-slate-500 text-center text-sm">No evidence yet...</p>';
+          return;
+        }
+
+        container.innerHTML = suspects
+          .map(
+            (s) => `
+        <div class="space-y-1">
+          <div class="flex justify-between text-sm">
+            <span class="text-white">${s.name}</span>
+            <span class="${s.score >= 70 ? "text-red-400" : s.score >= 40 ? "text-yellow-400" : "text-green-400"}">
+              ${s.score}% suspicious
+            </span>
+          </div>
+          <div class="w-full bg-slate-700 rounded-full h-1.5">
+            <div class="h-1.5 rounded-full transition-all ${s.score >= 70 ? "bg-red-500" : s.score >= 40 ? "bg-yellow-500" : "bg-green-500"}"
+                 style="width: ${s.score}%"></div>
+          </div>
+        </div>
+      `,
+          )
+          .join("");
+      }
+
+      function toggleTheme() {
+        document.body.classList.toggle("bg-white");
+        document.body.classList.toggle("text-slate-900");
+      }
+
+      // Start connection when page loads
+      window.addEventListener("DOMContentLoaded", () => {
+        connect();
+        updatePlayers();
+      });
+    </script>
+  </body>
+</html>

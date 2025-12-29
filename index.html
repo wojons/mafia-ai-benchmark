@@ -1,0 +1,84 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Mafia AI - Interactive Dashboard</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+      body {
+        background: linear-gradient(135deg, #0f172a 0%, #1e293b 100%);
+      }
+      .card {
+        background: rgba(30, 41, 59, 0.8);
+        backdrop-filter: blur(10px);
+        border: 1px solid rgba(51, 65, 85, 0.5);
+      }
+      .glow {
+        box-shadow: 0 0 40px rgba(59, 130, 246, 0.3);
+      }
+      @keyframes float {
+        0%,
+        100% {
+          transform: translateY(0);
+        }
+        50% {
+          transform: translateY(-10px);
+        }
+      }
+      .float {
+        animation: float 3s ease-in-out infinite;
+      }
+    </style>
+  </head>
+  <body class="min-h-screen flex items-center justify-center p-4">
+    <div class="card rounded-2xl p-8 max-w-2xl w-full glow">
+      <div class="text-center mb-8">
+        <h1 class="text-4xl font-bold text-white mb-2">🎭 Mafia AI</h1>
+        <p class="text-slate-400">
+          Multi-Agent AI-driven Social Deduction Game
+        </p>
+      </div>
+
+      <div class="grid grid-cols-1 md:grid-cols-2 gap-6 mb-8">
+        <a
+          href="/dashboard.html"
+          class="block p-6 bg-blue-600/20 hover:bg-blue-600/30 rounded-xl transition-all border border-blue-500/50 float"
+        >
+          <div class="text-4xl mb-4">📊</div>
+          <h2 class="text-xl font-bold text-white mb-2">Real-Time Dashboard</h2>
+          <p class="text-slate-400 text-sm">
+            Live game metrics, player tracking, cost monitoring & game feed
+          </p>
+        </a>
+
+        <a
+          href="/visualization.html"
+          class="block p-6 bg-purple-600/20 hover:bg-purple-600/30 rounded-xl transition-all border border-purple-500/50 float"
+          style="animation-delay: 0.5s"
+        >
+          <div class="text-4xl mb-4">🎨</div>
+          <h2 class="text-xl font-bold text-white mb-2">3D Visualization</h2>
+          <p class="text-slate-400 text-sm">
+            Interactive 3D world with character nodes & connections
+          </p>
+        </a>
+      </div>
+
+      <div class="bg-slate-800/50 rounded-lg p-4 text-sm text-slate-400">
+        <p class="font-semibold text-slate-300 mb-2">Features:</p>
+        <ul class="space-y-1">
+          <li>• Real-time WebSocket communication</li>
+          <li>• Cost tracking & budget enforcement</li>
+          <li>• Evidence & suspect meter visualization</li>
+          <li>• Multi-role support (Mafia + Special Roles)</li>
+          <li>• Dynamic AI persona generation</li>
+        </ul>
+      </div>
+
+      <div class="mt-6 text-center text-slate-500 text-xs">
+        <p>Mafia AI Benchmark • MIT License</p>
+      </div>
+    </div>
+  </body>
+</html>

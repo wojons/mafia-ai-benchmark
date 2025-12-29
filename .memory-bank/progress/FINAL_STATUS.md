@@ -1,60 +1,72 @@
 # 🎯 Mafia AI Benchmark - Summary & Fixes
 
-## ✅ CRITICAL BUG FIXED
+## ✅ EVIDENCE & CASE BUILDING SYSTEM - COMPLETE (Dec 29, 2025)
 
-### Issue: Information Leakage
+### What Was Implemented
 
-**Problem**: Doctor, Sheriff, and Vigilante could see the Mafia's kill target in their prompts, giving them unfair knowledge.
+#### Evidence System Components
 
-**Example of the bug**:
-```
-💉 Bob (DOCTOR):
-  🔒 THINK: Grace was targeted by the Mafia last night...
-  📢 SAYS:  "I will be protecting Grace..."
-  
-❌ This is WRONG! It's the FIRST night, the doctor shouldn't know!
-```
+1. **EvidenceRecord** - Single piece of observed evidence
+   - Tracks type (observation, deduction, suspicion, contradiction)
+   - Confidence score (0-100%) - how certain observer is
+   - Strength score (0-100%) - how impactful evidence should be
+   - Manipulable flag - can this evidence be faked?
+   - Suspicion delta - +/- adjustment to suspicion score
 
-**Root Cause**: 
-```javascript
-// WRONG - Doctor's prompt revealed mafia target
-previousPhaseData: `Mafia kill target: ${mafiaKillTarget?.name}`
-```
+2. **PlayerCaseFile** - All evidence about one player
+   - Auto-calculates suggested suspicion (75% confidence = 75 points)
+   - Suggests alignment (town/mafia/unknown) based on evidence
+   - Provides top N most suspicious evidence (prevents overload)
+   - Generates prompt summaries (disclaimer: agents can disagree!)
 
-### Solution Applied
+3. **EvidenceManager** - All evidence for one agent
+   - Personal biases (trustsLateVoters, skepticalOfRoleClaims, etc.)
+   - Auto-generates evidence from game events based on persona traits
+   - Gets most suspicious player (suggestion, not command)
+   - Generates comprehensive prompt summaries
 
-**For Doctor**:
-```javascript
-// CORRECT - Only public information
-previousPhaseData: `Previous night: ${deaths || 'No deaths'}`
-```
+4. **SuspectMeter** - Scoring algorithm with 10 configurable rules
+   - Voting patterns (late vote, vote switch, bandwagon, self-preservation)
+   - Behavioral analysis (aggression, consistency)
+   - Information-based (sheriff confirmation, doctor patterns)
+   - Meta factors (death, survival, early mafia votes)
 
-**For Sheriff**:
-```javascript
-// CORRECT - Only public information
-previousPhaseData: `Previous night: ${deaths}. Previous investigation: ${result}.`
-```
+### Evidence Philosophy (FUN & FLEXIBLE)
 
-**For Vigilante**:
-```javascript
-// CORRECT - Only public information  
-previousPhaseData: `Previous night: ${deaths}. Sheriff found ${target} is ${role}.`
-```
+**Key Design Principles**:
 
-**Result**: All special roles now make decisions WITHOUT knowing the Mafia's plans! ✅
+- ✅ **Evidence is SUGGESTION, not absolute truth** - agents can override
+- ✅ **Agents can RATIONALIZE suspicious behavior**
+- ✅ **Gaslighting IS supported** (manipulable flag on evidence)
+- ✅ **Evidence can be CHALLENGED and DEBATED**
+- ✅ **Personality affects what agents notice**
+- ✅ **Confidence varies** (60-90%, not 100%)
+
+**Prompt Summaries Include**:
+
+- ⚠️ "IMPORTANT: The evidence and suggestions below are HINTS, not absolute truth"
+- 💡 "You are free to: Dismiss weak evidence, Find contradictions, Provide alternative explanations"
+- 🧠 "Remember: Good liars can fool anyone. This is a GUIDE, not a RULEBOOK!"
+
+### Voting System Updated
+
+- ✅ Players can **ABSTAIN** from voting if unsure
+- ✅ Abstention triggers: "abstain", "not sure", "unsure", "skip" in SAY or THINK
+- ✅ Tie handling with insufficient votes
+- ✅ Role instructions updated to mention abstention option
 
 ---
 
-## 📁 Script Organization
+## ✅ CRITICAL BUG FIXED
 
 ### ✅ USE THESE:
 
-| Script | Purpose | Status |
-|--------|---------|--------|
+| Script                             | Purpose          | Status         |
+| ---------------------------------- | ---------------- | -------------- |
 | **`demo-game-correct-flow-v2.js`** | Main game engine | ✅ MAIN SCRIPT |
-| `./mafia.sh` | CLI wrapper | ✅ Use this |
-| `game-manager.js` | Save/load system | ✅ Working |
-| `saved-games/` | Game storage | ✅ Active |
+| `./mafia.sh`                       | CLI wrapper      | ✅ Use this    |
+| `game-manager.js`                  | Save/load system | ✅ Working     |
+| `saved-games/`                     | Game storage     | ✅ Active      |
 
 ### ❌ OLD/LEGACY (can be removed):
 
@@ -96,13 +108,13 @@ node demo-game-correct-flow-v2.js
 
 ## 📖 Documentation
 
-| Document | Purpose |
-|----------|---------|
-| `README.md` | Main documentation |
-| `QUICK_REFERENCE.md` | Command cheat sheet |
-| `GAME_MANAGEMENT.md` | Detailed management guide |
-| `ARCHITECTURE.md` | System design & flow |
-| `IMPLEMENTATION_STATUS.md` | Current status |
+| Document                   | Purpose                   |
+| -------------------------- | ------------------------- |
+| `README.md`                | Main documentation        |
+| `QUICK_REFERENCE.md`       | Command cheat sheet       |
+| `GAME_MANAGEMENT.md`       | Detailed management guide |
+| `ARCHITECTURE.md`          | System design & flow      |
+| `IMPLEMENTATION_STATUS.md` | Current status            |
 
 ---
 
@@ -128,13 +140,13 @@ node demo-game-correct-flow-v2.js
 
 ### What Each Role Knows
 
-| Role | Knows Mafia's Target? | Can See Private Chat? | Info Level |
-|------|----------------------|----------------------|------------|
-| Mafia | ❌ No | ✅ Yes (own team) | Private |
-| Doctor | ❌ No (FIXED!) | ❌ No | Limited |
-| Sheriff | ❌ No (FIXED!) | ❌ No | Limited |
-| Vigilante | ❌ No (FIXED!) | ❌ No | Limited |
-| Villager | ❌ No | ❌ No | Public only |
+| Role      | Knows Mafia's Target? | Can See Private Chat? | Info Level  |
+| --------- | --------------------- | --------------------- | ----------- |
+| Mafia     | ❌ No                 | ✅ Yes (own team)     | Private     |
+| Doctor    | ❌ No (FIXED!)        | ❌ No                 | Limited     |
+| Sheriff   | ❌ No (FIXED!)        | ❌ No                 | Limited     |
+| Vigilante | ❌ No (FIXED!)        | ❌ No                 | Limited     |
+| Villager  | ❌ No                 | ❌ No                 | Public only |
 
 ---
 
@@ -189,6 +201,7 @@ node run-scenario.js edge-case         # Edge case test
 ### For Players
 
 1. **Run a game**:
+
    ```bash
    node demo-game-correct-flow-v2.js
    ```
@@ -223,13 +236,13 @@ node run-scenario.js edge-case         # Edge case test
 
 ## 🐛 Issues Fixed
 
-| Issue | Status | Fix |
-|-------|--------|-----|
-| Information leakage to Doctor | ✅ Fixed | Removed mafia target from prompt |
-| Information leakage to Sheriff | ✅ Fixed | Removed mafia target from prompt |
-| Information leakage to Vigilante | ✅ Fixed | Removed mafia target from prompt |
-| Variable scope (mafiaKillTarget) | ✅ Fixed | Declared at class level |
-| Too many demo scripts | ⚠️  Identified | Use v2 only |
+| Issue                            | Status        | Fix                              |
+| -------------------------------- | ------------- | -------------------------------- |
+| Information leakage to Doctor    | ✅ Fixed      | Removed mafia target from prompt |
+| Information leakage to Sheriff   | ✅ Fixed      | Removed mafia target from prompt |
+| Information leakage to Vigilante | ✅ Fixed      | Removed mafia target from prompt |
+| Variable scope (mafiaKillTarget) | ✅ Fixed      | Declared at class level          |
+| Too many demo scripts            | ⚠️ Identified | Use v2 only                      |
 
 ---
 
@@ -244,7 +257,7 @@ node run-scenario.js edge-case         # Edge case test
 ✅ Split-pane consciousness (THINK vs SAYS)  
 ✅ Multiple AI agents coordinating  
 ✅ Random role assignment  
-✅ Win condition detection  
+✅ Win condition detection
 
 ---
 
@@ -262,5 +275,5 @@ node run-scenario.js edge-case         # Edge case test
 
 ---
 
-*Last Updated: December 28, 2025*
-*Status: ✅ PRODUCTION READY*
+_Last Updated: December 28, 2025_
+_Status: ✅ PRODUCTION READY_
