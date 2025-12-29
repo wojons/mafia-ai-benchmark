@@ -35,8 +35,23 @@ const { getRandomName, resetUsedNames } = require("./name-database");
 
 // ============================================
 // GAME ENGINE MODULES (REFACTORED)
-// (Not importing yet - keeping original functions in game-engine.js for compatibility)
 // ============================================
+
+const {
+  calculateRoles,
+  assignRolesWithMultiRole,
+  playerHasRole,
+  getPlayerRoles,
+  formatPlayerRoles,
+  hasRoleConflict,
+  resolveSheriffMafiaConflict,
+  resolveDoctorMafiaConflict,
+  calculateMafiaDoctorSavePattern,
+  shouldMafiaDoctorSaveTeammate,
+  isMafiaTeammate,
+  resolveVigilanteMafiaConflict,
+  getMultiRolePromptContext,
+} = require("./game-engine/index");
 
 // ============================================
 // ENHANCED PERSONA GENERATION SYSTEM
@@ -1226,44 +1241,15 @@ class MafiaGame {
   }
 
   calculateRoles(numPlayers) {
-    // Validate minimum players
-    if (numPlayers < 5) {
-      throw new Error("Minimum 5 players required");
-    }
-
-    const roles = [];
-
-    // Always include 1 mafia, 1 doctor, 1 sheriff
-    const specialRoles = ["MAFIA", "DOCTOR", "SHERIFF"];
-    roles.push(...specialRoles);
-
-    // Add vigilante only if we have 6+ players
-    if (numPlayers >= 6) {
-      roles.push("VIGILANTE");
-    }
-
-    // Add more mafia for larger games (roughly 1 mafia per 4 players)
-    const totalMafia = Math.floor(numPlayers / 4);
-    while (
-      roles.filter((r) =>
-        Array.isArray(r) ? r.includes("MAFIA") : r === "MAFIA",
-      ).length < totalMafia
-    ) {
-      roles.push("MAFIA");
-    }
-
-    // Fill remaining with villagers
-    while (roles.length < numPlayers) {
-      roles.push("VILLAGER");
-    }
+    // Call the imported calculateRoles function
+    const baseRoles = calculateRoles(numPlayers);
 
     // MULTI-ROLE MODE: Merge some roles into single players
     if (this.config.allowMultiRole) {
-      return this.assignRolesWithMultiRole(roles, numPlayers);
+      return this.assignRolesWithMultiRole(baseRoles, numPlayers);
     }
 
-    // Shuffle for random assignment (single role mode)
-    return roles.sort(() => Math.random() - 0.5);
+    return baseRoles;
   }
 
   /**
@@ -1271,151 +1257,35 @@ class MafiaGame {
    * Creates dramatic "inside man" scenarios
    */
   assignRolesWithMultiRole(roles, numPlayers) {
-    const result = [];
-
-    // Extract special roles for potential merging
-    const mafiaPositions = [];
-    const specialRolePositions = [];
-
-    // Track positions of mafia and special roles
-    for (let i = 0; i < roles.length; i++) {
-      const role = roles[i];
-      if (role === "MAFIA") {
-        mafiaPositions.push(i);
-      } else if (role !== "VILLAGER") {
-        specialRolePositions.push({ i, role });
-      }
-    }
-
-    // Multi-role combinations (randomly selected combinations)
-    const combinations = [];
-
-    // Try to create 1-2 multi-role players (not too many to keep game playable)
-    const numMultiRoles = Math.min(2, Math.floor(numPlayers / 4));
-
-    for (let attempt = 0; attempt < numMultiRoles * 2; attempt++) {
-      if (combinations.length >= numMultiRoles) break;
-
-      // Pick a random mafia to potentially add a second role to
-      if (mafiaPositions.length > 0 && specialRolePositions.length > 0) {
-        const mafiaIdx = Math.floor(Math.random() * mafiaPositions.length);
-        const specialIdx = Math.floor(
-          Math.random() * specialRolePositions.length,
-        );
-
-        const mafiaPosIndex = mafiaPositions[mafiaIdx];
-        const specialData = specialRolePositions[specialIdx];
-
-        // Anti-stacking: Don't let all mafia have same special role
-        // and ensure variety in combinations
-        const role1 = "MAFIA";
-        const role2 = specialData.role;
-
-        // Check if this combination is interesting and not already used
-        const existing = combinations.find(
-          (c) => c.includes(role1) && c.includes(role2),
-        );
-        if (existing) continue;
-
-        // Add this combination
-        combinations.push([role1, role2]);
-
-        // Mark these roles as used
-        mafiaPositions.splice(mafiaIdx, 1);
-        specialRolePositions.splice(specialIdx, 1);
-      }
-    }
-
-    // Build the final role list
-    const roleQueue = [...roles];
-    const combinationQueue = [...combinations];
-
-    for (let i = 0; i < numPlayers; i++) {
-      // If we have a multi-role combination pending, use it
-      if (combinationQueue.length > 0) {
-        result.push(combinationQueue.shift());
-        continue;
-      }
-
-      // Otherwise, pull next role from queue (which may be depleted after removing combined roles)
-      if (roleQueue.length > 0) {
-        // Pick a random role (not removing first, to maintain randomness)
-        const randomIdx = Math.floor(Math.random() * roleQueue.length);
-        const role = roleQueue.splice(randomIdx, 1)[0];
-        result.push(role);
-      } else {
-        // Fallback: villager
-        result.push("VILLAGER");
-      }
-    }
-
-    // Pad with villagers if still missing roles
-    while (result.length < numPlayers) {
-      result.push("VILLAGER");
-    }
-
-    return result;
+    return assignRolesWithMultiRole(roles, numPlayers);
   }
 
   /**
    * Check if a player has a specific role (handles multi-role arrays)
    */
   playerHasRole(player, roleToCheck) {
-    const playerRoles = Array.isArray(player.roles)
-      ? player.roles
-      : [player.role];
-
-    return playerRoles.some((role) => role === roleToCheck);
+    return playerHasRole(player, roleToCheck);
   }
 
   /**
    * Get all roles for a player (handles both single and multi-role)
    */
   getPlayerRoles(player) {
-    return Array.isArray(player.roles) ? player.roles : [player.role];
+    return getPlayerRoles(player);
   }
 
   /**
    * Format role list for display (handles multi-role)
    */
   formatPlayerRoles(player) {
-    const roles = this.getPlayerRoles(player);
-
-    if (roles.length === 1) {
-      return roles[0];
-    }
-
-    // Multi-role: prioritize mafia if present (keep secret!)
-    // But internally we know the truth
-    return roles.join(" + ");
+    return formatPlayerRoles(player);
   }
 
   /**
    * Check if player has conflicting roles (for conflict resolution)
    */
   hasRoleConflict(player) {
-    const roles = this.getPlayerRoles(player);
-
-    // Possible conflicts
-    const conflicts = [];
-
-    if (roles.includes("SHERIFF") && roles.includes("MAFIA")) {
-      conflicts.push("SHERIFF_MAFIA");
-    }
-
-    if (roles.includes("DOCTOR") && roles.includes("MAFIA")) {
-      conflicts.push("DOCTOR_MAFIA");
-    }
-
-    if (roles.includes("VIGILANTE") && roles.includes("MAFIA")) {
-      conflicts.push("VIGILANTE_MAFIA");
-    }
-
-    if (roles.includes("SHERIFF") && roles.includes("DOCTOR")) {
-      conflicts.push("SHERIFF_DOCTOR");
-    }
-
-    return conflicts;
+    return hasRoleConflict(player);
   }
 
   // ==========================================
@@ -1431,30 +1301,11 @@ class MafiaGame {
     investigationResult,
     investigatedPlayer,
   ) {
-    const result = investigationResult; // e.g., "MAFIA", "VILLAGER", "DOCTOR", etc.
-
-    // Private THINK (split-pane): Honest analysis
-    const privateThought =
-      `As Sheriff, I investigated ${investigatedPlayer.name} and found they are ${result}.\n` +
-      `As a Mafia member myself, I must balance the truth with protecting my mafia identity.\n` +
-      `If result is MAFIA: I know this teammate's identity. Should I hint or stay silent?\n` +
-      `If result is TOWN: Safe to report truthfully - no threat to mafia team.\n` +
-      `Key strategy: Report truth to town to build trust, hide my mafia role from public.`;
-
-    // Public SAYS: Truthful statement (trustworthiness is key for mole)
-    const publicStatement = `I investigated ${investigatedPlayer.name}. They are ${result}.`;
-
-    // Mafia team info (share in private chat)
-    const mafiaTeamInfo =
-      `MAFIA PRIVATE REPORT: Sheriff investigated ${investigatedPlayer.name}, result: ${result}. ` +
-      `My assessment: ${result === "MAFIA" ? "This is our teammate!" : result === "VILLAGER" ? "This is a townie we can safely eliminate." : result === "DOCTOR" ? "This is the doctor - high priority target." : "This is a special role, investigate further."}`;
-
-    return {
-      privateThought,
-      publicStatement,
-      mafiaTeamInfo,
-      roleConflict: "SHERIFF_MAFIA",
-    };
+    return resolveSheriffMafiaConflict(
+      sheriff,
+      investigationResult,
+      investigatedPlayer,
+    );
   }
 
   /**
@@ -1462,63 +1313,7 @@ class MafiaGame {
    * Doctor decides whether to protect mafia teammates or let them die
    */
   resolveDoctorMafiaConflict(doctor, targetPlayer, round) {
-    const isTeammate =
-      doctor.id === targetPlayer.id ||
-      this.isMafiaTeammate(doctor, targetPlayer);
-
-    // Decision logic
-    let decision = {
-      willProtect: false,
-      reason: "",
-      privateThought: "",
-      publicStatement: "",
-    };
-
-    if (isTeammate) {
-      // This is a mafia teammate
-      const saveFrequency = this.calculateMafiaDoctorSavePattern(round);
-
-      if (this.shouldMafiaDoctorSaveTeammate(saveFrequency)) {
-        // Save teammate (strategic: save when it looks natural)
-        decision.willProtect = true;
-        decision.reason = "Saving mafia teammate";
-        decision.privateThought =
-          `Target ${targetPlayer.name} is my mafia teammate.\n` +
-          `Saving them might reveal my doctor role, but letting them die is worse for mafia.\n` +
-          `Decision: PROTECT. Will try to make it look strategic (protecting key player).`;
-        decision.publicStatement = `I'll protect ${targetPlayer.name} tonight.`;
-      } else {
-        // Let teammate die (pattern variation: too many saves = suspicious)
-        decision.willProtect = false;
-        decision.reason = "Letting teammate die for realism";
-        decision.privateThought =
-          `Target ${targetPlayer.name} is my mafia teammate.\n` +
-          `But I've been saving too often - need to let someone die to avoid suspicion.\n` +
-          `Mafia vote may target them anyway. If I save, doctor role becomes obvious.\n` +
-          `Decision: DO NOT PROTECT. Sorry teammate, for the greater good of the mafia.`;
-        decision.publicStatement = `I'll be protecting someone tonight.`; // Ambiguous
-      }
-    } else {
-      // Not a teammate - standard doctor logic
-      const protectionPriority =
-        this.calculateDoctorProtectionPriority(targetPlayer);
-
-      decision.willProtect = protectionPriority > 50;
-      decision.reason = `Priority: ${protectionPriority}`;
-      decision.privateThought =
-        `${targetPlayer.name} is not mafia.\n` +
-        `Standard doctor assessment: Priority ${protectionPriority}.\n` +
-        `If I save them, I look like a helpful doctor. But need to vary my targets.\n` +
-        `Last round I protected: ${this.lastDoctorProtection}`;
-      decision.publicStatement = decision.willProtect
-        ? `I'll protect ${targetPlayer.name} tonight.`
-        : `I'll be protecting someone tonight.`;
-    }
-
-    return {
-      ...decision,
-      roleConflict: "DOCTOR_MAFIA",
-    };
+    return resolveDoctorMafiaConflict(doctor, targetPlayer, round);
   }
 
   /**
@@ -1526,26 +1321,21 @@ class MafiaGame {
    * (Pattern: 60-80% save rate to avoid being too obvious)
    */
   calculateMafiaDoctorSavePattern(round) {
-    // Early game: save more (build doctor credibility)
-    // Late game: save less (less suspicious to fail)
-
-    if (round <= 2) return 0.8; // 80% save rate early
-    if (round <= 4) return 0.7; // 70% save rate mid
-    return 0.6; // 60% save rate late
+    return calculateMafiaDoctorSavePattern(round);
   }
 
   /**
    * Should mafia doctor save teammate this round?
    */
   shouldMafiaDoctorSaveTeammate(saveFrequency) {
-    return Math.random() < saveFrequency;
+    return shouldMafiaDoctorSaveTeammate(saveFrequency);
   }
 
   /**
    * Check if two players are on the same mafia team
    */
   isMafiaTeammate(player1, player2) {
-    return player1.id !== player2.id && player1.isMafia && player2.isMafia;
+    return isMafiaTeammate(player1, player2);
   }
 
   /**
@@ -1553,57 +1343,12 @@ class MafiaGame {
    * Vigilante must avoid shooting mafia teammates
    */
   resolveVigilanteMafiaConflict(vigilante, potentialTarget, confidence, round) {
-    const isTeammate = this.isMafiaTeammate(vigilante, potentialTarget);
-
-    const conflict = {
-      shouldShoot: false,
-      riskScore: 0,
-      privateThought: "",
-      publicStatement: "",
-    };
-
-    if (isTeammate) {
-      // This is a mafia teammate - do NOT shoot!
-      conflict.shouldShoot = false;
-      conflict.riskScore = 0; // Risk isn't the issue, it's traitorous
-      conflict.privateThought =
-        `Wait, ${potentialTarget.name} is my mafia teammate!\n\n` +
-        `I cannot shoot them - that would betray my mafia team.\n` +
-        `I need to either:\n` +
-        `  - Hold my fire\n` +
-        `  - Shoot a town player instead\n` +
-        `  - Pretend to "protect" mafia by not shooting\n\n` +
-        `My vigilante shot is precious - only one shot. I'll wait for a better target.`;
-      conflict.publicStatement = "I'm still deciding whether to use my shot.";
-    } else {
-      // Not a teammate - standard vigilante logic applies
-      // but I'm mafia, so I want to help mafia, not town
-
-      conflict.privateThought =
-        `${potentialTarget.name} is not mafia (I think). Confidence: ${confidence}%.\n\n` +
-        `As a vigilante who is also mafia, I need to consider:\n` +
-        `  - If I shoot town, I help mafia team\n` +
-        `  - But if I shoot wrong, I waste my only shot\n` +
-        `  - And I need to avoid looking suspicious myself\n\n` +
-        `Confidence ${confidence}% is ${confidence > 70 ? "high enough to shoot" : "too low, I need to be sure."}`;
-
-      if (confidence > 70) {
-        conflict.shouldShoot = true;
-        conflict.riskScore = 100 - confidence;
-        conflict.publicStatement = `I'm considering my shot. ${potentialTarget.name} is showing suspicious behavior.`;
-      } else {
-        conflict.shouldShoot = false;
-        conflict.privateThought +=
-          "\n\nI'll hold my fire for now. Too risky without better evidence.";
-        conflict.publicStatement =
-          "I'm still evaluating the situation before I commit to a shot.";
-      }
-    }
-
-    return {
-      ...conflict,
-      roleConflict: "VIGILANTE_MAFIA",
-    };
+    return resolveVigilanteMafiaConflict(
+      vigilante,
+      potentialTarget,
+      confidence,
+      round,
+    );
   }
 
   /**
@@ -1611,67 +1356,7 @@ class MafiaGame {
    * Returns additional prompt text explaining role conflicts
    */
   getMultiRolePromptContext(player) {
-    const conflicts = this.hasRoleConflict(player);
-
-    if (conflicts.length === 0) {
-      return "";
-    }
-
-    let context = "\n## ⚠️ MULTI-ROLE CONFLICT\n\n";
-    context += "You have multiple roles that create strategic challenges:\n\n";
-
-    for (const conflict of conflicts) {
-      const allRoles = this.getPlayerRoles(player);
-
-      switch (conflict) {
-        case "SHERIFF_MAFIA":
-          context += "🎭 SHERIFF + MAFIA (The Perfect Mole)\n";
-          context += "  • You are the town's trusted sheriff\n";
-          context += "  • But you secretly serve the mafia\n";
-          context +=
-            "  • Public SAYS: Report investigation findings truthfully (builds trust)\n";
-          context += "  • Private THINK: Honest analysis of both roles\n";
-          context +=
-            "  • Mafia team info: Share your findings in mafia private chat\n";
-          context +=
-            "  • Goal: Use sheriff authority to misdirect town while protecting mafia teammates\n\n";
-          break;
-
-        case "DOCTOR_MAFIA":
-          context += "🎭 DOCTOR + MAFIA (The Unexplained Save)\n";
-          context += "  • You can protect any player each night\n";
-          context +=
-            "  • But if you save mafia teammates too much, doctor role is exposed\n";
-          context += "  • Let them die sometimes to avoid suspicion\n";
-          context +=
-            "  • Goal: Balance protecting mafia vs. looking like a helpful town doctor\n\n";
-          break;
-
-        case "VIGILANTE_MAFIA":
-          context += "🎭 VIGILANTE + MAFIA (Conflicted Assassin)\n";
-          context += "  • You have ONE shot to eliminate someone\n";
-          context += "  • Shooting mafia teammates = betrayal\n";
-          context +=
-            "  • Shooting town = helps mafia (but reveals your identity to mafia team later)\n";
-          context +=
-            "  • Goal: Avoid friendly fire, shoot high-value town targets\n\n";
-          break;
-
-        case "SHERIFF_DOCTOR":
-          context += "🎭 SHERIFF + DOCTOR (Powerful Town Duo)\n";
-          context += "  • You can investigate AND protect\n";
-          context += "  • Can self-protect if needed (as doctor)\n";
-          context += "  • Sheriff info guides doctor decisions\n";
-          context +=
-            "  • Goal: Use both abilities strategically to protect town\n\n";
-          break;
-      }
-    }
-
-    context +=
-      "Remember: You must maintain your public persona for each role while secretly managing your alliance.\n";
-
-    return context;
+    return getMultiRolePromptContext(player);
   }
 
   async startGame(numPlayers = 5, personaSeeds = null) {

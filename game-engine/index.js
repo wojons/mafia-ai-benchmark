@@ -17,6 +17,23 @@ const {
 // Events and prompts
 const { createGameEvent, createPrompt } = require("./events");
 
+// Role management and conflicts
+const {
+  calculateRoles,
+  assignRolesWithMultiRole,
+  playerHasRole,
+  getPlayerRoles,
+  formatPlayerRoles,
+  hasRoleConflict,
+  resolveSheriffMafiaConflict,
+  resolveDoctorMafiaConflict,
+  calculateMafiaDoctorSavePattern,
+  shouldMafiaDoctorSaveTeammate,
+  isMafiaTeammate,
+  resolveVigilanteMafiaConflict,
+  getMultiRolePromptContext,
+} = require("./roles");
+
 // Database helper
 async function getGameDatabase() {
   if (!gameDatabase) {
@@ -51,6 +68,21 @@ module.exports = {
   // Events
   createGameEvent,
   createPrompt,
+
+  // Roles
+  calculateRoles,
+  assignRolesWithMultiRole,
+  playerHasRole,
+  getPlayerRoles,
+  formatPlayerRoles,
+  hasRoleConflict,
+  resolveSheriffMafiaConflict,
+  resolveDoctorMafiaConflict,
+  calculateMafiaDoctorSavePattern,
+  shouldMafiaDoctorSaveTeammate,
+  isMafiaTeammate,
+  resolveVigilanteMafiaConflict,
+  getMultiRolePromptContext,
 
   // Database
   getGameDatabase,
