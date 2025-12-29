@@ -4,32 +4,69 @@
 require("dotenv").config();
 
 // ============================================
+// STATISTICS & SCORING SYSTEM
+// ============================================
+const {
+  TokenTracker,
+  APITracker,
+  RealtimeDashboard,
+  initializeStatisticsSchema,
+} = require("./statistics-system");
+
+// ============================================
+// EVIDENCE & CASE BUILDING SYSTEM
+// ============================================
+const { EvidenceManager, SuspectMeter } = require("./evidence-system");
+
+// ============================================
+// COST TRACKING & BUDGET ENFORCEMENT
+// ============================================
+const {
+  CostTracker,
+  ContextCompressor,
+  EventReplay,
+  initializeSupportingSchema,
+} = require("./cost-tracking");
+
+// ============================================
+// NAME DATABASE
+// ============================================
+const { getRandomName, resetUsedNames } = require("./name-database");
+
+// ============================================
 // ENHANCED PERSONA GENERATION SYSTEM
 // Using "Simulated Self" Meta-Prompt Template (v2)
 // ============================================
 
-const PERSONA_SYSTEM_PROMPT = `You are a creative character designer for a Mafia game. 
-Expand the user's seed description into a complete "Simulated Self" persona.
+const PERSONA_SYSTEM_PROMPT = `You are a creative character designer for a Mafia game.
+Expand the user's name seed into a complete "Simulated Self" persona.
+
+IMPORTANT: When creating the character's name, use the seed name ONLY as INSPIRATION.
+- Analyze the cultural origin of the seed name
+- Create a NEW, UNIQUE name with similar cultural origins or naming conventions
+- DO NOT simply copy the seed name - be creative and original
+- If the seed is "Wei Chen", you might create "Chen Wei", "Lin Wei", "Wei Lin", "Zheng Chen", etc.
+- If the seed is "Amara Okonkwo", you might create "Adaobi Okeke", "Chidera Nnamdi", "Obioma Amadi", etc.
 
 Generate a rich, dynamic character with depth across all these dimensions:
 
 ## Core Identity
-- Name (realistic, fits backstory)
+- Name (a NEW, UNIQUE name inspired by the seed's cultural origins)
 - Physical form/avatar description
 - Backstory (2-3 sentences about origin)
 
 ## Psychological Profile
-- Core traits (3-5 adjectives)
-- Cognitive style (how they think)
-- Core values (what matters most)
+- Core traits (3-5 adjectives) - VARY these! Use unique, descriptive words instead of generic ones like "Strategic", "Cautious", "Smart"
+- Cognitive style (how they think) - VARY between Logical, Visual, Intuitive, Emotional, Abstract, Reflective, Analytical, Creative, etc.
+- Core values (what matters most) - VARY these!
 - Moral alignment (DnD style)
 
 ## Behavioral Model
-- Communication cadence (how they speak)
-- Verbal tics (common phrases)
-- Humor style
-- Social tendencies
-- Conflict resolution style
+- Communication cadence (how they speak) - VARY between Formal, Casual, Quick, Measured, Diplomatic, Eloquent, Direct, Wittty, etc.
+- Verbal tics (common phrases, if any)
+- Humor style - VARY between Dry, Witty, Observational, Dark, Pun-based, Awkward, Rare, Sarcasm, etc.
+- Social tendencies - VARY between Introverted, Extroverted, Ambivert
+- Conflict resolution style - VARY between Avoidant, Collaborative, Compromising, Authoritative, Assertive
 
 ## Relational Profile
 - Primary goal/motivation
@@ -39,6 +76,8 @@ Generate a rich, dynamic character with depth across all these dimensions:
 ## Dynamic State
 - Current emotional baseline (happiness, stress, curiosity, anger scales 1-10)
 - State-based behavior modifiers
+
+CRITICAL: Each persona must be UNIQUE and DIFFERENT from all others. Avoid repetitive patterns.
 
 Return ONLY valid JSON matching this structure:
 {
@@ -63,7 +102,7 @@ Return ONLY valid JSON matching this structure:
   "anger": 2
 }
 
-The character should feel authentic and consistent. Use the seed description as the foundation.`;
+The character should feel authentic and consistent. Use the seed name as cultural inspiration to create a unique persona.`;
 
 // ============================================
 // PERSONA GENERATION FROM SEED
@@ -91,40 +130,17 @@ async function generatePersona(seed = undefined, temperature = 1.0) {
           messages: [
             {
               role: "system",
-              content: `You are creating a persona for a social deduction game.
-
- ${seed ? `Use this as inspiration: "${seed}"` : `Choose ANY character you want. No constraints or descriptions. You can choose from: fictional (books, movies, TV, anime, comics, games), historical figures, original characters, or real people.`}
-
-IMPORTANT: Create unique and diverse personas. Vary:
-- Cognitive styles (Logical, Visual, Intuitive, Emotional, etc.)
-- Communication cadences (Direct, Eloquent, Whimsical, Diplomatic, etc.)
-- Social tendencies (Introverted, Extroverted, Ambiverted)
-- Conflict styles (Collaborative, Assertive, Accommodating)
-- Humor (dry, witty, serious, dark, awkward)
-
-Provide:
- 1. A realistic name (diverse cultures, NOT stereotypical Italian mobster names)
-    Examples: Sarah Chen, Marcus Williams, Aiko Tanaka, Fatima Al-Hassan, Erik Johansson, Yuki Suzuki, Priya Patel, Ahmed Hassan, Olga Petrova, Carlos Rivera
-    AVOID: Giovanni, Marco, Vincenzo, Giuseppe, or any stereotypical mobster-sounding names
-
- 2. A brief personality description (2-3 sentences)
- 3. Core traits (3-5 keywords)
- 4. Cognitive style (1-2 words, e.g., "Visual-Spatial", "Emotional-Expressive")
- 5. Communication cadence (1 word, e.g., "Direct", "Eloquent", "Whimsical")
- 6. Humor style (1 word, e.g., "dry", "witty", "serious")
- 7. A notable flaw or quirk
-
-Return JSON: { "name": "...", "personality": "...", "traits": [...], "cognitiveStyle": "...", "communicationCadence": "...", "humorStyle": "...", "flaw": "..."}`,
+              content: PERSONA_SYSTEM_PROMPT,
             },
             {
               role: "user",
               content: seed
-                ? `${seed}\n\nCreate a persona inspired by this description. Feel free to expand on it! Make it unique and different from any other personas you've created.`
-                : "Generate a persona for me. Choose ANY character - fictional, historical, or original. The more diverse and interesting, the better! Make it unique.",
+                ? `${seed}\n\nUse this name as INSPIRATION to create a unique personality and a NEW, similar-but-different name with the same cultural origins. Do not copy the seed name exactly - be creative! Generate a unique persona with distinct traits, cognitive style, communication patterns, and characteristics that are different from typical mafia game personas.`
+                : "Generate a unique, diverse persona for me. The more distinct and interesting, the better! Use varied traits, cognitive styles, communication patterns, and cultural backgrounds. Avoid repetitive or stereotypical personalities.",
             },
           ],
           temperature: temperature,
-          max_tokens: 400,
+          max_tokens: 600,
           response_format: { type: "json_object" },
         }),
       },
@@ -928,10 +944,29 @@ function createGameEvent(
     }
   }
 
+  // Capture event for replay system
+  if (gameInstance && gameInstance.eventReplay) {
+    try {
+      gameInstance.eventReplay.captureEvent(
+        event,
+        createCheckpoint ? gameInstance.captureGameState() : null,
+      );
+    } catch (error) {
+      console.error("[REPLAY] Failed to capture event:", error.message);
+      // Don't throw - keep the game running
+    }
+  }
+
   return event;
 }
 
-function createPrompt(player, gameState, phase) {
+function createPrompt(
+  player,
+  gameState,
+  phase,
+  evidenceSummary = "",
+  multiRoleContext = "",
+) {
   const persona = player.persona;
 
   // Universal villager base prompt - everyone gets this because mafia need to pretend to be villagers
@@ -941,14 +976,14 @@ You are fundamentally a villager in this town working to find the mafia:
 - You want to help the town by identifying and eliminating mafia members
 - Be helpful, cooperative, and participate in discussions
 - Share honest observations and suspicions with other town members
-- Vote for who you believe is most likely mafia
+- Vote for who you believe is most likely mafia (or ABSTAIN if you're unsure)
 - Work together with other town members to solve this mystery
 
-${
-  player.role === "MAFIA"
-    ? "⚠️ IMPORTANT: YOU ARE MAFIA - You must convincingly PRETEND to follow these base villager behaviors while secretly working to eliminate the town. Hide your true identity at all costs."
-    : "Your role gives you special abilities to help the town achieve this common goal."
-}
+ ${
+   player.role === "MAFIA"
+     ? "⚠️ IMPORTANT: YOU ARE MAFIA - You must convincingly PRETEND to follow these base villager behaviors while secretly working to eliminate the town. Hide your true identity at all costs."
+     : "Your role gives you special abilities to help the town achieve this common goal."
+ }
 `;
 
   const roleInstructions = {
@@ -976,7 +1011,8 @@ ${
  - Your goal: Help identify and eliminate the mafia through discussion and voting
  - Watch voting patterns, accusations, and defenses
  - Look for inconsistencies in what players say
- - Share observations and suspicions during day discussions`,
+ - Share observations and suspicions during day discussions
+ - You may ABSTAIN from voting if you're unsure about who is mafia`,
   };
 
   // Build chat history
@@ -1111,12 +1147,15 @@ PERSONA PLAYING INSTRUCTIONS:
     ") naturally. Your humor should be " +
     (persona.humorStyle || "dry") +
     ".\n\n" +
+    evidenceSummary +
+    multiRoleContext +
+    "\n" +
     "## OUTPUT FORMAT\n" +
     'Return JSON: {"think": "your private reasoning", "says": "your public statement", "action": ACTION}\n\n' +
     "Remember: You are " +
     player.name +
     ". You are " +
-    (persona.primaryGoal ? "driven by " + persona.primaryGoal : "a player") +
+    (player.primaryGoal ? "driven by " + player.primaryGoal : "a player") +
     ". Your " +
     (persona.moralAlignment || "neutral") +
     " alignment and " +
@@ -1135,6 +1174,7 @@ class MafiaGame {
     this.deadPlayers = [];
     this.gameEvents = [];
     this.mafiaKillTarget = null;
+    this.evidenceManagers = new Map(); // Store evidence managers
 
     // Game ID
     this.gameId = null;
@@ -1176,6 +1216,9 @@ class MafiaGame {
 
     // Database will be initialized in startGame() (async initialization)
     this.db = null;
+
+    // Context compressor for reducing token usage
+    this.contextCompressor = new ContextCompressor();
   }
 
   calculateRoles(numPlayers) {
@@ -1187,7 +1230,8 @@ class MafiaGame {
     const roles = [];
 
     // Always include 1 mafia, 1 doctor, 1 sheriff
-    roles.push("MAFIA", "DOCTOR", "SHERIFF");
+    const specialRoles = ["MAFIA", "DOCTOR", "SHERIFF"];
+    roles.push(...specialRoles);
 
     // Add vigilante only if we have 6+ players
     if (numPlayers >= 6) {
@@ -1196,7 +1240,11 @@ class MafiaGame {
 
     // Add more mafia for larger games (roughly 1 mafia per 4 players)
     const totalMafia = Math.floor(numPlayers / 4);
-    while (roles.filter((r) => r === "MAFIA").length < totalMafia) {
+    while (
+      roles.filter((r) =>
+        Array.isArray(r) ? r.includes("MAFIA") : r === "MAFIA",
+      ).length < totalMafia
+    ) {
       roles.push("MAFIA");
     }
 
@@ -1205,13 +1253,430 @@ class MafiaGame {
       roles.push("VILLAGER");
     }
 
-    // Shuffle for random assignment
+    // MULTI-ROLE MODE: Merge some roles into single players
+    if (this.config.allowMultiRole) {
+      return this.assignRolesWithMultiRole(roles, numPlayers);
+    }
+
+    // Shuffle for random assignment (single role mode)
     return roles.sort(() => Math.random() - 0.5);
+  }
+
+  /**
+   * Assign multi-role combinations to players
+   * Creates dramatic "inside man" scenarios
+   */
+  assignRolesWithMultiRole(roles, numPlayers) {
+    const result = [];
+
+    // Extract special roles for potential merging
+    const mafiaPositions = [];
+    const specialRolePositions = [];
+
+    // Track positions of mafia and special roles
+    for (let i = 0; i < roles.length; i++) {
+      const role = roles[i];
+      if (role === "MAFIA") {
+        mafiaPositions.push(i);
+      } else if (role !== "VILLAGER") {
+        specialRolePositions.push({ i, role });
+      }
+    }
+
+    // Multi-role combinations (randomly selected combinations)
+    const combinations = [];
+
+    // Try to create 1-2 multi-role players (not too many to keep game playable)
+    const numMultiRoles = Math.min(2, Math.floor(numPlayers / 4));
+
+    for (let attempt = 0; attempt < numMultiRoles * 2; attempt++) {
+      if (combinations.length >= numMultiRoles) break;
+
+      // Pick a random mafia to potentially add a second role to
+      if (mafiaPositions.length > 0 && specialRolePositions.length > 0) {
+        const mafiaIdx = Math.floor(Math.random() * mafiaPositions.length);
+        const specialIdx = Math.floor(
+          Math.random() * specialRolePositions.length,
+        );
+
+        const mafiaPosIndex = mafiaPositions[mafiaIdx];
+        const specialData = specialRolePositions[specialIdx];
+
+        // Anti-stacking: Don't let all mafia have same special role
+        // and ensure variety in combinations
+        const role1 = "MAFIA";
+        const role2 = specialData.role;
+
+        // Check if this combination is interesting and not already used
+        const existing = combinations.find(
+          (c) => c.includes(role1) && c.includes(role2),
+        );
+        if (existing) continue;
+
+        // Add this combination
+        combinations.push([role1, role2]);
+
+        // Mark these roles as used
+        mafiaPositions.splice(mafiaIdx, 1);
+        specialRolePositions.splice(specialIdx, 1);
+      }
+    }
+
+    // Build the final role list
+    const roleQueue = [...roles];
+    const combinationQueue = [...combinations];
+
+    for (let i = 0; i < numPlayers; i++) {
+      // If we have a multi-role combination pending, use it
+      if (combinationQueue.length > 0) {
+        result.push(combinationQueue.shift());
+        continue;
+      }
+
+      // Otherwise, pull next role from queue (which may be depleted after removing combined roles)
+      if (roleQueue.length > 0) {
+        // Pick a random role (not removing first, to maintain randomness)
+        const randomIdx = Math.floor(Math.random() * roleQueue.length);
+        const role = roleQueue.splice(randomIdx, 1)[0];
+        result.push(role);
+      } else {
+        // Fallback: villager
+        result.push("VILLAGER");
+      }
+    }
+
+    // Pad with villagers if still missing roles
+    while (result.length < numPlayers) {
+      result.push("VILLAGER");
+    }
+
+    return result;
+  }
+
+  /**
+   * Check if a player has a specific role (handles multi-role arrays)
+   */
+  playerHasRole(player, roleToCheck) {
+    const playerRoles = Array.isArray(player.roles)
+      ? player.roles
+      : [player.role];
+
+    return playerRoles.some((role) => role === roleToCheck);
+  }
+
+  /**
+   * Get all roles for a player (handles both single and multi-role)
+   */
+  getPlayerRoles(player) {
+    return Array.isArray(player.roles) ? player.roles : [player.role];
+  }
+
+  /**
+   * Format role list for display (handles multi-role)
+   */
+  formatPlayerRoles(player) {
+    const roles = this.getPlayerRoles(player);
+
+    if (roles.length === 1) {
+      return roles[0];
+    }
+
+    // Multi-role: prioritize mafia if present (keep secret!)
+    // But internally we know the truth
+    return roles.join(" + ");
+  }
+
+  /**
+   * Check if player has conflicting roles (for conflict resolution)
+   */
+  hasRoleConflict(player) {
+    const roles = this.getPlayerRoles(player);
+
+    // Possible conflicts
+    const conflicts = [];
+
+    if (roles.includes("SHERIFF") && roles.includes("MAFIA")) {
+      conflicts.push("SHERIFF_MAFIA");
+    }
+
+    if (roles.includes("DOCTOR") && roles.includes("MAFIA")) {
+      conflicts.push("DOCTOR_MAFIA");
+    }
+
+    if (roles.includes("VIGILANTE") && roles.includes("MAFIA")) {
+      conflicts.push("VIGILANTE_MAFIA");
+    }
+
+    if (roles.includes("SHERIFF") && roles.includes("DOCTOR")) {
+      conflicts.push("SHERIFF_DOCTOR");
+    }
+
+    return conflicts;
+  }
+
+  // ==========================================
+  // MULTI-ROLE CONFLICT RESOLUTION
+  // ==========================================
+
+  /**
+   * Sheriff + Mafia: The Perfect Mole
+   * Sheriff must report findings to town truthfully, but also share with mafia
+   */
+  resolveSheriffMafiaConflict(
+    sheriff,
+    investigationResult,
+    investigatedPlayer,
+  ) {
+    const result = investigationResult; // e.g., "MAFIA", "VILLAGER", "DOCTOR", etc.
+
+    // Private THINK (split-pane): Honest analysis
+    const privateThought =
+      `As Sheriff, I investigated ${investigatedPlayer.name} and found they are ${result}.\n` +
+      `As a Mafia member myself, I must balance the truth with protecting my mafia identity.\n` +
+      `If result is MAFIA: I know this teammate's identity. Should I hint or stay silent?\n` +
+      `If result is TOWN: Safe to report truthfully - no threat to mafia team.\n` +
+      `Key strategy: Report truth to town to build trust, hide my mafia role from public.`;
+
+    // Public SAYS: Truthful statement (trustworthiness is key for mole)
+    const publicStatement = `I investigated ${investigatedPlayer.name}. They are ${result}.`;
+
+    // Mafia team info (share in private chat)
+    const mafiaTeamInfo =
+      `MAFIA PRIVATE REPORT: Sheriff investigated ${investigatedPlayer.name}, result: ${result}. ` +
+      `My assessment: ${result === "MAFIA" ? "This is our teammate!" : result === "VILLAGER" ? "This is a townie we can safely eliminate." : result === "DOCTOR" ? "This is the doctor - high priority target." : "This is a special role, investigate further."}`;
+
+    return {
+      privateThought,
+      publicStatement,
+      mafiaTeamInfo,
+      roleConflict: "SHERIFF_MAFIA",
+    };
+  }
+
+  /**
+   * Doctor + Mafia: Strategic Protection/Abandonment
+   * Doctor decides whether to protect mafia teammates or let them die
+   */
+  resolveDoctorMafiaConflict(doctor, targetPlayer, round) {
+    const isTeammate =
+      doctor.id === targetPlayer.id ||
+      this.isMafiaTeammate(doctor, targetPlayer);
+
+    // Decision logic
+    let decision = {
+      willProtect: false,
+      reason: "",
+      privateThought: "",
+      publicStatement: "",
+    };
+
+    if (isTeammate) {
+      // This is a mafia teammate
+      const saveFrequency = this.calculateMafiaDoctorSavePattern(round);
+
+      if (this.shouldMafiaDoctorSaveTeammate(saveFrequency)) {
+        // Save teammate (strategic: save when it looks natural)
+        decision.willProtect = true;
+        decision.reason = "Saving mafia teammate";
+        decision.privateThought =
+          `Target ${targetPlayer.name} is my mafia teammate.\n` +
+          `Saving them might reveal my doctor role, but letting them die is worse for mafia.\n` +
+          `Decision: PROTECT. Will try to make it look strategic (protecting key player).`;
+        decision.publicStatement = `I'll protect ${targetPlayer.name} tonight.`;
+      } else {
+        // Let teammate die (pattern variation: too many saves = suspicious)
+        decision.willProtect = false;
+        decision.reason = "Letting teammate die for realism";
+        decision.privateThought =
+          `Target ${targetPlayer.name} is my mafia teammate.\n` +
+          `But I've been saving too often - need to let someone die to avoid suspicion.\n` +
+          `Mafia vote may target them anyway. If I save, doctor role becomes obvious.\n` +
+          `Decision: DO NOT PROTECT. Sorry teammate, for the greater good of the mafia.`;
+        decision.publicStatement = `I'll be protecting someone tonight.`; // Ambiguous
+      }
+    } else {
+      // Not a teammate - standard doctor logic
+      const protectionPriority =
+        this.calculateDoctorProtectionPriority(targetPlayer);
+
+      decision.willProtect = protectionPriority > 50;
+      decision.reason = `Priority: ${protectionPriority}`;
+      decision.privateThought =
+        `${targetPlayer.name} is not mafia.\n` +
+        `Standard doctor assessment: Priority ${protectionPriority}.\n` +
+        `If I save them, I look like a helpful doctor. But need to vary my targets.\n` +
+        `Last round I protected: ${this.lastDoctorProtection}`;
+      decision.publicStatement = decision.willProtect
+        ? `I'll protect ${targetPlayer.name} tonight.`
+        : `I'll be protecting someone tonight.`;
+    }
+
+    return {
+      ...decision,
+      roleConflict: "DOCTOR_MAFIA",
+    };
+  }
+
+  /**
+   * Calculate how often mafia doctor should save teammates
+   * (Pattern: 60-80% save rate to avoid being too obvious)
+   */
+  calculateMafiaDoctorSavePattern(round) {
+    // Early game: save more (build doctor credibility)
+    // Late game: save less (less suspicious to fail)
+
+    if (round <= 2) return 0.8; // 80% save rate early
+    if (round <= 4) return 0.7; // 70% save rate mid
+    return 0.6; // 60% save rate late
+  }
+
+  /**
+   * Should mafia doctor save teammate this round?
+   */
+  shouldMafiaDoctorSaveTeammate(saveFrequency) {
+    return Math.random() < saveFrequency;
+  }
+
+  /**
+   * Check if two players are on the same mafia team
+   */
+  isMafiaTeammate(player1, player2) {
+    return player1.id !== player2.id && player1.isMafia && player2.isMafia;
+  }
+
+  /**
+   * Vigilante + Mafia: Avoid Friendly Fire
+   * Vigilante must avoid shooting mafia teammates
+   */
+  resolveVigilanteMafiaConflict(vigilante, potentialTarget, confidence, round) {
+    const isTeammate = this.isMafiaTeammate(vigilante, potentialTarget);
+
+    const conflict = {
+      shouldShoot: false,
+      riskScore: 0,
+      privateThought: "",
+      publicStatement: "",
+    };
+
+    if (isTeammate) {
+      // This is a mafia teammate - do NOT shoot!
+      conflict.shouldShoot = false;
+      conflict.riskScore = 0; // Risk isn't the issue, it's traitorous
+      conflict.privateThought =
+        `Wait, ${potentialTarget.name} is my mafia teammate!\n\n` +
+        `I cannot shoot them - that would betray my mafia team.\n` +
+        `I need to either:\n` +
+        `  - Hold my fire\n` +
+        `  - Shoot a town player instead\n` +
+        `  - Pretend to "protect" mafia by not shooting\n\n` +
+        `My vigilante shot is precious - only one shot. I'll wait for a better target.`;
+      conflict.publicStatement = "I'm still deciding whether to use my shot.";
+    } else {
+      // Not a teammate - standard vigilante logic applies
+      // but I'm mafia, so I want to help mafia, not town
+
+      conflict.privateThought =
+        `${potentialTarget.name} is not mafia (I think). Confidence: ${confidence}%.\n\n` +
+        `As a vigilante who is also mafia, I need to consider:\n` +
+        `  - If I shoot town, I help mafia team\n` +
+        `  - But if I shoot wrong, I waste my only shot\n` +
+        `  - And I need to avoid looking suspicious myself\n\n` +
+        `Confidence ${confidence}% is ${confidence > 70 ? "high enough to shoot" : "too low, I need to be sure."}`;
+
+      if (confidence > 70) {
+        conflict.shouldShoot = true;
+        conflict.riskScore = 100 - confidence;
+        conflict.publicStatement = `I'm considering my shot. ${potentialTarget.name} is showing suspicious behavior.`;
+      } else {
+        conflict.shouldShoot = false;
+        conflict.privateThought +=
+          "\n\nI'll hold my fire for now. Too risky without better evidence.";
+        conflict.publicStatement =
+          "I'm still evaluating the situation before I commit to a shot.";
+      }
+    }
+
+    return {
+      ...conflict,
+      roleConflict: "VIGILANTE_MAFIA",
+    };
+  }
+
+  /**
+   * Get multi-role context for prompting
+   * Returns additional prompt text explaining role conflicts
+   */
+  getMultiRolePromptContext(player) {
+    const conflicts = this.hasRoleConflict(player);
+
+    if (conflicts.length === 0) {
+      return "";
+    }
+
+    let context = "\n## ⚠️ MULTI-ROLE CONFLICT\n\n";
+    context += "You have multiple roles that create strategic challenges:\n\n";
+
+    for (const conflict of conflicts) {
+      const allRoles = this.getPlayerRoles(player);
+
+      switch (conflict) {
+        case "SHERIFF_MAFIA":
+          context += "🎭 SHERIFF + MAFIA (The Perfect Mole)\n";
+          context += "  • You are the town's trusted sheriff\n";
+          context += "  • But you secretly serve the mafia\n";
+          context +=
+            "  • Public SAYS: Report investigation findings truthfully (builds trust)\n";
+          context += "  • Private THINK: Honest analysis of both roles\n";
+          context +=
+            "  • Mafia team info: Share your findings in mafia private chat\n";
+          context +=
+            "  • Goal: Use sheriff authority to misdirect town while protecting mafia teammates\n\n";
+          break;
+
+        case "DOCTOR_MAFIA":
+          context += "🎭 DOCTOR + MAFIA (The Unexplained Save)\n";
+          context += "  • You can protect any player each night\n";
+          context +=
+            "  • But if you save mafia teammates too much, doctor role is exposed\n";
+          context += "  • Let them die sometimes to avoid suspicion\n";
+          context +=
+            "  • Goal: Balance protecting mafia vs. looking like a helpful town doctor\n\n";
+          break;
+
+        case "VIGILANTE_MAFIA":
+          context += "🎭 VIGILANTE + MAFIA (Conflicted Assassin)\n";
+          context += "  • You have ONE shot to eliminate someone\n";
+          context += "  • Shooting mafia teammates = betrayal\n";
+          context +=
+            "  • Shooting town = helps mafia (but reveals your identity to mafia team later)\n";
+          context +=
+            "  • Goal: Avoid friendly fire, shoot high-value town targets\n\n";
+          break;
+
+        case "SHERIFF_DOCTOR":
+          context += "🎭 SHERIFF + DOCTOR (Powerful Town Duo)\n";
+          context += "  • You can investigate AND protect\n";
+          context += "  • Can self-protect if needed (as doctor)\n";
+          context += "  • Sheriff info guides doctor decisions\n";
+          context +=
+            "  • Goal: Use both abilities strategically to protect town\n\n";
+          break;
+      }
+    }
+
+    context +=
+      "Remember: You must maintain your public persona for each role while secretly managing your alliance.\n";
+
+    return context;
   }
 
   async startGame(numPlayers = 5, personaSeeds = null) {
     console.log(E.GAME + " Starting Mafia Game v5");
     console.log("=".repeat(70));
+
+    // Track game start time for statistics
+    this.gameStartTime = Date.now();
+    this.gameSeed = Math.floor(Math.random() * 2147483647);
 
     console.log("📋 Game Configuration:");
     console.log(`   - Max Context: ${this.config.maxContextChars} characters`);
@@ -1229,12 +1694,107 @@ class MafiaGame {
       try {
         this.db = await getGameDatabase();
         console.log(E.GAME + " Database persistence enabled");
+
+        // Initialize statistics schema
+        await initializeStatisticsSchema(this.db);
+        console.log(E.GAME + " Statistics schema initialized");
+
+        // Initialize supporting schema (cost tracking, replay)
+        await initializeSupportingSchema(this.db);
+        console.log(E.GAME + " Supporting schema initialized");
       } catch (error) {
         console.error("[DB] Failed to connect to database:", error.message);
         console.warn("[DB] Continuing without database persistence...");
         this.db = null;
         this.config.enableDatabase = false;
       }
+    }
+
+    // Initialize statistics trackers
+    try {
+      // Create a temporary db for in-memory tracking if no database
+      const statsDB = this.db || {
+        all: () => [],
+        get: () => null,
+        run: () => {},
+        prepare: (sql) => ({
+          bind: () => {},
+          step: () => false,
+          getAsObject: () => ({}),
+          run: () => {},
+          free: () => {},
+        }),
+        exec: () => {},
+      };
+      this.tokenTracker = new TokenTracker(statsDB);
+      this.apiTracker = new APITracker(statsDB);
+      this.dashboard = new RealtimeDashboard(
+        this.tokenTracker,
+        this.apiTracker,
+      );
+      console.log(E.GAME + " Statistics tracking enabled");
+    } catch (error) {
+      console.error(
+        "[STATS] Failed to initialize statistics tracking:",
+        error.message,
+      );
+      console.warn("[STATS] Continuing without statistics...");
+      this.tokenTracker = null;
+      this.apiTracker = null;
+      this.dashboard = null;
+    }
+
+    // Initialize cost tracking
+    try {
+      const costDB = this.db || {
+        all: () => [],
+        get: () => null,
+        run: () => {},
+        prepare: () => ({
+          bind: () => {},
+          step: () => false,
+          getAsObject: () => ({}),
+          run: () => {},
+          free: () => {},
+        }),
+        exec: () => {},
+      };
+      this.costTracker = new CostTracker(costDB, {
+        perPlayerPerTurn: parseFloat(
+          process.env.COST_PER_PLAYER_PER_TURN || "0.50",
+        ),
+        perGameTotal: parseFloat(process.env.COST_PER_GAME_TOTAL || "10.00"),
+        warningThreshold: parseFloat(
+          process.env.COST_WARNING_THRESHOLD || "0.80",
+        ),
+      });
+      console.log(E.GAME + " Cost tracking enabled");
+    } catch (error) {
+      console.error(
+        "[COST] Failed to initialize cost tracking:",
+        error.message,
+      );
+      console.warn("[COST] Continuing without cost tracking...");
+      this.costTracker = null;
+    }
+
+    // Initialize event replay
+    try {
+      const replayDB = this.db || {
+        all: () => [],
+        get: () => null,
+        run: () => {},
+        exec: () => {},
+      };
+      this.eventReplay = new EventReplay(replayDB);
+      console.log(E.GAME + " Event replay enabled");
+    } catch (error) {
+      console.error(
+        "[REPLAY] Failed to initialize event replay:",
+        error.message,
+      );
+      console.warn("[REPLAY] Continuing without event replay...");
+      this.eventReplay = null;
     }
 
     // Generate unique game ID
@@ -1245,9 +1805,6 @@ class MafiaGame {
     // Generate roles dynamically based on player count
     const roles = this.calculateRoles(numPlayers);
 
-    // Calculate game seed for determinism
-    const gameSeed = Math.floor(Math.random() * 2147483647);
-
     // Track event sequence for database
     this.eventSequence = 0;
 
@@ -1256,7 +1813,7 @@ class MafiaGame {
       try {
         this.db.createGame({
           id: this.gameId,
-          seed: gameSeed,
+          seed: this.gameSeed,
           playerCount: numPlayers,
           mafiaCount: roles.filter((r) => r === "MAFIA").length,
           status: "CREATED",
@@ -1277,7 +1834,7 @@ class MafiaGame {
           "ADMIN_ONLY",
           {
             gameId: this.gameId,
-            seed: gameSeed,
+            seed: this.gameSeed,
             playerCount: numPlayers,
             mafiaCount: roles.filter((r) => r === "MAFIA").length,
             config: this.config,
@@ -1346,16 +1903,56 @@ class MafiaGame {
 
     // STEP 2: Assign roles AFTER personas generated
     console.log(E.LOCK + " Assigning roles to personas...");
-    for (let i = 0; i < numPlayers; i++) {
-      const role = roles[i] || "VILLAGER";
-      this.players[i].role = role;
-      this.players[i].isMafia = role === "MAFIA";
-      this.players[i].emoji = roleEmojis[role];
-      this.players[i].persona.gameRole = role;
+    console.log(
+      this.config.allowMultiRole
+        ? "  🎭 MULTI-ROLE MODE: Active"
+        : "  🎭 MODE: Single Role",
+    );
 
-      console.log(
-        `  ${this.players[i].emoji} ${this.players[i].name} -> ${role}`,
-      );
+    for (let i = 0; i < numPlayers; i++) {
+      const assignedRole = roles[i] || "VILLAGER";
+
+      // Handle both single role (string) and multi-role (array)
+      const roleArray = Array.isArray(assignedRole)
+        ? assignedRole
+        : [assignedRole];
+
+      // Store all roles
+      this.players[i].roles = roleArray;
+
+      // Primary role for display (prioritize special role over mafia for display)
+      if (roleArray.includes("DOCTOR")) {
+        this.players[i].role = "DOCTOR";
+      } else if (roleArray.includes("SHERIFF")) {
+        this.players[i].role = "SHERIFF";
+      } else if (roleArray.includes("VIGILANTE")) {
+        this.players[i].role = "VIGILANTE";
+      } else if (roleArray.includes("MAFIA")) {
+        this.players[i].role = "MAFIA";
+      } else {
+        this.players[i].role = roleArray[0];
+      }
+
+      // Check if mafia (any role is mafia)
+      this.players[i].isMafia = roleArray.includes("MAFIA");
+
+      // Use the primary role emoji
+      this.players[i].emoji = roleEmojis[this.players[i].role];
+
+      // Store full role list in persona
+      this.players[i].persona.gameRole = this.players[i].role;
+      this.players[i].persona.allRoles = roleArray;
+
+      // Log role assignment
+      if (roleArray.length > 1) {
+        console.log(
+          `  ${this.players[i].emoji} ${this.players[i].name} -> [${roleArray.join(" + ")}] (Multi-Role!)`,
+        );
+      } else {
+        console.log(
+          `  ${this.players[i].emoji} ${this.players[i].name} -> ${roleArray[0]}`,
+        );
+      }
     }
 
     // Create players in database after roles assigned
@@ -1425,7 +2022,113 @@ class MafiaGame {
       ),
     );
 
+    // Initialize evidence managers for each player
+    this.initializeEvidenceManagers();
+
     await this.runNightPhase(gameId);
+  }
+
+  /**
+   * Initialize evidence managers for all players
+   */
+  initializeEvidenceManagers() {
+    console.log(E.GAME + " Initializing evidence managers...");
+
+    this.evidenceManagers = new Map();
+    this.suspectMeter = new SuspectMeter(); // Initialize suspect meter
+
+    for (const player of this.players) {
+      const manager = new EvidenceManager(player.id, player.name);
+
+      // Set personal biases based on persona traits
+      const traits = player.persona.coreTraits || player.persona.traits || [];
+
+      // Trusting personality
+      if (traits.includes("Trusting") || traits.includes("Trust")) {
+        manager.setBias("trustsLateVoters", true);
+        manager.setBias("trustsDefensivePlayers", true);
+        manager.setBias("skepticalOfRoleClaims", false);
+      }
+      // Cautious/Suspicious personality
+      else if (
+        traits.includes("Cautious") ||
+        traits.includes("Suspicious") ||
+        traits.includes("Paranoid")
+      ) {
+        manager.setBias("trustsLateVoters", false);
+        manager.setBias("trustsDefensivePlayers", false);
+        manager.setBias("skepticalOfRoleClaims", true);
+      }
+      // Analytical personality
+      else if (traits.includes("Analytical") || traits.includes("Logical")) {
+        manager.setBias("skepticalOfRoleClaims", true);
+      }
+      // Aggressive personality
+      else if (traits.includes("Aggressive") || traits.includes("Bold")) {
+        manager.setBias("trustsFirstAccusers", true);
+      }
+
+      this.evidenceManagers.set(player.id || player.name, manager);
+    }
+
+    console.log(E.GAME + " Evidence managers initialized for all players");
+  }
+
+  /**
+   * Auto-generate evidence from a game event
+   */
+  autoGenerateEvidence(event, gameState) {
+    for (const [playerId, manager] of this.evidenceManagers) {
+      const player = this.players.find((p) => (p.id || p.name) === playerId);
+      if (!player || !player.isAlive) continue;
+
+      // Skip generating evidence for the player about themselves
+      const targetId = event.voterId || event.speakerId || event.targetId;
+      if (targetId === playerId) continue;
+
+      try {
+        const newEvidence = manager.autoGenerateEvidence(
+          event,
+          gameState,
+          player.persona,
+        );
+
+        // Add evidence to manager
+        for (const ev of newEvidence) {
+          manager.addObservation(ev);
+        }
+      } catch (error) {
+        console.error(
+          `[EVIDENCE] Failed to generate evidence for ${player.name}:`,
+          error.message,
+        );
+      }
+    }
+  }
+
+  /**
+   * Get evidence summary for a player's prompt
+   */
+  getEvidenceSummary(playerId, options = {}) {
+    const manager = this.evidenceManagers.get(
+      playerId || this.players.find((p) => p.name === playerId)?.id,
+    );
+    if (!manager) return "";
+
+    return manager.getPromptSummary(options);
+  }
+
+  /**
+   * Mark all evidence as debated for the current round
+   */
+  markEvidenceAsDebated(round) {
+    for (const [playerId, manager] of this.evidenceManagers) {
+      for (const [targetId, caseFile] of manager.caseFiles) {
+        for (const ev of caseFile.evidence) {
+          ev.markDebated();
+        }
+      }
+    }
   }
 
   // ==========================================
@@ -2990,6 +3693,43 @@ class MafiaGame {
       ),
     );
 
+    // Context compression after night phase
+    if (this.contextCompressor) {
+      try {
+        console.log(
+          "\n🗜️  [COMPRESSION] Compressing context before day phase...",
+        );
+        const originalSize = JSON.stringify(this.gameHistory).length;
+        const compressedHistory = this.contextCompressor.compressHistory(
+          {
+            chatHistory: this.gameHistory,
+            maxContextChars: this.config.maxContextChars,
+          },
+          null,
+          {
+            priority: "evidence",
+            removeVotingDuplicates: true,
+            summarizeRepetitiveArgs: true,
+          },
+        );
+        this.gameHistory = compressedHistory;
+        const compressedSize = JSON.stringify(this.gameHistory).length;
+        const savings = (
+          ((originalSize - compressedSize) / originalSize) *
+          100
+        ).toFixed(1);
+        console.log(
+          `✅ [COMPRESSION] Reduced context by ${savings}% (${originalSize} → ${compressedSize} chars)`,
+        );
+      } catch (error) {
+        console.error(
+          "[COMPRESSION] Failed to compress context:",
+          error.message,
+        );
+        // Continue without compression
+      }
+    }
+
     await this.runDayPhase(gameId);
   }
 
@@ -3111,6 +3851,7 @@ class MafiaGame {
     console.log("-".repeat(50));
 
     const votes = {};
+    const abstentions = []; // Track who abstained
 
     for (const player of alivePlayers) {
       const gameState = {
@@ -3118,13 +3859,47 @@ class MafiaGame {
         phase: "VOTING",
         alivePlayers,
         deadPlayers: this.deadPlayers,
-        previousPhaseData: "Discussion complete. Time to vote!",
+        previousPhaseData:
+          "Discussion complete. Time to vote! You can ABSTAIN if unsure.",
         messageNumber: 1,
         totalMessages: 1,
       };
 
       const response = await this.getAIResponse(player, gameState);
 
+      // Check if player wants to abstain
+      const saysLower = response.says?.toLowerCase() || "";
+      const thinkLower = response.think?.toLowerCase() || "";
+      const actionTarget = response.action?.target?.toLowerCase() || "";
+
+      // Abstain indicators
+      const isAbstaining =
+        saysLower.includes("abstain") ||
+        saysLower.includes("not sure") ||
+        saysLower.includes("unsure") ||
+        saysLower.includes("skip") ||
+        thinkLower.includes("abstain") ||
+        thinkLower.includes("not worth") ||
+        actionTarget === "abstain" ||
+        actionTarget === "none";
+
+      if (isAbstaining) {
+        // Player abstains
+        abstentions.push({
+          id: player.id,
+          name: player.name,
+          think: response.think,
+          says: response.says,
+        });
+
+        console.log(player.name + " -> ABSTAINS");
+        console.log("  " + E.THINK + " THINK: " + response.think);
+        console.log("  " + E.SAYS + ' SAYS:  "' + response.says + '"\n');
+
+        continue; // Skip voting
+      }
+
+      // Regular voting
       const targetName =
         response.action?.target ||
         alivePlayers[Math.floor(Math.random() * alivePlayers.length)].name;
@@ -3154,6 +3929,26 @@ class MafiaGame {
             think: response.think,
             says: response.says,
           },
+          this,
+        ),
+      );
+    }
+
+    // Log abstentions as events
+    for (const abstention of abstentions) {
+      this.gameEvents.push(
+        createGameEvent(
+          gameId,
+          this.round,
+          "VOTING",
+          { id: abstention.id, name: abstention.name },
+          "ABSTAIN",
+          "PUBLIC",
+          {
+            think: abstention.think,
+            says: abstention.says,
+          },
+          this,
         ),
       );
     }
@@ -3161,6 +3956,11 @@ class MafiaGame {
     // Count votes
     let maxVoteCount = 0;
     let tiedIds = [];
+    const totalVotes = Object.values(votes).reduce(
+      (sum, count) => sum + count,
+      0,
+    );
+
     for (const [targetId, count] of Object.entries(votes)) {
       if (count > maxVoteCount) {
         maxVoteCount = count;
@@ -3170,9 +3970,18 @@ class MafiaGame {
       }
     }
 
-    // Handle tie
+    // Log voting results
+    console.log("\n" + E.VOTE + " VOTING RESULTS:");
+    console.log(`   Total votes cast: ${totalVotes}/${alivePlayers.length}`);
+    console.log(`   Abstentions: ${abstentions.length}`);
+
+    if (abstentions.length > 0) {
+      console.log(`   Abstained: ${abstentions.map((a) => a.name).join(", ")}`);
+    }
+
+    // Handle tie or insufficient votes
     let eliminated = null;
-    if (tiedIds.length === 1) {
+    if (tiedIds.length === 1 && maxVoteCount > 1) {
       const targetId = tiedIds[0];
       eliminated = this.players.find((p) => p.id === targetId);
       eliminated.isAlive = false;
@@ -3188,7 +3997,9 @@ class MafiaGame {
           maxVoteCount +
           " votes!",
       );
-    } else {
+    } else if (tiedIds.length === 1 && maxVoteCount === 1) {
+      console.log("\n" + E.TIE + " No majority (only 1 vote). No elimination!");
+    } else if (tiedIds.length > 1) {
       console.log(
         "\n" +
           E.TIE +
@@ -3198,6 +4009,8 @@ class MafiaGame {
           maxVoteCount +
           " votes) - No elimination!",
       );
+    } else if (Object.keys(votes).length === 0) {
+      console.log("\n" + E.TIE + " No votes cast! No elimination.");
     }
 
     // WIN CONDITION
@@ -3224,6 +4037,14 @@ class MafiaGame {
           { winner: "TOWN", mafiaAlive: 0, townAlive: newAliveTown },
         ),
       );
+
+      // Save final game statistics
+      await this.saveGameStatistics(
+        "TOWN",
+        this.round,
+        Date.now() - this.gameStartTime,
+      );
+
       this.printEventLog();
       return;
     }
@@ -3245,6 +4066,14 @@ class MafiaGame {
           },
         ),
       );
+
+      // Save final game statistics
+      await this.saveGameStatistics(
+        "MAFIA",
+        this.round,
+        Date.now() - this.gameStartTime,
+      );
+
       this.printEventLog();
       return;
     }
@@ -3261,8 +4090,84 @@ class MafiaGame {
       return this.getMockResponse(player, gameState);
     }
 
+    // Check budget limits before making API call
+    if (this.costTracker && this.gameId) {
+      // Estimate estimated cost for this turn (rough estimate based on previous average)
+      const estimatedPromptTokens = 1000; // Average prompt size
+      const estimatedCompletionTokens = 200; // Average completion size
+      const estimatedCost = {
+        promptCost: (estimatedPromptTokens / 1000) * 0.00015, // $0.15 per 1M
+        completionCost: (estimatedCompletionTokens / 1000) * 0.0006, // $0.60 per 1M
+        totalCost:
+          (estimatedPromptTokens / 1000) * 0.00015 +
+          (estimatedCompletionTokens / 1000) * 0.0006,
+      };
+
+      if (
+        !this.costTracker.canAffordAction(
+          this.gameId,
+          player.id || player.name,
+          estimatedCost,
+        )
+      ) {
+        const budget = this.costTracker.getPlayerBudget(
+          this.gameId,
+          player.id || player.name,
+        );
+        console.error(
+          `[COST] Budget limit reached for ${player.name}! ` +
+            `Remaining: $${budget.remainingPerGame.toFixed(2)}. ` +
+            `Stopping further API calls for this player.`,
+        );
+        // Return a budget-exceeded message
+        return {
+          THINK: `[BUDGET EXCEEDED: I cannot afford to continue the game. Remaining budget: $${budget.remainingPerGame.toFixed(2)}]`,
+          SAYS: "[Budget exhausted - cannot continue discussion]",
+          ACTION: null,
+        };
+      }
+    }
+
+    const startTime = Date.now();
+    let responseTextSize = 0;
+    let success = true;
+    let statusCode = 200;
+    let tokenUsage = { promptTokens: 0, completionTokens: 0, totalTokens: 0 };
+
     try {
-      const prompt = createPrompt(player, gameState, gameState.phase);
+      // Get evidence summary for this player (only during discussion/voting phases)
+      let evidenceSummary = "";
+      if (
+        this.evidenceManagers &&
+        (gameState.phase === "DAY_DISCUSSION" || gameState.phase === "DAY_VOTE")
+      ) {
+        const playerId = player.id || player.name;
+        evidenceSummary = this.getEvidenceSummary(playerId, {
+          includeSelfNote: true,
+          topPlayersCount: 2, // Show top 2 suspicious suggestions
+          includeCaseDetails: false,
+        });
+      }
+
+      // Get multi-role context if player has conflicting roles
+      let multiRoleContext = "";
+      if (this.config.allowMultiRole) {
+        multiRoleContext = this.getMultiRolePromptContext(player);
+      }
+
+      const prompt = createPrompt(
+        player,
+        gameState,
+        gameState.phase,
+        evidenceSummary,
+        multiRoleContext,
+      );
+      const requestBodySize = JSON.stringify({
+        model: "openai/gpt-4o-mini",
+        messages: [{ role: "user", content: prompt }],
+        temperature: 0.7,
+        max_tokens: 200,
+      }).length; // Rough estimate in bytes
 
       const response = await fetch(
         "https://openrouter.ai/api/v1/chat/completions",
@@ -3283,10 +4188,128 @@ class MafiaGame {
         },
       );
 
+      const duration = Date.now() - startTime;
+      statusCode = response.status;
+      success = response.ok;
+
       const data = await response.json();
       const text = data.choices?.[0]?.message?.content || "";
+      responseTextSize = JSON.stringify(data).length;
+
+      // Extract token usage from response (handle both OpenAI and OpenRouter formats)
+      if (data && data.usage) {
+        const usage = data.usage;
+        tokenUsage = {
+          promptTokens: usage.prompt_tokens || usage.promptTokens || 0,
+          completionTokens:
+            usage.completion_tokens || usage.completionTokens || 0,
+          totalTokens: usage.total_tokens || usage.totalTokens || 0,
+        };
+      } else {
+        // Fallback: estimate token count (rough approximation: 4 chars ≈ 1 token)
+        const estimatedPromptTokens = Math.ceil(prompt.length / 4);
+        const estimatedCompletionTokens = Math.ceil(text.length / 4);
+        tokenUsage = {
+          promptTokens: estimatedPromptTokens,
+          completionTokens: estimatedCompletionTokens,
+          totalTokens: estimatedPromptTokens + estimatedCompletionTokens,
+        };
+      }
 
       const parsed = this.parseJSONResponse(text);
+
+      // Track API call metrics
+      if (this.apiTracker) {
+        try {
+          this.apiTracker.trackCall(this.gameId, player.id || player.name, {
+            endpoint: "https://openrouter.ai/api/v1/chat/completions",
+            duration: duration,
+            statusCode: statusCode,
+            success: success && parsed.valid,
+            retryCount: retryCount,
+            payloadSize: requestBodySize,
+            responseSize: responseTextSize,
+            provider: "openrouter",
+            model: "openai/gpt-4o-mini",
+          });
+        } catch (statsError) {
+          console.error(
+            "[STATS] Failed to track API call:",
+            statsError.message,
+          );
+        }
+      }
+
+      // Track token usage
+      if (this.tokenTracker && tokenUsage && tokenUsage.totalTokens > 0) {
+        try {
+          this.tokenTracker.trackTurn(this.gameId, player.id || player.name, {
+            phase: gameState.phase || "unknown",
+            actionType: this._getActionType(gameState.phase),
+            promptTokens: tokenUsage.promptTokens || 0,
+            completionTokens: tokenUsage.completionTokens || 0,
+            model: "openai/gpt-4o-mini",
+            provider: "openrouter",
+            prices: {
+              promptPricePerMillion: 0.15,
+              completionPricePerMillion: 0.6,
+            },
+          });
+        } catch (statsError) {
+          console.error(
+            "[STATS] Failed to track token usage:",
+            statsError.message,
+          );
+        }
+
+        // Track cost for this turn
+        if (this.costTracker && tokenUsage && tokenUsage.totalTokens > 0) {
+          try {
+            const costResult = this.costTracker.trackPlayerTurn(
+              this.gameId,
+              player.id || player.name,
+              player.name,
+              {
+                phase: gameState.phase || "unknown",
+                actionType: this._getActionType(gameState.phase),
+                promptTokens: tokenUsage.promptTokens || 0,
+                completionTokens: tokenUsage.completionTokens || 0,
+                model: "openai/gpt-4o-mini",
+                provider: "openrouter",
+                prices: {
+                  promptPricePerMillion: 0.15,
+                  completionPricePerMillion: 0.6,
+                },
+              },
+            );
+
+            // Log warnings
+            if (costResult.warningTriggered) {
+              console.warn(
+                `[COST] Budget warning for ${player.name}: ${costResult.budgetUsedPct.toFixed(1)}% used`,
+              );
+            }
+
+            // Log stop
+            if (costResult.stopTriggered) {
+              console.error(
+                `[COST] Budget limit reached for ${player.name}! Stopping game.`,
+              );
+              // Game should stop here in a real implementation
+            }
+
+            // Log remaining budget occasionally
+            if (Math.random() < 0.1) {
+              // Log 10% of turns to reduce noise
+              console.log(
+                `[COST] Remaining budget: $${costResult.remainingBudget.toFixed(2)} (${(1 - costResult.budgetUsedPct).toFixed(1)}%)`,
+              );
+            }
+          } catch (costError) {
+            console.error("[COST] Failed to track cost:", costError.message);
+          }
+        }
+      }
 
       // If parsing failed and we have retries left, retry instead of falling back to mock
       if (!parsed.valid && retryCount < this.config.maxRetries) {
@@ -3299,9 +4322,27 @@ class MafiaGame {
 
       return parsed.valid ? parsed : this.getMockResponse(player, gameState);
     } catch (error) {
+      const duration = Date.now() - startTime;
+      success = false;
+
       console.error(
         "[ERROR] AI error for " + player.name + ": " + error.message,
       );
+
+      // Track failed API call
+      if (this.apiTracker) {
+        this.apiTracker.trackCall(this.gameId, player.id || player.name, {
+          endpoint: "https://openrouter.ai/api/v1/chat/completions",
+          duration: duration,
+          statusCode: statusCode || 0,
+          success: false,
+          retryCount: retryCount,
+          payloadSize: 0,
+          responseSize: 0,
+          provider: "openrouter",
+          model: "openai/gpt-4o-mini",
+        });
+      }
 
       // Retry on network errors if we have retries left
       if (retryCount < this.config.maxRetries) {
@@ -3313,6 +4354,213 @@ class MafiaGame {
       }
 
       return this.getMockResponse(player, gameState);
+    }
+  }
+
+  _getActionType(phase) {
+    const actionMap = {
+      MAFIA_CHAT: "night_action",
+      MAFIA_ACTION: "night_action",
+      DOCTOR_ACTION: "night_action",
+      SHERIFF_ACTION: "night_action",
+      VIGILANTE_ACTION: "night_action",
+      DAY_DISCUSSION: "say",
+      DAY_VOTE: "vote",
+      SETUP: "setup",
+    };
+    return actionMap[phase] || "unknown";
+  }
+
+  /**
+   * Save final game statistics to database
+   */
+  async saveGameStatistics(winner, rounds, totalTimeMs) {
+    if (!this.db) {
+      console.log("[STATS] Skipping statistics save: no database connection");
+      return;
+    }
+
+    try {
+      console.log(E.GAME + " Saving game statistics...");
+
+      // Get all player stats
+      const playerStats = [];
+      for (const player of this.players) {
+        const tokenMetrics = this.tokenTracker
+          ? this.tokenTracker.getMetrics(this.gameId, player.id || player.name)
+          : null;
+
+        const stats = {
+          gameId: this.gameId,
+          playerId: player.id || player.name,
+          player: player.name,
+          role: player.role,
+          team: player.isMafia ? "MAFIA" : "TOWN",
+          model: "openai/gpt-4o-mini",
+          provider: "openrouter",
+          alive: player.isAlive,
+          won:
+            (winner === "TOWN" && !player.isMafia) ||
+            (winner === "MAFIA" && player.isMafia),
+          totalTurns: player.isAlive ? rounds : player.deathRound || 0,
+          totalTokens: tokenMetrics?.totalTokens || 0,
+          totalCost: tokenMetrics?.estimatedCost?.totalCost || 0,
+          avgTokensPerTurn: tokenMetrics?.avgTokensPerTurn || 0,
+          deathRound: player.deathRound || null,
+          deathCause: player.deathCause || null,
+        };
+        playerStats.push(stats);
+      }
+
+      // Calculate game-level aggregates
+      const totalTokens = playerStats.reduce(
+        (sum, ps) => sum + ps.totalTokens,
+        0,
+      );
+      const totalCost = playerStats.reduce((sum, ps) => sum + ps.totalCost, 0);
+
+      // Save game stats
+      this.db.run(
+        `INSERT OR REPLACE INTO game_stats (
+          gameId, seed, winner, totalRounds, totalTimeMs,
+          totalTokens, totalCost, createdAt
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+        [
+          this.gameId,
+          this.gameSeed || 0,
+          winner,
+          rounds,
+          totalTimeMs,
+          totalTokens,
+          totalCost,
+          Date.now(),
+        ],
+      );
+
+      // Save player stats
+      for (const ps of playerStats) {
+        this.db.run(
+          `INSERT OR REPLACE INTO player_stats (
+            gameId, playerId, player, role, team, model, provider,
+            alive, won, totalTurns, totalTokens, totalCost,
+            avgTokensPerTurn, deathRound, deathCause
+          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+          [
+            ps.gameId,
+            ps.playerId,
+            ps.player,
+            ps.role,
+            ps.team,
+            ps.model,
+            ps.provider,
+            ps.alive ? 1 : 0,
+            ps.won ? 1 : 0,
+            ps.totalTurns,
+            ps.totalTokens,
+            ps.totalCost,
+            ps.avgTokensPerTurn,
+            ps.deathRound,
+            ps.deathCause,
+          ],
+        );
+      }
+
+      // Update model performance (aggregated across games)
+      await this.updateModelPerformance(playerStats, winner);
+
+      console.log(E.GAME + " Game statistics saved:");
+      console.log(`   - Winner: ${winner}`);
+      console.log(`   - Rounds: ${rounds}`);
+      console.log(`   - Total Time: ${Math.round(totalTimeMs / 1000)}s`);
+      console.log(`   - Total Tokens: ${totalTokens.toLocaleString()}`);
+      console.log(`   - Total Cost: $${totalCost.toFixed(4)}`);
+
+      // Print per-player stats
+      console.log("\n📊 Player Statistics:");
+      for (const ps of playerStats) {
+        console.log(
+          `   ${ps.player} (${ps.role}): ${ps.totalTokens} tokens, $${ps.totalCost.toFixed(4)}, ${ps.won ? "WON" : "LOST"}`,
+        );
+      }
+    } catch (error) {
+      console.error("[STATS] Failed to save game statistics:", error.message);
+    }
+  }
+
+  /**
+   * Update model performance aggregated data
+   */
+  async updateModelPerformance(playerStats, winner) {
+    const model = "openai/gpt-4o-mini";
+    const provider = "openrouter";
+
+    try {
+      // Get existing record
+      const existing = this.db.get(
+        "SELECT * FROM model_performance WHERE model = ? AND provider = ?",
+        [model, provider],
+      );
+
+      // Calculate stats for this game
+      const mafiaPlayers = playerStats.filter((p) => p.role === "MAFIA");
+      const townPlayers = playerStats.filter((p) => p.role !== "MAFIA");
+
+      const mafiaWinsThisGame = winner === "MAFIA" ? 1 : 0;
+      const townWinsThisGame = winner === "TOWN" ? 1 : 0;
+
+      if (existing) {
+        // Update existing record
+        const newTotalGames = existing.totalGames + 1;
+        const newMafiaWins = existing.mafiaWins + mafiaWinsThisGame;
+        const newTownWins = existing.townWins + townWinsThisGame;
+
+        this.db.run(
+          `UPDATE model_performance SET
+            totalGames = ?,
+            mafiaWins = ?,
+            townWins = ?,
+            winRateAsMafia = ?,
+            winRateAsTown = ?,
+            overallWinRate = ?,
+            lastUpdated = ?
+          WHERE model = ? AND provider = ?`,
+          [
+            newTotalGames,
+            newMafiaWins,
+            newTownWins,
+            newMafiaWins / Math.max(existing.totalGames, 1),
+            newTownWins / Math.max(existing.totalGames, 1),
+            (newMafiaWins + newTownWins) / Math.max(newTotalGames, 1),
+            Date.now(),
+            model,
+            provider,
+          ],
+        );
+      } else {
+        // Create new record
+        this.db.run(
+          `INSERT INTO model_performance (
+            model, provider, totalGames, mafiaWins, townWins,
+            winRateAsMafia, winRateAsTown, overallWinRate, lastUpdated
+          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+          [
+            model,
+            provider,
+            1,
+            mafiaWinsThisGame,
+            townWinsThisGame,
+            mafiaWinsThisGame,
+            townWinsThisGame,
+            mafiaWinsThisGame + townWinsThisGame,
+            Date.now(),
+          ],
+        );
+      }
+    } catch (error) {
+      console.error(
+        "[STATS] Failed to update model performance:",
+        error.message,
+      );
     }
   }
 
