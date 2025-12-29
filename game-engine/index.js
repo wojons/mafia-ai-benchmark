@@ -4,7 +4,15 @@
 // ============================================
 
 // Constants and utilities
-const { E, roleEmojis, simpleUUID, generateNameFromSeed } = require("./utils");
+const {
+  E,
+  roleEmojis,
+  simpleUUID,
+  generateNameFromSeed,
+  randomChoice,
+  randomSample,
+  randomInt,
+} = require("./utils");
 
 // Persona generation
 const {

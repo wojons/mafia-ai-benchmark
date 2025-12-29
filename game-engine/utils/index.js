@@ -135,6 +135,32 @@ function generateNameFromSeed(seed) {
 }
 
 // ============================================
+// RANDOM UTILITIES
+// ============================================
+
+/**
+ * Get random element from array
+ */
+function randomChoice(array) {
+  return array[Math.floor(Math.random() * array.length)];
+}
+
+/**
+ * Get N random unique elements from array
+ */
+function randomSample(array, count) {
+  const shuffled = [...array].sort(() => Math.random() - 0.5);
+  return shuffled.slice(0, count);
+}
+
+/**
+ * Get random number between min and max (inclusive)
+ */
+function randomInt(min, max) {
+  return Math.floor(Math.random() * (max - min + 1)) + min;
+}
+
+// ============================================
 // EXPORTS
 // ============================================
 
@@ -143,4 +169,7 @@ module.exports = {
   roleEmojis,
   simpleUUID,
   generateNameFromSeed,
+  randomChoice,
+  randomSample,
+  randomInt,
 };
