@@ -2,7 +2,7 @@
 // TEST GAME-ENGINE.JS WITH NEW IMPORTS
 // ============================================
 
-const { MafiaGame } = require("./game-engine");
+const { MafiaGame } = require("../../../game-engine");
 
 console.log("\n" + "=".repeat(70));
 console.log("🧪 TESTING GAME-ENGINE.JS WITH REFACTORED MODULES");

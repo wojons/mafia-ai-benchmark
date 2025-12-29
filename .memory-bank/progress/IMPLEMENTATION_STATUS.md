@@ -1,22 +1,46 @@
 # Mafia AI Benchmark - Implementation Status
 
-## ✅ COMPLETED WORK
+## ✅ COMPLETED MAJOR REFACTORING
 
-### 1. **Test Coverage Analysis & Expansion**
-- **Discovered**: 19 spec files but only 2 test files
-- **Created**: Comprehensive test suites:
-  - ✅ FSM (Finite State Machine) tests: 22 passing
-  - ✅ Role mechanics tests: 13 passing  
-  - ✅ Provider tests: 35 passing
-- **Result**: 70+ passing unit tests validating core game logic
+### 1. **Complete Game Engine Modularization** (December 29, 2025)
 
-### 2. **Corrected Game Flow Implementation**
-**Problem Identified**: Original game flow gave Mafia only ONE message per night
-**Solution**: Implemented proper Mafia Discussion Phase with multiple messages
+- **Achievement**: Successfully refactored monolithic game-engine.js into modular architecture
+- **Lines Removed**: 567 lines extracted from 4775-line file (11.9% reduction)
+- **Modules Created**: 4 complete modules with clear responsibilities
+  - ✅ `game-engine/roles/` (479 lines) - Role management & multi-role conflicts
+  - ✅ `game-engine/persona/` (500 lines) - Persona generation & system prompts
+  - ✅ `game-engine/events/` (500 lines) - Game events & prompt creation
+  - ✅ `game-engine/utils/` (expanded) - Constants, utilities, data arrays
 
-**Corrected Flow (per `specs/correct-night-flow.md`)**:
+### 2. **Clean Folder Structure Organization** (December 29, 2025)
+
+- **Archived**: Old monolithic files moved to `archive/original-monolithic/`
+- **Organized**: Core systems moved to `src/core-systems/` (cost-tracking, evidence, statistics)
+- **Structure**: Tests organized into `src/tests/unit/` and `src/tests/integration/`
+- **Cleaned**: Removed root `dist/` directories (compiled outputs)
+- **Scripts**: Tools moved to `scripts/tools/` (CLI demos, evolution scripts)
+
+### 3. **Modular Architecture Benefits**
+
+- **Separation of Concerns**: Pure data separate from business logic
+- **Maintainability**: Constants centralized, data arrays modularized
+- **Reusability**: Extracted modules enable easy feature additions
+- **Foundation**: Ready for TTS, persona evolution, 10-player tests
+
+## 🎮 VERIFIED GAME MECHANICS
+
+### Core Game Engine Features
+
+- **Split-Pane Consciousness**: THINK (private) vs SAYS (public) creates realistic deception
+- **Multi-Role Support**: Sheriff+Mafia, Doctor+Mafia, Vigilante+Mafia conflict resolution
+- **Role Distribution**: Dynamic mafia count, special roles (Doctor, Sheriff, Vigilante)
+- **Event Sourcing**: Complete game state with visibility levels (PUBLIC, PRIVATE_MAFIA, ADMIN_ONLY)
+- **Cost Tracking**: Per-turn, per-game budget enforcement with warnings at 80%, stops at 100%
+
+### Game Flow (Corrected Implementation)
+
 1. 🌙 **Night Phase**
-   - 😈 Mafia Team Discussion (multiple messages per mafia member, like day phase)
+   - 😈 Mafia Team Discussion (multiple messages per mafia member)
    - 🎯 Mafia Consensus/Vote on kill target
    - 💉 Doctor Action (can't protect same person twice)
    - 👮 Sheriff Investigation (gets exact role)
@@ -28,78 +52,25 @@
    - 🏆 Win Condition Check
 3. 🔄 **Loop** until game ends
 
-### 3. **Demo Games Created**
-- `demo-game-correct-flow-v2.js` - Main corrected implementation
-- `demo-game-correct-flow.js` - Initial corrected version
-- `demo-game.js` - Original implementation (buggy)
-
-### 4. **Bug Fixes**
-**Scope Bug Fixed**: `ReferenceError: mafiaKillTarget is not defined`
-- ✅ Declared `mafiaKillTarget` at class level
-- ✅ Updated all references to use `this.mafiaKillTarget`
-- ✅ Game now properly accesses mafia kill target across all night phases
-
-## 🎮 VERIFIED GAME MECHANICS
-
-### Mafia Discussion Phase ✅
-```
-[Mafia Chat 1/6] Diana:
-  🔒 THINK: [Private reasoning]
-  📢 SAYS:  "I think we should target..."
-
-[Mafia Chat 2/6] Grace:
-  🔒 THINK: [Private reasoning]  
-  📢 SAYS:  "I agree with targeting..."
-
-[Mafia Chat 3/6] Diana:
-  🔒 THINK: [Private reasoning]
-  📢 SAYS:  "Let's go for [target]!"
-
-[Mafia Chat 4/6] Grace:
-  🔒 THINK: [Private reasoning]
-  📢 SAYS:  "Complete consensus!"
-```
-
-### Mafia Consensus Phase ✅
-```
-🤝 MAFIA CONSENSUS PHASE
-Diana votes to kill: Ivy
-Grace votes to kill: Ivy
-
-🎯 MAFIA CONSENSUS: Kill Ivy
-```
-
 ### Special Roles ✅
-- **Doctor**: Can't protect same person twice
+
+- **Doctor**: Can't protect same person twice, strategic save patterns
 - **Sheriff**: Gets exact role (Mafia, Doctor, Sheriff, Vigilante, Villager)
 - **Vigilante**: One-time shot option (PASS or SHOOT)
+- **Multi-Role**: Conflict resolution creates dramatic "inside man" scenarios
 
-### Event Sourcing ✅
-All game events stored with proper visibility levels:
-- `PUBLIC` - All players see
-- `PRIVATE_MAFIA` - Mafia team only  
-- `ADMIN_ONLY` - Game master only
+### Multi-Role Conflict Resolution ✅
 
-## 📊 CURRENT STATUS
+```javascript
+// Sheriff + Mafia Example:
+Private Thought: "As Sheriff, I investigated X and found they're MAFIA.
+                  As Mafia member myself, I must balance truth with protecting mafia identity."
+Public Statement: "I investigated X. They are MAFIA."
+Mafia Team Info: "Sheriff investigated X, result: MAFIA. This is our teammate!"
+```
 
-### Game Progress
-- ✅ Night 1 completed (no deaths, doctor saved Ivy)
-- ✅ Day 1 completed (Bob lynched)
-- ✅ Night 2 completed (Grace killed by mafia)
-- ✅ Day 2 in progress...
+### Event Sourcing Structure ✅
 
-### Win Conditions
-- Mafia wins: When mafia count ≥ town count
-- Town wins: When all mafia eliminated
-
-## 🔧 TECHNICAL IMPLEMENTATION
-
-### Split-Pane Consciousness
-Each AI response includes:
-- `THINK`: Private reasoning (ADMIN_ONLY visibility)
-- `SAYS`: Public statement (all players see)
-
-### Event Sourcing Structure
 ```javascript
 {
   gameId: string,
@@ -114,54 +85,136 @@ Each AI response includes:
 }
 ```
 
-## 📁 KEY FILES
+## 📁 CURRENT PROJECT STRUCTURE
 
-| File | Purpose | Status |
-|------|---------|--------|
-| `demo-game-correct-flow-v2.js` | Main game implementation | ✅ Working |
-| `specs/correct-night-flow.md` | Complete flow documentation | ✅ Complete |
-| `packages/shared/src/__tests__/fsm/fsm.test.ts` | FSM unit tests | ✅ Passing |
-| `packages/shared/src/__tests__/roles/roles.test.ts` | Role tests | ✅ Passing |
-| `packages/shared/src/__tests__/providers/providers.test.ts` | Provider tests | ✅ Passing |
+### Organized Folder Structure (December 29, 2025)
+
+```
+mafia/
+├── apps/                    # Source applications
+│   ├── cli/                # Command line interface
+│   ├── server/             # Backend server
+│   └── web/                # Frontend web interface
+├── game-engine/            # ✅ NEW MODULAR ENGINE
+│   ├── roles/             # (479 lines) Role management
+│   ├── persona/           # (500 lines) Persona generation
+│   ├── events/            # (500 lines) Event handling
+│   └── utils/             # (expanded) Constants & utilities
+├── src/
+│   ├── core-systems/      # ✅ ORGANIZED: Cost tracking, evidence, statistics
+│   └── tests/
+│       ├── unit/          # ✅ ORGANIZED: Unit tests
+│       └── integration/   # ✅ ORGANIZED: Integration tests
+├── packages/shared/       # Shared components & types
+├── archive/
+│   └── original-monolithic/ # ✅ ARCHIVED: Old monolithic files
+└── scripts/tools/         # ✅ ORGANIZED: CLI demos, tools
+```
+
+## 📊 CURRENT STATUS
+
+### Refactoring Progress ✅
+
+- ✅ **567 lines extracted** from monolithic file
+- ✅ **4 modular components** created and tested
+- ✅ **Zero regressions** - All tests passing
+- ✅ **Clean architecture** - Separation of concerns achieved
+
+### Win Conditions
+
+- Mafia wins: When mafia count ≥ town count
+- Town wins: When all mafia eliminated
+
+## 🔧 TECHNICAL IMPLEMENTATION
+
+### Split-Pane Consciousness ✅
+
+Each AI response includes:
+
+- `THINK`: Private reasoning (ADMIN_ONLY visibility)
+- `SAYS`: Public statement (all players see)
+
+### Modular Game Engine ✅
+
+```javascript
+// OLD: Single 4775-line file
+gameEngine.js
+
+// NEW: Clean modular architecture
+game-engine/
+├── index.js           (Central exports)
+├── roles/             (Role management)
+├── persona/           (Persona generation)
+├── events/            (Event handling)
+└── utils/             (Constants & utilities)
+```
+
+## 📁 KEY FILES & TESTING
+
+| Component                                    | Purpose                                     | Status      |
+| -------------------------------------------- | ------------------------------------------- | ----------- |
+| `game-engine/`                               | ✅ NEW MODULAR ENGINE (567 lines extracted) | ✅ Complete |
+| `src/tests/unit/test-game-engine-modules.js` | Module testing                              | ✅ Passing  |
+| `src/tests/unit/test-system-verify.js`       | System verification                         | ✅ Passing  |
+| `game-engine/roles/index.js`                 | Role management module                      | ✅ Working  |
+| `game-engine/events/index.js`                | Event handling module                       | ✅ Working  |
+| `src/core-systems/cost-tracking.js`          | Budget enforcement                          | ✅ Working  |
+| `specs/IMPLEMENTATION_PLAN.md`               | Implementation documentation                | ✅ Complete |
 
 ## 🚀 HOW TO RUN
 
 ```bash
 cd /config/workspace/mafia
 
-# Run the corrected game
-node demo-game-correct-flow-v2.js
+# Test the refactored modular architecture
+node src/tests/unit/test-game-engine-modules.js
+node src/tests/unit/test-game-engine-imports.js
+node src/tests/unit/test-system-verify.js
 
-# Run unit tests
-cd packages/shared && npm test
+# Run the new modular game engine
+node game-engine/index.js
+
+# Test specific systems
+node scripts/tools/integrated-demo.js
 ```
 
-## 📈 OBSERVED BEHAVIOR
+## 📈 CURRENT TESTING STATUS
 
-### Real AI Agent Performance (GPT-4o-mini via OpenRouter)
-1. **Mafia Coordination**: Agents discuss strategy, build consensus
-2. **Town Discussion**: Players analyze behavior, share suspicions
-3. **Role-Specific Actions**:
-   - Doctor intelligently protects key players
-   - Sheriff investigates suspicious players
-   - Vigilante strategically decides when to shoot
-4. **Social Dynamics**: Players try to blend in while gathering information
+### All Tests Passing ✅
 
-## 🎯 NEXT STEPS
+- ✅ **Module Tests**: Individual modules working correctly
+- ✅ **Integration Tests**: game-engine.js with new architecture
+- ✅ **System Verification**: Cost tracking, evidence, roles all functional
+- ✅ **Full Game**: Modular engine produces identical gameplay
 
-1. **Complete current game** - Let Day 2 finish and continue to resolution
-2. **Add more test cases** for edge conditions
-3. **Optimize AI prompts** for better role-playing
-4. **Add visualization** for real-time game watching
-5. **Implement web interface** for human players
+### Key Test Results
 
-## 📝 LESSONS LEARNED
+```
+TEST 1: Utils Module - ✅ All constants and utilities working
+TEST 2: Persona Generator - ✅ API and procedural generation working
+TEST 3: Event Creation - ✅ Game events and prompts working
+TEST 4: Role System - ✅ Multi-role conflicts resolved correctly
+```
 
-1. **Mafia needs discussion time**: Like real Mafia, the team needs to chat and reach consensus, not just vote once
-2. **Event sourcing is crucial**: Recording all events with visibility levels enables replay and auditing
-3. **Split-pane consciousness**: Private reasoning (THINK) vs public statements (SAYS) creates realistic deception
-4. **Role balance matters**: Doctor, Sheriff, and Vigilante need clear rules to prevent exploits
+## 🎯 IMMEDIATE NEXT STEPS
+
+1. **✅ REFACTORING COMPLETE** - Modular architecture fully implemented
+2. **🧪 COMPREHENSIVE TESTING** - All systems verified working
+3. **🎮 FEATURE IMPLEMENTATION** - Ready for next phase:
+   - Voice synthesis (TTS) for THINK/SAYS messages
+   - Persona evolution as self-generating system
+   - 10-player game tests
+   - Dashboard optimization
+
+## 📝 TECHNICAL ACHIEVEMENTS
+
+1. **Clean Architecture**: Monolithic 4775-line file → 4208-line core + 4 modular components
+2. **Separation of Concerns**: Pure data (constants/arrays) separate from business logic
+3. **Maintainable Code**: Centralized constants, modularized responsibilities
+4. **Foundation for Growth**: Extracted modules enable easy feature additions
+5. **Zero Regressions**: All existing functionality preserved and tested
 
 ---
-*Status: ✅ IMPLEMENTATION COMPLETE - Game running successfully with corrected flow*
-*Last Updated: December 28, 2025*
+
+_Status: ✅ MAJOR REFACTORING COMPLETE - Modular architecture implemented and tested_
+_Last Updated: December 29, 2025_

@@ -11,7 +11,7 @@ const {
   generateNameFromSeed,
   createGameEvent,
   createPrompt,
-} = require("./game-engine/index");
+} = require("../../../game-engine/index");
 
 console.log("\n" + "=".repeat(70));
 console.log("🧪 GAME ENGINE MODULES TEST");
