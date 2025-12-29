@@ -12,6 +12,12 @@ const {
   randomChoice,
   randomSample,
   randomInt,
+  // Constants
+  firstNames,
+  moralAlignments,
+  coreValues,
+  flaws,
+  archetypes,
 } = require("./utils");
 
 // Persona generation
