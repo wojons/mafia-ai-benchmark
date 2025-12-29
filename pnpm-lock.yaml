@@ -7,6 +7,10 @@ settings:
 importers:
 
   .:
+    dependencies:
+      sql.js:
+        specifier: ^1.13.0
+        version: 1.13.0
     devDependencies:
       '@types/node':
         specifier: ^25.0.3
@@ -2097,6 +2101,9 @@ packages:
   source-map-js@1.2.1:
     resolution: {integrity: sha512-UXWMKhLOwVKb728IUtQPXxfYU+usdybtUrK/8uGE8CQMvrhOpwvzDBwj0QhSL7MQc7vIsISBG8VQ8+IDQxpfQA==}
     engines: {node: '>=0.10.0'}
+
+  sql.js@1.13.0:
+    resolution: {integrity: sha512-RJbVP1HRDlUUXahJ7VMTcu9Rm1Nzw+EBpoPr94vnbD4LwR715F3CcxE2G2k45PewcaZ57pjetYa+LoSJLAASgA==}
 
   stackback@0.0.2:
     resolution: {integrity: sha512-1XMJE5fQo1jGH6Y/7ebnwPOBEkIEnT4QF32d5R1+VXdXveM0IBMJt8zfaxX1P3QhVwrYe+576+jkANtSS2mBbw==}
@@ -4358,6 +4365,8 @@ snapshots:
       - supports-color
 
   source-map-js@1.2.1: {}
+
+  sql.js@1.13.0: {}
 
   stackback@0.0.2: {}
 

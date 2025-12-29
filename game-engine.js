@@ -587,12 +587,27 @@ const E = {
 
 // Only print banner when executed directly
 if (require.main === module) {
-  console.log(E.GAME + " Mafia AI Benchmark - PERSONA EDITION v3");
+  console.log(E.GAME + " Mafia AI Benchmark - PERSONA EDITION v5");
   console.log("=".repeat(70));
-  console.log("Features: Persona System, Mafia Consensus, Roles, Voting");
+  console.log(
+    "Features: Persona System, Mafia Consensus, Roles, Voting, Database",
+  );
   console.log("=".repeat(70) + "\n");
 }
 const API_KEY = process.env.OPENAI_API_KEY;
+
+// Database integration
+let gameDatabase = null;
+const DB_PATH = process.env.DB_PATH || "./data/mafia.db";
+
+async function getGameDatabase() {
+  if (!gameDatabase) {
+    const { GameDatabase } = require("./modules/database.js");
+    gameDatabase = new GameDatabase(DB_PATH);
+    await gameDatabase.connect();
+  }
+  return gameDatabase;
+}
 
 const roleEmojis = {
   MAFIA: E.MAFIA,
@@ -863,8 +878,9 @@ function createGameEvent(
   eventType,
   visibility,
   content,
+  gameInstance = null,
 ) {
-  return {
+  const event = {
     gameId: gameId,
     round: round,
     phase: phase,
@@ -875,6 +891,23 @@ function createGameEvent(
     timestamp: new Date().toISOString(),
     content: content,
   };
+
+  // Persist to database if available
+  if (gameInstance && gameInstance.db && gameInstance.config.enableDatabase) {
+    try {
+      gameInstance.db.appendEvent(gameId, {
+        event_type: eventType,
+        timestamp: Date.now(),
+        private: visibility === "PRIVATE_MAFIA" || visibility === "ADMIN_ONLY",
+        payload: content,
+      });
+    } catch (error) {
+      console.error("[DB] Failed to persist event:", error.message);
+      // Don't throw - keep the game running
+    }
+  }
+
+  return event;
 }
 
 function createPrompt(player, gameState, phase) {
@@ -1082,12 +1115,18 @@ class MafiaGame {
     this.gameEvents = [];
     this.mafiaKillTarget = null;
 
+    // Game ID
+    this.gameId = null;
+
+    // Track context history
+    this.gameHistory = [];
+
     // Game configuration options
     this.config = {
       // Context window management
       maxContextChars:
         options.maxContextChars ||
-        parseInt(process.env.MAX_CONTEXT_CHARS || "100000", 10), // Maximum characters in game history
+        parseInt(process.env.MAX_CONTEXT_CHARS || "100000", 10),
 
       // Retry settings
       maxRetries:
@@ -1096,20 +1135,26 @@ class MafiaGame {
           : parseInt(process.env.MAX_RETRIES || "3", 10),
       retryDelay:
         options.retryDelay ||
-        parseInt(process.env.RETRY_DELAY_MS || "1000", 10), // ms
+        parseInt(process.env.RETRY_DELAY_MS || "1000", 10),
 
       // Persona generation diversity
       personaTemperature:
         options.personaTemperature ||
-        parseFloat(process.env.PERSONA_TEMPERATURE || "1.0"), // Higher = more diverse
+        parseFloat(process.env.PERSONA_TEMPERATURE || "1.0"),
 
       // Multi-role support (experimental)
       allowMultiRole:
         options.allowMultiRole || process.env.ALLOW_MULTI_ROLE === "true",
+
+      // Enable database persistence
+      enableDatabase:
+        options.enableDatabase !== undefined
+          ? options.enableDatabase
+          : process.env.ENABLE_DATABASE === "true",
     };
 
-    // Track context history
-    this.gameHistory = [];
+    // Database will be initialized in startGame() (async initialization)
+    this.db = null;
   }
 
   calculateRoles(numPlayers) {
@@ -1144,7 +1189,7 @@ class MafiaGame {
   }
 
   async startGame(numPlayers = 5, personaSeeds = null) {
-    console.log(E.GAME + " Starting Mafia Game v4");
+    console.log(E.GAME + " Starting Mafia Game v5");
     console.log("=".repeat(70));
 
     console.log("📋 Game Configuration:");
@@ -1152,8 +1197,83 @@ class MafiaGame {
     console.log(`   - Max Retries: ${this.config.maxRetries}`);
     console.log(`   - Persona Temperature: ${this.config.personaTemperature}`);
     console.log(
-      `   - Multi-Role Mode: ${this.config.allowMultiRole ? "ENABLED" : "DISABLED"}\n`,
+      `   - Multi-Role Mode: ${this.config.allowMultiRole ? "ENABLED" : "DISABLED"}`,
     );
+    console.log(
+      `   - Database: ${this.config.enableDatabase ? "ENABLED" : "DISABLED"}\n`,
+    );
+
+    // Connect to database if enabled
+    if (this.config.enableDatabase) {
+      try {
+        this.db = await getGameDatabase();
+        console.log(E.GAME + " Database persistence enabled");
+      } catch (error) {
+        console.error("[DB] Failed to connect to database:", error.message);
+        console.warn("[DB] Continuing without database persistence...");
+        this.db = null;
+        this.config.enableDatabase = false;
+      }
+    }
+
+    // Generate unique game ID
+    this.gameId =
+      "game-" + Date.now() + "-" + Math.random().toString(36).substring(2, 10);
+    console.log(E.GAME + " Game ID: " + this.gameId);
+
+    // Generate roles dynamically based on player count
+    const roles = this.calculateRoles(numPlayers);
+
+    // Calculate game seed for determinism
+    const gameSeed = Math.floor(Math.random() * 2147483647);
+
+    // Track event sequence for database
+    this.eventSequence = 0;
+
+    // Create game in database
+    if (this.config.enableDatabase && this.db) {
+      try {
+        this.db.createGame({
+          id: this.gameId,
+          seed: gameSeed,
+          playerCount: numPlayers,
+          mafiaCount: roles.filter((r) => r === "MAFIA").length,
+          status: "CREATED",
+          phase: "SETUP",
+          dayNumber: 0,
+          roundNumber: 0,
+          createdAt: Date.now(),
+          config: this.config,
+        });
+
+        // Log game creation event
+        createGameEvent(
+          this.gameId,
+          0,
+          "SETUP",
+          null,
+          "GAME_CREATED",
+          "ADMIN_ONLY",
+          {
+            gameId: this.gameId,
+            seed: gameSeed,
+            playerCount: numPlayers,
+            mafiaCount: roles.filter((r) => r === "MAFIA").length,
+            config: this.config,
+          },
+          this,
+        );
+      } catch (error) {
+        console.error(
+          "[DB] Failed to initialize game in database:",
+          error.message,
+        );
+        console.warn("[DB] Continuing without database persistence...");
+        // Disable database for this game
+        this.db = null;
+        this.config.enableDatabase = false;
+      }
+    }
 
     // If no personaSeeds provided, create array of undefined for LLM freedom
     // If personaSeeds provided, use them as guidance
@@ -1161,9 +1281,6 @@ class MafiaGame {
       personaSeeds = new Array(numPlayers).fill(undefined);
       console.log(E.LOCK + " No seeds provided - LLM will choose freely");
     }
-
-    // Generate roles dynamically based on player count
-    const roles = this.calculateRoles(numPlayers);
 
     // Ensure we have enough seeds for all players (use undefined if not enough)
     while (personaSeeds.length < numPlayers) {
