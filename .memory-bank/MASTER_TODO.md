@@ -7,9 +7,9 @@
 
 ## 🎯 OVERALL STATUS
 
-**Specification Coverage**: 62-67%
+**Specification Coverage**: 63-68%
 **Critical Missing**: 4 blocks
-**High Priority Missing**: 7 items (2 completed in Database Persistence - see below)
+**High Priority Missing**: 6 items (2 completed in Database Persistence, 1 in Strategic AI - see below)
 **Medium Priority Missing**: 14 items
 **Low Priority Missing**: 3 items
 
@@ -120,12 +120,13 @@
 **Spec Reference**: specs/role-mechanics.md
 **Priority**: HIGH
 
-- [ ] **AI-HIGH-1**: Implement mafia kill selection algorithm
+- [x] **AI-HIGH-1**: Implement mafia kill selection algorithm ✅ COMPLETED
   - Priority: Eliminate confirmed sheriff
   - Priority: Eliminate likely doctor
   - Priority: Eliminate high-suspicion town leader
   - **Effort**: Medium
   - **Spec Lines**: 60-99
+  - **Implementation**: calculateMafiaKillPriority() with scoring based on role and behavior
 
 - [ ] **AI-HIGH-2**: Implement doctor protection strategy
   - Self-protection logic
