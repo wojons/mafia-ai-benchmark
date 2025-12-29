@@ -552,7 +552,6 @@ function generateProceduralPersona(seed = undefined) {
 
 module.exports = {
   generatePersona,
-  generateNameFromSeed,
   generateProceduralPersona,
   PERSONA_SYSTEM_PROMPT,
 };

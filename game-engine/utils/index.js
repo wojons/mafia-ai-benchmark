@@ -62,6 +62,79 @@ function simpleUUID() {
 }
 
 // ============================================
+// NAME GENERATOR
+// ============================================
+
+function generateNameFromSeed(seed) {
+  const firstNames = [
+    "Alex",
+    "Morgan",
+    "Jordan",
+    "Casey",
+    "Taylor",
+    "Riley",
+    "Avery",
+    "Parker",
+    "Quinn",
+    "Skyler",
+    "Drew",
+    "Blake",
+    "Cameron",
+    "Dakota",
+    "Emerson",
+    "Finley",
+    "Harper",
+    "Hayden",
+    "Jesse",
+    "Kai",
+  ];
+
+  const lastNames = [
+    "Smith",
+    "Johnson",
+    "Williams",
+    "Brown",
+    "Jones",
+    "Garcia",
+    "Miller",
+    "Davis",
+    "Rodriguez",
+    "Martinez",
+    "Wilson",
+    "Anderson",
+    "Taylor",
+    "Thomas",
+    "Moore",
+    "Jackson",
+    "Martin",
+    "Lee",
+    "Thompson",
+    "White",
+  ];
+
+  // Try to extract name hints from seed (if provided)
+  if (seed) {
+    const seedWords = seed.split(" ");
+    const potentialFirst = seedWords.find((w) =>
+      firstNames.some((fn) => fn.toLowerCase() === w.toLowerCase()),
+    );
+
+    if (potentialFirst) {
+      const first =
+        potentialFirst.charAt(0).toUpperCase() +
+        potentialFirst.slice(1).toLowerCase();
+      const last = lastNames[Math.floor(Math.random() * lastNames.length)];
+      return `${first} ${last}`;
+    }
+  }
+
+  // Random name
+  const first = firstNames[Math.floor(Math.random() * firstNames.length)];
+  const last = lastNames[Math.floor(Math.random() * lastNames.length)];
+  return `${first} ${last}`;
+}
+
+// ============================================
 // EXPORTS
 // ============================================
 
@@ -69,4 +142,5 @@ module.exports = {
   E,
   roleEmojis,
   simpleUUID,
+  generateNameFromSeed,
 };
