@@ -879,6 +879,7 @@ function createGameEvent(
   visibility,
   content,
   gameInstance = null,
+  createCheckpoint = false,
 ) {
   const event = {
     gameId: gameId,
@@ -890,16 +891,36 @@ function createGameEvent(
     visibility: visibility,
     timestamp: new Date().toISOString(),
     content: content,
+
+    // Add game state snapshot context (for critical events)
+    gameStateSnapshot:
+      createCheckpoint && gameInstance ? gameInstance.captureGameState() : null,
   };
 
   // Persist to database if available
   if (gameInstance && gameInstance.db && gameInstance.config.enableDatabase) {
     try {
+      // For events with game state snapshot, create a database snapshot first
+      let snapshotId = null;
+      if (createCheckpoint) {
+        const snapshot = gameInstance.createSnapshot(
+          gameId,
+          gameInstance.eventSequence,
+          event.gameStateSnapshot,
+        );
+        snapshotId = null; // Would need to get the ID if we return it
+      }
+
+      // Append event with full context
       gameInstance.db.appendEvent(gameId, {
         event_type: eventType,
         timestamp: Date.now(),
         private: visibility === "PRIVATE_MAFIA" || visibility === "ADMIN_ONLY",
-        payload: content,
+        payload: {
+          ...content,
+          // Include full game state in payload for critical events
+          gameState: createCheckpoint ? event.gameStateSnapshot : undefined,
+        },
       });
     } catch (error) {
       console.error("[DB] Failed to persist event:", error.message);
@@ -1408,6 +1429,173 @@ class MafiaGame {
   }
 
   // ==========================================
+  // GAME STATE CAPTURE (Persistence & Recovery)
+  // ==========================================
+
+  /**
+   * Capture current game state for persistence
+   * Includes everything needed to reconstruct the game
+   */
+  captureGameState() {
+    return {
+      // Game info
+      gameId: this.gameId,
+      round: this.round,
+      dayNumber: this.dayNumber,
+      phase: this.phase,
+      gameStatus: this.gameStatus,
+      winner: this.winner,
+
+      // Players (full state)
+      players: this.players.map((p) => ({
+        id: p.id,
+        name: p.name,
+        role: p.role,
+        emoji: p.emoji,
+        isMafia: p.isMafia,
+        isAlive: p.isAlive,
+        persona: p.persona,
+      })),
+
+      // Dead players
+      deadPlayers: this.deadPlayers.map((p) => ({
+        id: p.id,
+        name: p.name,
+        role: p.role,
+        emoji: p.emoji,
+        deathType: p.deathType,
+      })),
+
+      // Game history (all events and messages)
+      gameHistory: this.gameHistory,
+      gameEvents: this.gameEvents,
+
+      // Special states
+      mafiaKillTarget: this.mafiaKillTarget
+        ? { id: this.mafiaKillTarget.id, name: this.mafiaKillTarget.name }
+        : null,
+      lastDoctorProtection: this.lastDoctorProtection,
+      vigilanteShotUsed: this.vigilanteShotUsed,
+      lastVigilanteTarget: this.lastVigilanteTarget
+        ? {
+            id: this.lastVigilanteTarget.id,
+            name: this.lastVigilanteTarget.name,
+          }
+        : null,
+
+      // Voting history
+      votingHistory: this.votingHistory || [],
+
+      // Timestamps
+      lastCheckpoint: Date.now(),
+    };
+  }
+
+  /**
+   * Create a checkpoint (snapshot) of current game state
+   * Used for resuming from database after crash/restart
+   */
+  async createGameStateCheckpoint(phase) {
+    if (this.db && this.config.enableDatabase) {
+      try {
+        const gameState = this.captureGameState();
+        this.db.createSnapshot(this.gameId, this.eventSequence, gameState);
+        console.log(
+          `[DB] Created checkpoint: ${this.gameId}#phase=${phase} (seq=${this.eventSequence})`,
+        );
+        return gameState;
+      } catch (error) {
+        console.error(
+          "[DB] Failed to create game state checkpoint:",
+          error.message,
+        );
+        return null;
+      }
+    }
+    return null;
+  }
+
+  /**
+   * Resume game from database checkpoint
+   * Used to restart a paused or crashed game
+   */
+  async resumeFromCheckpoint(gameId) {
+    if (!(this.db && this.config.enableDatabase)) {
+      throw new Error("Database not enabled for game resume");
+    }
+
+    try {
+      console.log(`[DB] Attempting to resume game: ${gameId}`);
+
+      // Get latest snapshot (most recent game state)
+      const snapshot = this.db.getLatestSnapshot(gameId);
+      if (!snapshot) {
+        throw new Error(`No snapshot found for game ${gameId}. Cannot resume.`);
+      }
+
+      console.log(
+        `[DB] Found checkpoint from ${new Date(
+          snapshot.createdAt,
+        ).toISOString()}`,
+      );
+
+      // Restore game state from snapshot
+      const state = snapshot.gameState;
+
+      // Restore basic game info
+      this.gameId = state.gameId;
+      this.round = state.round;
+      this.dayNumber = state.dayNumber;
+      this.phase = state.phase;
+      this.gameStatus = state.gameStatus;
+      this.winner = state.winner;
+
+      // Restore players (create fresh objects with same data)
+      this.players = state.players.map((p) => ({
+        ...p,
+        // Keep persona reference
+      }));
+      this.deadPlayers = state.deadPlayers;
+
+      // Restore history
+      this.gameHistory = state.gameHistory || [];
+      this.gameEvents = state.gameEvents || [];
+
+      // Restore special states
+      if (state.mafiaKillTarget) {
+        const player = this.players.find(
+          (p) => p.id === state.mafiaKillTarget.id,
+        );
+        this.mafiaKillTarget = player || null;
+      }
+      this.lastDoctorProtection = state.lastDoctorProtection;
+      this.vigilanteShotUsed = state.vigilanteShotUsed;
+      if (state.lastVigilanteTarget) {
+        const player = this.players.find(
+          (p) => p.id === state.lastVigilanteTarget.id,
+        );
+        this.lastVigilanteTarget = player || null;
+      }
+      this.votingHistory = state.votingHistory || [];
+
+      console.log(
+        `[DB] Game resumed at round ${this.round}, phase ${this.phase}`,
+      );
+      console.log(
+        `[DB] Players: ${this.players.length} alive, ${this.deadPlayers.length} dead`,
+      );
+
+      // Update game status in database
+      await this.db.updateGame(gameId, { status: "RUNNING" });
+
+      return true;
+    } catch (error) {
+      console.error("[DB] Failed to resume game:", error.message);
+      throw error;
+    }
+  }
+
+  // ==========================================
   // STRATEGIC AI HELPERS
   // ==========================================
 
@@ -1586,8 +1774,13 @@ class MafiaGame {
         "PHASE_CHANGE",
         "PUBLIC",
         { aliveCount: alivePlayers.length, mafiaCount: aliveMafia.length },
+        this,
+        true, // Create checkpoint at night start
       ),
     );
+
+    // Create database checkpoint for resumability
+    await this.createGameStateCheckpoint("NIGHT_START");
 
     // STEP 1: MAFIA TEAM CHAT
     console.log(E.MAFIA + " STEP 1: MAFIA TEAM CHAT");
@@ -2196,6 +2389,23 @@ class MafiaGame {
     console.log("\n" + "=".repeat(70));
     console.log(E.DAY + " DAY " + this.round + " - Discussion & Voting");
     console.log("=".repeat(70));
+
+    // Create checkpoint at day start
+    this.gameEvents.push(
+      createGameEvent(
+        gameId,
+        this.round,
+        "DAY_STARTED",
+        null,
+        "PHASE_CHANGE",
+        "PUBLIC",
+        { aliveCount: alivePlayers.length, phase: "DAY_DISCUSSION" },
+        this,
+        true, // Create checkpoint at day start
+      ),
+    );
+
+    await this.createGameStateCheckpoint("DAY_START");
 
     console.log(
       "\n👥 Alive (" +

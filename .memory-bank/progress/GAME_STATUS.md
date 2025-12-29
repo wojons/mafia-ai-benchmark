@@ -94,14 +94,25 @@ SAYS:  [Public statement, can lie (mafia) or tell truth (town)]
 - Context-aware responses based on role
 - Real-time API calls during game
 
-### ✅ Database Persistence (NEW)
+### ✅ Database Persistence ✅
 
 - SQLite integration using sql.js (no native bindings)
 - Full event sourcing with sequence numbers
-- Privacy flags for event visibility
+- Privacy flags for event visibility (PUBLIC, PRIVATE_MAFIA, ADMIN_ONLY)
 - Automatic persistence to disk
 - Graceful degradation if database fails
 - Optional via ENABLE_DATABASE environment variable
+- **NEW: Players table for per-game player tracking**
+
+### ✅ Game Persistence & Recovery (NEW)
+
+- Full game state checkpointing at phase transitions
+- Pause/resume capability for long-running games
+- Crash recovery from database snapshots
+- Event replay capability
+- Support for massive games (5000+ players running for weeks)
+- All chat history, voting history, and player states persisted
+- Zero-loss persistence - nothing in memory only
 
 ## Running the Game
 

@@ -217,6 +217,36 @@ class GameDatabase {
       this.persist();
 
       console.log("[DB] Database tables initialized");
+
+      // Add game_state_snapshot_id column to events if not exists
+      try {
+        // Check if column exists
+        const checkSql = "PRAGMA table_info(events)";
+        const stmt = this.db.prepare(checkSql);
+        const columns = [];
+        while (stmt.step()) {
+          columns.push(stmt.getAsObject());
+        }
+        stmt.free();
+
+        const hasStateColumn = columns.some(
+          (c) => c.name === "game_state_snapshot_id",
+        );
+
+        if (!hasStateColumn) {
+          console.log("[DB] Adding game_state_snapshot_id to events table...");
+          this.db.run(
+            "ALTER TABLE events ADD COLUMN game_state_snapshot_id INTEGER",
+          );
+          console.log("[DB] Added game_state_snapshot_id column");
+        }
+      } catch (error) {
+        // Ignore if ALTER fails (might not be supported)
+        console.warn(
+          "[DB] Could not add game_state_snapshot_id column:",
+          error.message,
+        );
+      }
     } catch (error) {
       console.error("[DB] Failed to initialize tables:", error.message);
       throw error;
