@@ -1,14 +1,15 @@
 # Master TODO List - Specification vs Implementation Gaps
 
 **Created**: December 29, 2025
+**Last Updated**: December 29, 2025
 **Status**: Active
 **Total Items**: 42 TODO items
 
 ## 🎯 OVERALL STATUS
 
-**Specification Coverage**: 60-65%
+**Specification Coverage**: 62-67%
 **Critical Missing**: 4 blocks
-**High Priority Missing**: 9 items
+**High Priority Missing**: 7 items (2 completed in Database Persistence - see below)
 **Medium Priority Missing**: 14 items
 **Low Priority Missing**: 3 items
 
@@ -93,18 +94,20 @@
 **Spec Reference**: specs/database-schema.md
 **Priority**: HIGH
 
-- [ ] **DB-HIGH-1**: Implement SQLite integration
+- [x] **DB-HIGH-1**: Implement SQLite integration ✅ COMPLETED
   - Connect SQLite database to game engine
   - Create game_events table
   - Create game_sessions table
   - **Effort**: Medium
   - **Spec Lines**: 1-50
+  - **Implementation**: Used sql.js (pure JavaScript, no native bindings required)
 
-- [ ] **DB-HIGH-2**: Implement event persistence
+- [x] **DB-HIGH-2**: Implement event persistence ✅ COMPLETED
   - Save all game events to database
   - Add timestamps and metadata
   - Enable event replay capability
   - **Effort**: Medium
+  - **Implementation**: Events auto-saved via createGameEvent() with privacy flags
 
 - [ ] **DB-HIGH-3**: Add cross-game analysis
   - Query historic game data

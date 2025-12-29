@@ -47,5 +47,8 @@
     "llm-games"
   ],
   "author": "Mafia AI Benchmark Team",
-  "license": "MIT"
+  "license": "MIT",
+  "dependencies": {
+    "sql.js": "^1.13.0"
+  }
 }
