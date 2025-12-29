@@ -135,6 +135,211 @@ function generateNameFromSeed(seed) {
 }
 
 // ============================================
+// CONSTANT DATA ARRAYS
+// ============================================
+
+const firstNames = [
+  "Alex",
+  "Morgan",
+  "Jordan",
+  "Casey",
+  "Taylor",
+  "Riley",
+  "Avery",
+  "Parker",
+  "Quinn",
+  "Skyler",
+  "Drew",
+  "Blake",
+  "Cameron",
+  "Dakota",
+  "Emerson",
+  "Finley",
+  "Harper",
+  "Hayden",
+  "Jesse",
+  "Kai",
+];
+
+const moralAlignments = [
+  "Lawful Good",
+  "Neutral Good",
+  "Chaotic Good",
+  "Lawful Neutral",
+  "True Neutral",
+  "Chaotic Neutral",
+  "Lawful Evil",
+  "Neutral Evil",
+  "Chaotic Evil",
+];
+
+const coreValues = [
+  "Family",
+  "Friendship",
+  "Justice",
+  "Freedom",
+  "Power",
+  "Knowledge",
+  "Honesty",
+  "Wealth",
+  "Peace",
+  "Glory",
+];
+
+const flaws = [
+  "Trusting",
+  "Arrogant",
+  "Obsessive",
+  "Impulsive",
+  "Cynical",
+  "Naive",
+  "Stubborn",
+  "Greedy",
+];
+
+const archetypes = {
+  historical: [
+    {
+      name: "Caesar",
+      archetype: "Leader",
+      traits: ["Charismatic", "Strategic", "Ambitious"],
+      communicationStyle: "Authoritative",
+      humor: "dry",
+    },
+    {
+      name: "Cleopatra",
+      archetype: "Diplomat",
+      traits: ["Intelligent", "Charming", "Cunning"],
+      communicationStyle: "Elegant",
+      humor: "witty",
+    },
+    {
+      name: "Leonardo",
+      archetype: "Inventor",
+      traits: ["Curious", "Creative", "Perfectionist"],
+      communicationStyle: "Analytical",
+      humor: "quiet",
+    },
+    {
+      name: "Genghis",
+      archetype: "Conqueror",
+      traits: ["Fierce", "Strategic", "Honorable"],
+      communicationStyle: "Direct",
+      humor: "serious",
+    },
+    {
+      name: "Marie",
+      archetype: "Scientist",
+      traits: ["Dedicated", "Brilliant", "Resilient"],
+      communicationStyle: "Precise",
+      humor: "subtle",
+    },
+    {
+      name: "Lincoln",
+      archetype: "Mediator",
+      traits: ["Wise", "Patient", "Principled"],
+      communicationStyle: "Warm",
+      humor: "gentle",
+    },
+    {
+      name: "Elizabeth",
+      archetype: "Strategist",
+      traits: ["Calculating", "Charismatic", "Independent"],
+      communicationStyle: "Regal",
+      humor: "sharp",
+    },
+    {
+      name: "Sun Tzu",
+      archetype: "Tactician",
+      traits: ["Analytical", "Strategic", "Patient"],
+      communicationStyle: "Measured",
+      humor: "ironic",
+    },
+  ],
+  fictional: [
+    {
+      name: "Sherlock",
+      archetype: "Detective",
+      traits: ["Observant", "Logical", "Detached"],
+      communicationStyle: "Clinical",
+      humor: "dry",
+    },
+    {
+      name: "Atticus",
+      archetype: "Defender",
+      traits: ["Principled", "Empathetic", "Courageous"],
+      communicationStyle: "Warm",
+      humor: "gentle",
+    },
+    {
+      name: "Katniss",
+      archetype: "Survivor",
+      traits: ["Resourceful", "Brave", "Protective"],
+      communicationStyle: "Blunt",
+      humor: "rare",
+    },
+    {
+      name: "Sherlock",
+      archetype: "Detective",
+      traits: ["Observant", "Logical", "Detached"],
+      communicationStyle: "Clinical",
+      humor: "dry",
+    },
+    {
+      name: "Atticus",
+      archetype: "Defender",
+      traits: ["Principled", "Empathetic", "Courageous"],
+      communicationStyle: "Warm",
+      humor: "gentle",
+    },
+    {
+      name: "Katniss",
+      archetype: "Survivor",
+      traits: ["Resourceful", "Brave", "Protective"],
+      communicationStyle: "Blunt",
+      humor: "rare",
+    },
+  ],
+  modern: [
+    {
+      name: "Tech Leader",
+      archetype: "Innovator",
+      traits: ["Visionary", "Analytical", "Determined"],
+      communicationStyle: "Precise",
+      humor: "dry",
+    },
+    {
+      name: "Community Organizer",
+      archetype: "Unifier",
+      traits: ["Charitable", "Connected", "Inspiring"],
+      communicationStyle: "Passionate",
+      humor: "warm",
+    },
+    {
+      name: "Small Business Owner",
+      archetype: "Entrepreneur",
+      traits: ["Resourceful", "Determined", "Practical"],
+      communicationStyle: "Direct",
+      humor: "witty",
+    },
+    {
+      name: "Teacher",
+      archetype: "Mentor",
+      traits: ["Patient", "Knowledgeable", "Caring"],
+      communicationStyle: "Measured",
+      humor: "subtle",
+    },
+    {
+      name: "Community Leader",
+      archetype: "Activist",
+      traits: ["Passionate", "Principled", "Resilient"],
+      communicationStyle: "Empathetic",
+      humor: "gentle",
+    },
+  ],
+};
+
+// ============================================
 // RANDOM UTILITIES
 // ============================================
 
@@ -172,4 +377,10 @@ module.exports = {
   randomChoice,
   randomSample,
   randomInt,
+  // Constants
+  firstNames,
+  moralAlignments,
+  coreValues,
+  flaws,
+  archetypes,
 };
