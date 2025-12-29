@@ -1,10 +1,10 @@
 # Memory Bank - Current Progress Summary
 
-## 🎯 Project Status: DATABASE INTEGRATION COMPLETED
+## 🎯 Project Status: STRATEGIC AI ALGORITHM IMPLEMENTED
 
 **Last Updated**: December 29, 2025
-**Version**: 5.0
-**Commit**: 17efe3f
+**Version**: 5.1
+**Commit**: 3b1785e
 
 ---
 
@@ -44,7 +44,7 @@
 - [x] Rich backstories and flaws
 - [x] AI prompt integration
 
-### 5. Database Persistence (NEW) ✅
+### 5. Database Persistence ✅
 
 - [x] SQLite integration using sql.js (no native bindings required)
 - [x] Full database schema implementation (games, events, snapshots tables)
@@ -54,7 +54,27 @@
 - [x] Optional persistence via ENABLE_DATABASE environment variable
 - [x] Database tests passing
 
-### 6. Testing - 272+ Tests
+### 6. Players Table (NEW) ✅
+
+- [x] Added players table to database schema
+- [x] Per-game player tracking with roles and status
+- [x] createPlayer, getPlayers, updatePlayer methods
+- [x] Player creation integrated into game engine
+- [x] Model and provider tracking per player
+- [x] Support for alive/death status updates
+- [x] Unique constraint on (game_id, player_id)
+
+### 7. Strategic AI - Mafia Kill Selection (NEW) ✅
+
+- [x] calculateMafiaKillPriority() function implemented
+- [x] Priority-based target scoring (Sheriff > Doctor > Vigilante > Villagers)
+- [x] Voting history analysis for strategic decisions
+- [x] Player activity tracking for threat assessment
+- [x] Strategic priorities passed to AI as guidance
+- [x] Random variation for unpredictability
+- [x] Debug logging for verification
+
+### 8. Testing - 272+ Tests (baseline)
 
 - [x] FSM tests (51)
 - [x] Role tests (58)
