@@ -745,6 +745,411 @@ class GameDatabase {
   }
 
   // ==========================================
+  // CROSS-GAME ANALYSIS
+  // ==========================================
+
+  /**
+   * Get statistics about games by status
+   */
+  getGamesByStatus() {
+    try {
+      const stmt = this.db.prepare(`
+        SELECT status, COUNT(*) as count,
+               ROUND(AVG(duration_ms) / 1000, 2) as avg_duration_seconds
+        FROM games
+        WHERE status != 'CANCELLED'
+        GROUP BY status
+        ORDER BY count DESC
+      `);
+
+      const stats = [];
+      while (stmt.step()) {
+        const rows = [];
+        stmt.getAsObject();
+      }
+      stmt.free();
+
+      // Try a different approach with direct SQL
+      const results = this.db.exec(
+        "SELECT status, COUNT(*) as count, ROUND(AVG(duration_ms) / 1000, 2) as avg_duration_seconds FROM games WHERE status != 'CANCELLED' GROUP BY status ORDER BY count DESC",
+      );
+      return results;
+    } catch (error) {
+      console.error("[DB] Failed to get games by status:", error.message);
+      throw error;
+    }
+  }
+
+  /**
+   * Get win rate by winner (town vs mafia)
+   */
+  getWinRates() {
+    try {
+      const stmt = this.db.prepare(`
+        SELECT winner, COUNT(*) as games,
+               ROUND(CAST(COUNT(*) AS FLOAT) * 100.0 / (
+                 SELECT COUNT(*) FROM games WHERE winner IS NOT NULL AND status = 'FINISHED'
+               ), 2) as win_rate,
+               ROUND(AVG(duration_ms) / 1000, 2) as avg_duration_seconds
+        FROM games
+        WHERE winner IS NOT NULL
+          AND status = 'FINISHED'
+        GROUP BY winner
+        ORDER BY games DESC
+      `);
+
+      const stats = [];
+      while (stmt.step()) {
+        const row = stmt.getAsObject();
+        stats.push(row[0]);
+      }
+      stmt.free();
+
+      return stats;
+    } catch (error) {
+      console.error("[DB] Failed to get win rates:", error.message);
+      throw error;
+    }
+  }
+
+  /**
+   * Get role performance statistics
+   */
+  getRolePerformance() {
+    try {
+      const stmt = this.db.prepare(`
+        SELECT
+          p.assigned_role,
+          COUNT(*) as total_players,
+          SUM(CASE WHEN p.is_alive = 1 THEN 1 ELSE 0 END) as survivors,
+          ROUND(CAST(SUM(CASE WHEN p.is_alive = 1 THEN 1 ELSE 0 END) AS FLOAT) * 100.0 / COUNT(*), 2) as survival_rate
+        FROM players p
+        JOIN games g ON g.id = p.game_id
+        WHERE g.status = 'FINISHED'
+        GROUP BY p.assigned_role
+        ORDER BY survival_rate DESC
+      `);
+
+      const stats = [];
+      while (stmt.step()) {
+        const row = stmt.getAsObject();
+        stats.push(row[0]);
+      }
+      stmt.free();
+
+      return stats;
+    } catch (error) {
+      console.error("[DB] Failed to get role performance:", error.message);
+      throw error;
+    }
+  }
+
+  /**
+   * Get game length distribution
+   */
+  getGameLengthDistribution() {
+    try {
+      const stmt = this.db.prepare(`
+        SELECT
+          CASE
+            WHEN round_number < 3 THEN '1-2 rounds'
+            WHEN round_number < 5 THEN '3-4 rounds'
+            WHEN round_number < 7 THEN '5-6 rounds'
+            WHEN round_number < 10 THEN '7-9 rounds'
+            ELSE '10+ rounds'
+          END as length_range,
+          COUNT(*) as games,
+          ROUND(CAST(COUNT(*) AS FLOAT) * 100.0 / (
+            SELECT COUNT(*) FROM games WHERE status = 'FINISHED'
+          ), 2) as percentage
+        FROM games
+        WHERE status = 'FINISHED' AND round_number IS NOT NULL
+        GROUP BY length_range
+        ORDER BY MIN(round_number) DESC
+      `);
+
+      const stats = [];
+      while (stmt.step()) {
+        const row = stmt.getAsObject();
+        stats.push(row[0]);
+      }
+      stmt.free();
+
+      return stats;
+    } catch (error) {
+      console.error(
+        "[DB] Failed to get game length distribution:",
+        error.message,
+      );
+      throw error;
+    }
+  }
+
+  /**
+   * Get event type distribution
+   */
+  getEventTypeDistribution() {
+    try {
+      const stmt = this.db.prepare(`
+        SELECT event_type, COUNT(*) as occurrences
+        FROM events
+        GROUP BY event_type
+        ORDER BY occurrences DESC
+        LIMIT 20
+      `);
+
+      const stats = [];
+      while (stmt.step()) {
+        const row = stmt.getAsObject();
+        stats.push(row[0]);
+      }
+      stmt.free();
+
+      return stats;
+    } catch (error) {
+      console.error(
+        "[DB] Failed to get event type distribution:",
+        error.message,
+      );
+      throw error;
+    }
+  }
+
+  /**
+   * Get time-series data (games per day)
+   */
+  getGamesPerDay(days = 30) {
+    try {
+      const cutoffDate = Date.now() - days * 24 * 60 * 60 * 1000;
+      const stmt = this.db.prepare(`
+        SELECT
+          DATE(created_at / 1000, 'unixepoch') as date,
+          COUNT(*) as games_finished,
+          SUM(CASE WHEN winner = 'town' THEN 1 ELSE 0 END) as town_wins,
+          SUM(CASE WHEN winner = 'mafia' THEN 1 ELSE 0 END) as mafia_wins,
+          COUNT(*) - SUM(CASE WHEN winner IS NULL THEN 1 ELSE 0 END) as games_completed
+        FROM games
+        WHERE created_at >= ?
+          AND status != 'CANCELLED'
+        GROUP BY date
+        ORDER BY date DESC
+      `);
+
+      stmt.bind([cutoffDate]);
+
+      const stats = [];
+      while (stmt.step()) {
+        const row = stmt.getAsObject();
+        stats.push(row[0]);
+      }
+      stmt.free();
+
+      return stats;
+    } catch (error) {
+      console.error("[DB] Failed to get games per day:", error.message);
+      throw error;
+    }
+  }
+
+  /**
+   * Generate comprehensive cross-game report
+   */
+  generateCrossGameReport() {
+    try {
+      console.log("\n" + "=".repeat(60));
+      console.log("CROSS-GAME ANALYSIS REPORT");
+      console.log("=".repeat(60));
+      console.log(`Generated: ${new Date().toISOString()}`);
+
+      const dbStats = this.getStats();
+      console.log(`\n📊 Database Stats:`);
+      console.log(`  Total Games: ${dbStats.games}`);
+      console.log(`  Total Events: ${dbStats.events}`);
+      console.log(`  Snapshots: ${dbStats.snapshots}`);
+
+      const statusStats = this.getGamesByStatus();
+      console.log(`\n📈 Games by Status:`);
+      statusStats.forEach((stat) => {
+        console.log(
+          `  ${stat.status}: ${stat.count} games` +
+            (stat.avg_duration_seconds
+              ? ` (${stat.avg_duration_seconds}s avg)`
+              : ""),
+        );
+      });
+
+      const winRates = this.getWinRates();
+      console.log(`\n🏆 Win Rates (Completed Games):`);
+      winRates.forEach((stat) => {
+        console.log(
+          `  ${stat.winner}: ${stat.games} games (${stat.win_rate}%)` +
+            ` - ${stat.avg_duration_seconds}s avg duration`,
+        );
+      });
+
+      const roleStats = this.getRolePerformance();
+      console.log(`\n👤 Role Performance (Survival Rate):`);
+      roleStats.forEach((stat) => {
+        console.log(
+          `  ${stat.assigned_role}: ${stat.survivors}/${stat.total_players} survived (${stat.survival_rate}%)`,
+        );
+      });
+
+      const lengthStats = this.getGameLengthDistribution();
+      console.log(`\n⏱️ Game Length Distribution:`);
+      lengthStats.forEach((stat) => {
+        console.log(
+          `  ${stat.length_range}: ${stat.games} games (${stat.percentage}%)`,
+        );
+      });
+
+      const eventStats = this.getEventTypeDistribution();
+      console.log(`\n📝 Top Event Types:`);
+      const topEvents = eventStats.slice(0, 10);
+      topEvents.forEach((stat) => {
+        console.log(`  ${stat.event_type}: ${stat.occurrences} occurrences`);
+      });
+
+      const dailyStats = this.getGamesPerDay(7);
+      console.log(`\n📅 Last 7 Days:`);
+      dailyStats.forEach((stat) => {
+        console.log(`  ${stat.date}: ${stat.games_finished} games`);
+      });
+
+      console.log("\n" + "=".repeat(60));
+
+      return {
+        databaseStats: dbStats,
+        gamesByStatus: statusStats,
+        winRates: winRates,
+        rolePerformance: roleStats,
+        gameLengthDistribution: lengthStats,
+        eventTypeDistribution: eventStats,
+        gamesPerDay: dailyStats,
+        generatedAt: new Date().toISOString(),
+      };
+    } catch (error) {
+      console.error(
+        "[DB] Failed to generate cross-game report:",
+        error.message,
+      );
+      throw error;
+    }
+  }
+
+  /**
+   * Query historic game data with filters
+   */
+  queryHistoricGames(filters = {}) {
+    try {
+      let query = "SELECT * FROM games WHERE 1=1";
+      const params = [];
+
+      if (filters.winner) {
+        query += " AND winner = :winner";
+        params.winner = filters.winner;
+      }
+
+      if (filters.status) {
+        query += " AND status = :status";
+        params.status = filters.status;
+      }
+
+      if (filters.minDayCount) {
+        query += " AND day_number >= :minDayCount";
+        params.minDayCount = filters.minDayCount;
+      }
+
+      if (filters.maxDayCount) {
+        query += " AND day_number <= :maxDayCount";
+        params.maxDayCount = filters.maxDayCount;
+      }
+
+      if (filters.startDate) {
+        query += " AND created_at >= :startDate";
+        params.startDate = filters.startDate;
+      }
+
+      if (filters.endDate) {
+        query += " AND created_at <= :endDate";
+        params.endDate = filters.endDate;
+      }
+
+      if (filters.limit) {
+        query += " ORDER BY created_at DESC LIMIT :limit";
+        params.limit = filters.limit;
+      } else {
+        query += " ORDER BY created_at DESC";
+      }
+
+      const stmt = this.db.prepare(query);
+      stmt.bind(params);
+
+      const games = [];
+      while (stmt.step()) {
+        const row = stmt.getAsObject();
+        games.push({
+          ...row,
+          config: row.config_json ? JSON.parse(row.config_json) : null,
+          initialRoles: row.initial_roles ? JSON.parse(row.initial_roles) : [],
+          finalState: row.final_state ? JSON.parse(row.final_state) : null,
+        });
+      }
+      stmt.free();
+
+      return games;
+    } catch (error) {
+      console.error("[DB] Failed to query historic games:", error.message);
+      throw error;
+    }
+  }
+
+  /**
+   * Get player statistics across all games
+   */
+  getPlayerStats(playerName = null) {
+    try {
+      let query = `
+        SELECT
+          p.player_id,
+          p.player_name,
+          p.assigned_role,
+          g.winner,
+          g.day_number,
+          p.is_alive,
+          g.id as game_id,
+          g.created_at as game_date
+        FROM players p
+        JOIN games g ON g.id = p.game_id
+        WHERE 1=1
+      `;
+
+      const params = [];
+
+      if (playerName) {
+        query += " AND p.player_name LIKE :playerName";
+        params.playerName = `%${playerName}%`;
+      }
+
+      query += " ORDER BY g.created_at DESC";
+
+      const stmt = this.db.prepare(query);
+      stmt.bind(params);
+
+      const stats = [];
+      while (stmt.step()) {
+        stats.push(stmt.getAsObject());
+      }
+      stmt.free();
+
+      return stats;
+    } catch (error) {
+      console.error("[DB] Failed to get player stats:", error.message);
+      throw error;
+    }
+  }
+
+  // ==========================================
   // UTILITY METHODS
   // ==========================================
 
