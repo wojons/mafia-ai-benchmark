@@ -69,6 +69,34 @@ Public Statement: "I investigated X. They are MAFIA."
 Mafia Team Info: "Sheriff investigated X, result: MAFIA. This is our teammate!"
 ```
 
+### AI Prompting Enhancement (December 30, 2025) 🔄
+
+**Phase-Specific Prompts ✅**:
+
+- Added `getPhaseInstructions()` helper for phase-aware prompts
+- Phase-specific guidance for: MAFIA_CHAT, DOCTOR_ACTION, SHERIFF_INVESTIGATION, DAY_DISCUSSION, DAY_VOTE
+- Models now receive explicit instructions for current phase
+- See: [`specs/ai-prompting-enhancement.md`](../../specs/ai-prompting-enhancement.md)
+
+**Multi-Role Fixes ✅**:
+
+- Fixed multi-role player filtering to use `playerHasRole()` instead of direct role check
+- Sheriff investigation now shows ALL roles using `formatPlayerRoles()`
+- Multi-role players properly detected for role actions
+
+**Documentation Created ✅**:
+
+- `specs/ai-prompting-enhancement.md` - Detailed implementation spec
+- `specs/multi-role-coordination.md` - Coordination system (planned)
+- `specs/AI_PROMPTING_QUICK_REFERENCE.md` - Quick reference guide
+- `specs/IMPLEMENTATION_PROMPTING_STATUS.md` - Progress tracking
+
+**Known Issues ⚠️**:
+
+- JSON parse failures at ~50% rate (investigation needed)
+- Multi-role phase guidance partially incomplete
+- Multi-doctor/sheriff/vigilante coordination planned but not implemented
+
 ### Event Sourcing Structure ✅
 
 ```javascript

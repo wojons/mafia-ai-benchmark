@@ -3,7 +3,7 @@
 // Mafia AI Benchmark
 // ============================================
 
-const { openDatabase, createGameEvent } = require("./modules/database");
+const { openDatabase, createGameEvent } = require("./database");
 
 /**
  * Token Metrics Tracking

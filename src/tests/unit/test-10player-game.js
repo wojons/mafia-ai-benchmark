@@ -5,7 +5,7 @@
 
 require("dotenv").config();
 
-const { MafiaGame } = require("./game-engine");
+const { MafiaGame } = require("../../../game-engine");
 
 async function run10PlayerGameTest() {
   console.log("\n" + "=".repeat(70));

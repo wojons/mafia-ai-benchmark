@@ -5,7 +5,7 @@
 
 require("dotenv").config();
 
-const { MafiaGame } = require("./game-engine");
+const { MafiaGame } = require("../../../game-engine");
 const {
   CostTracker,
   ContextCompressor,
