@@ -586,7 +586,13 @@ const roleEmojis = {
 };
 
 // Generate personas using data from utils
-const { archetypes } = require("./game-engine/utils");
+const {
+  archetypes,
+  gamePhases,
+  gameMessages,
+  priorityScores,
+  gameLimits,
+} = require("./game-engine/utils");
 
 function generateGamePersonas(numPlayers) {
   const personas = [];
@@ -1936,31 +1942,31 @@ class MafiaGame {
         ) || [];
 
       if (!hasBeenInvestigated && recentAccusations.length >= 3) {
-        score += 120;
+        score += priorityScores.SHERIFF;
         reasons.push(
           "Highly suspicious - accused multiple times, never investigated",
         );
       } else if (!hasBeenInvestigated && recentAccusations.length >= 2) {
-        score += 100;
+        score += priorityScores.MAFIA_LEADER;
         reasons.push("Suspicious - accused twice, never investigated");
       } else if (!hasBeenInvestigated && recentAccusations.length >= 1) {
-        score += 80;
+        score += priorityScores.DOCTOR;
         reasons.push("Accused once, never investigated");
       }
 
-      // Priority 2: Moderate suspicion, investigated long ago (70 points)
+      // Priority 2: Moderate suspicion, investigated long ago
       if (hasBeenInvestigated) {
         const daysSinceInvestigated =
           this.dayNumber - (hasBeenInvestigated.day || 0);
         if (daysSinceInvestigated >= 3) {
-          score += 70;
+          score += priorityScores.VIGILANTE_ACTIVE;
           reasons.push(
             `Investigated ${daysSinceInvestigated} days ago - worth re-checking`,
           );
         }
       }
 
-      // Priority 3: Very active but quiet (50 points) - suspicious
+      // Priority 3: Very active but quiet - suspicious
       const messagesByPlayer =
         this.gameHistory?.filter?.(
           (g) => g.playerId === player.id && g.visibility === "PUBLIC",
@@ -1971,12 +1977,12 @@ class MafiaGame {
           messagesByPlayer.reduce((sum, m) => sum + (m.says?.length || 0), 0) /
           messagesByPlayer.length;
         if (avgLength < 50) {
-          score += 50;
+          score += priorityScores.LEADER;
           reasons.push("Active but vague messages - could be mafia");
         }
       }
 
-      // Priority 4: Voting patterns that are suspicious (40 points)
+      // Priority 4: Voting patterns that are suspicious
       const recentVotes = gameState?.votingHistory?.slice(-5) || [];
       let suspiciousVotes = 0;
       for (const voteRound of recentVotes) {
@@ -2318,13 +2324,13 @@ class MafiaGame {
       createGameEvent(
         gameId,
         this.round,
-        "NIGHT_STARTED",
+        gameMessages.MAFIA_CHAT_START,
         null,
         "PHASE_CHANGE",
-        "PUBLIC",
-        { aliveCount: alivePlayers.length, mafiaCount: aliveMafia.length },
+        "PRIVATE_MAFIA",
+        { aliveCount: aliveMafia.length, maxMessages: maxMessages },
         this,
-        true, // Create checkpoint at night start
+        true, // Create checkpoint at mafia chat start
       ),
     );
 
@@ -2341,8 +2347,8 @@ class MafiaGame {
       );
 
       const mafiaMessages = [];
-      const maxMessages = 6;
-      const maxPerPlayer = 2;
+      const maxMessages = gameLimits.MAFIA_MAX_MESSAGES;
+      const maxPerPlayer = gameLimits.MAFIA_MAX_PER_PLAYER;
       const mafiaMessageCounts = {};
       aliveMafia.forEach((m) => (mafiaMessageCounts[m.id] = 0));
 
@@ -2361,7 +2367,7 @@ class MafiaGame {
 
         const gameState = {
           round: this.round,
-          phase: "MAFIA_CHAT",
+          phase: gamePhases.MAFIA_CHAT,
           alivePlayers,
           deadPlayers: this.deadPlayers,
           previousPhaseData:
@@ -4018,7 +4024,7 @@ class MafiaGame {
     const phase = gameState.phase;
     const target = gameState.alivePlayers?.[0];
 
-    if (phase === "MAFIA_CHAT") {
+    if (phase === gamePhases.MAFIA_CHAT) {
       return {
         think: "[Private] I need to discuss strategy.",
         says: "I think we should target someone suspicious.",
@@ -4026,7 +4032,7 @@ class MafiaGame {
       };
     }
 
-    if (phase === "MAFIA_KILL_VOTE" || phase === "VOTING") {
+    if (phase === gamePhases.MAFIA_KILL_VOTE || phase === gamePhases.VOTING) {
       const voteTarget = target || { name: "Bob" };
       return {
         think: "[Private] My vote is for " + voteTarget.name + ".",
@@ -4035,7 +4041,7 @@ class MafiaGame {
       };
     }
 
-    if (phase === "DOCTOR_ACTION") {
+    if (phase === gamePhases.DOCTOR_ACTION) {
       return {
         think: "[Private] I'll protect " + (target?.name || "someone") + ".",
         says: "I'll be protecting someone tonight.",
@@ -4043,7 +4049,7 @@ class MafiaGame {
       };
     }
 
-    if (phase === "SHERIFF_INVESTIGATION") {
+    if (phase === gamePhases.SHERIFF_INVESTIGATION) {
       return {
         think:
           "[Private] I'll investigate " + (target?.name || "someone") + ".",
