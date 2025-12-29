@@ -34,8 +34,12 @@ const {
 const { getRandomName, resetUsedNames } = require("./name-database");
 
 // ============================================
+// GAME ENGINE MODULES (REFACTORED)
+// (Not importing yet - keeping original functions in game-engine.js for compatibility)
+// ============================================
+
+// ============================================
 // ENHANCED PERSONA GENERATION SYSTEM
-// Using "Simulated Self" Meta-Prompt Template (v2)
 // ============================================
 
 const PERSONA_SYSTEM_PROMPT = `You are a creative character designer for a Mafia game.
