@@ -119,6 +119,46 @@ async function testDatabase() {
     console.log("[PASS] Retrieved snapshot:", snapshot ? "Found" : "Not found");
     console.log();
 
+    // Test players
+    db.createPlayer({
+      gameId: gameId,
+      playerId: "p1",
+      playerName: "Alice",
+      assignedRole: "MAFIA",
+      isAlive: true,
+      model: "gpt-4o-mini",
+      provider: "openrouter",
+    });
+    console.log("[PASS] Created player: p1 (Alice - MAFIA)");
+
+    db.createPlayer({
+      gameId: gameId,
+      playerId: "p2",
+      playerName: "Bob",
+      assignedRole: "SHERIFF",
+      isAlive: true,
+      model: "gpt-4o-mini",
+      provider: "openrouter",
+    });
+    console.log("[PASS] Created player: p2 (Bob - SHERIFF)");
+
+    const players = db.getPlayers(gameId);
+    console.log(`[PASS] Retrieved ${players.length} players:`);
+    players.forEach((p) => {
+      console.log(
+        `  - ${p.player_name} (${p.assigned_role}): ${p.is_alive ? "ALIVE" : "DEAD"}`,
+      );
+    });
+
+    db.updatePlayer(gameId, "p1", { isAlive: false });
+    console.log("[PASS] Player p1 marked as dead");
+
+    const updatedPlayers = db.getPlayers(gameId);
+    console.log(
+      `[PASS] Player p1 status: ${updatedPlayers.find((p) => p.player_id === "p1").is_alive ? "ALIVE" : "DEAD"}`,
+    );
+    console.log();
+
     // Test listing games
     const games = db.listGames({ limit: 5 });
     console.log(`[PASS] Listed ${games.length} recent games`);

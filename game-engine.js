@@ -1337,6 +1337,27 @@ class MafiaGame {
       );
     }
 
+    // Create players in database after roles assigned
+    if (this.config.enableDatabase && this.db) {
+      try {
+        for (const player of this.players) {
+          this.db.createPlayer({
+            gameId: this.gameId,
+            playerId: player.id,
+            playerName: player.name,
+            assignedRole: player.role,
+            isAlive: player.isAlive,
+            model: this.config.model || null,
+            provider: this.config.provider || null,
+          });
+        }
+        console.log(`[DB] Created ${this.players.length} players in database`);
+      } catch (error) {
+        console.error("[DB] Failed to create players:", error.message);
+        // Don't throw - keep the game running
+      }
+    }
+
     const gameId = simpleUUID();
     console.log(E.LOCK + " Game ID: " + gameId);
     console.log(E.LOCK + " CHARACTERS (Secret Role Assignments):");
