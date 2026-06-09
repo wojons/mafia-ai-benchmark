@@ -92,5 +92,21 @@ export {
   ProviderFactory,
 } from './providers/index.js';
 
+export {
+  // From logging
+  Logger,
+  createLogger,
+  LogLevel,
+} from './logging/index.js';
+
+export type {
+  LogEntry,
+  LoggerConfig,
+  TransportConfig,
+  ConsoleTransportOptions,
+  FileTransportOptions,
+  EventBusTransportOptions,
+} from './logging/index.js';
+
 // Version
 export const VERSION = '1.0.0';
