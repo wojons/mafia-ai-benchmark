@@ -10,6 +10,7 @@ import GameWatcher from './components/GameWatcher';
 import StatsPanel from './components/StatsPanel';
 import Settings from './components/Settings';
 import Loading from './components/Loading';
+import SplitPaneView from './components/SplitPaneView';
 
 function App() {
   const { initialize, connected } = useGameStore();
@@ -38,6 +39,7 @@ function App() {
             <Route path="/" element={<GameList />} />
             <Route path="/game/:gameId" element={<GameBoard />} />
             <Route path="/watch/:gameId" element={<GameWatcher />} />
+            <Route path="/observe/:gameId" element={<SplitPaneView />} />
             <Route path="/stats" element={<StatsPanel />} />
             <Route path="/settings" element={<Settings />} />
             <Route path="*" element={<Navigate to="/" replace />} />

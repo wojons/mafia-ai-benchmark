@@ -22,7 +22,21 @@ export interface LegacyGameConfig {
   numPlayers?: number;
   personaSeeds?: string[];
   gameConfig?: Record<string, unknown>;
+  /** Per-role model assignments, e.g. { MAFIA: "qwen3.6-35b", SHERIFF: "kimi-k2.6" } */
+  roleModels?: Record<string, string>;
 }
+
+/** Map role names to legacy env var names */
+const ROLE_ENV_MAP: Record<string, string> = {
+  'MAFIA': 'MAFIA_MODEL',
+  'SHERIFF': 'SHERIFF_MODEL',
+  'DOCTOR': 'DOCTOR_MODEL',
+  'VILLAGER': 'VILLAGER_MODEL',
+  'VIGILANTE': 'VIGILANTE_MODEL',
+  'JESTER': 'JESTER_MODEL',
+  'DETECTIVE': 'DETECTIVE_MODEL',
+  'BODYGUARD': 'BODYGUARD_MODEL',
+};
 
 export interface LegacyGameState {
   gameId: string;
@@ -78,10 +92,24 @@ export class LegacyGameAdapter extends EventEmitter {
     
     console.log(`[LegacyAdapter] Starting legacy game ${gameId} with args:`, args);
     
+    // Build environment with per-role model assignments
+    const env: NodeJS.ProcessEnv = { ...process.env };
+    if (config.roleModels) {
+      for (const [role, model] of Object.entries(config.roleModels)) {
+        const envKey = ROLE_ENV_MAP[role.toUpperCase()];
+        if (envKey) {
+          env[envKey] = model;
+          console.log(`[LegacyAdapter] Set ${envKey}=${model} for role ${role}`);
+        } else {
+          console.warn(`[LegacyAdapter] Unknown role: ${role}, no env var mapping`);
+        }
+      }
+    }
+    
     // Spawn the bridge as a child process
     const childProcess = spawn('node', [this.bridgeScriptPath, ...args], {
       cwd: path.resolve(__dirname, '..'),
-      env: { ...process.env },
+      env,
       stdio: ['pipe', 'pipe', 'pipe'],
     });
     

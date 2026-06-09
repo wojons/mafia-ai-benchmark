@@ -24,59 +24,138 @@ export function setupRoutes(app: Express, context: ServerContext): void {
     console.warn('⚠️ Legacy game adapter not available:', (e as Error).message);
   }
   
-  // ==================== SSE EVENT STREAMING ====================
+  // ==================== GAME REPLAY & EVENTS ====================
   
-  // Subscribe to game events via SSE
+  // Get game events (REST JSON) with optional visibility filter
+  // When Accept: text/event-stream, acts as SSE streaming endpoint
   app.get('/api/v1/games/:gameId/events', (req: Request, res: Response) => {
     const { gameId } = req.params;
+    const wantsSSE = req.headers.accept?.includes('text/event-stream');
     
-    // Set up SSE headers
-    res.setHeader('Content-Type', 'text/event-stream');
-    res.setHeader('Cache-Control', 'no-cache');
-    res.setHeader('Connection', 'keep-alive');
-    res.setHeader('X-Accel-Buffering', 'no'); // Disable nginx buffering
-    
-    // Send initial connection event
-    res.write(`data: ${JSON.stringify({ type: 'connected', gameId, timestamp: new Date().toISOString() })}\n\n`);
-    
-    // Add to subscriptions
-    if (!gameSSESubscriptions.has(gameId)) {
-      gameSSESubscriptions.set(gameId, new Set());
-    }
-    gameSSESubscriptions.get(gameId)!.add(res);
-    
-    console.log(`📡 SSE client connected to game ${gameId}`);
-    
-    // Subscribe to event bus for this game
-    const unsubscribe = eventBus.subscribe(
-      '*',
-      (event: any) => {
-        if (event.gameId === gameId) {
-          res.write(`data: ${JSON.stringify(event)}\n\n`);
-        }
-      },
-      { filter: (event: any) => event.gameId === gameId }
-    );
-    
-    // Handle client disconnect
-    req.on('close', () => {
-      unsubscribe();
-      gameSSESubscriptions.get(gameId)?.delete(res);
-      if (gameSSESubscriptions.get(gameId)?.size === 0) {
-        gameSSESubscriptions.delete(gameId);
+    if (wantsSSE) {
+      // ===== SSE STREAMING =====
+      // Set up SSE headers
+      res.setHeader('Content-Type', 'text/event-stream');
+      res.setHeader('Cache-Control', 'no-cache');
+      res.setHeader('Connection', 'keep-alive');
+      res.setHeader('X-Accel-Buffering', 'no'); // Disable nginx buffering
+      
+      // Send initial connection event
+      res.write(`data: ${JSON.stringify({ type: 'connected', gameId, timestamp: new Date().toISOString() })}\n\n`);
+      
+      // Add to subscriptions
+      if (!gameSSESubscriptions.has(gameId)) {
+        gameSSESubscriptions.set(gameId, new Set());
       }
-      console.log(`📡 SSE client disconnected from game ${gameId}`);
-    });
+      gameSSESubscriptions.get(gameId)!.add(res);
+      
+      console.log(`📡 SSE client connected to game ${gameId}`);
+      
+      // Subscribe to event bus for this game
+      const unsubscribe = eventBus.subscribe(
+        '*',
+        (event: any) => {
+          if (event.gameId === gameId) {
+            res.write(`data: ${JSON.stringify(event)}\n\n`);
+          }
+        },
+        { filter: (event: any) => event.gameId === gameId }
+      );
+      
+      // Handle client disconnect
+      req.on('close', () => {
+        unsubscribe();
+        gameSSESubscriptions.get(gameId)?.delete(res);
+        if (gameSSESubscriptions.get(gameId)?.size === 0) {
+          gameSSESubscriptions.delete(gameId);
+        }
+        console.log(`📡 SSE client disconnected from game ${gameId}`);
+      });
+      
+      // Keep connection alive
+      const keepAlive = setInterval(() => {
+        res.write(`: keepalive\n\n`);
+      }, 30000);
+      
+      req.on('close', () => {
+        clearInterval(keepAlive);
+      });
+      return;
+    }
     
-    // Keep connection alive
-    const keepAlive = setInterval(() => {
-      res.write(`: keepalive\n\n`);
-    }, 30000);
+    // ===== REST JSON EVENTS =====
+    const visibility = (req.query.visibility as string) || 'all';
     
-    req.on('close', () => {
-      clearInterval(keepAlive);
-    });
+    try {
+      // Check if game exists (both repository and legacy)
+      const game = gameRepository.getGame(gameId);
+      let legacyExists = false;
+      
+      if (!game && legacyAdapter) {
+        const state = legacyAdapter.getGameState(gameId);
+        legacyExists = !!state;
+      }
+      
+      if (!game && !legacyExists) {
+        return res.status(404).json({ success: false, error: 'Game not found' });
+      }
+      
+      // Get events
+      let events = gameRepository.getEvents(gameId);
+      
+      // Apply visibility filter
+      if (visibility === 'public') {
+        events = events.filter(e => e.visibility === 'PUBLIC');
+      } else if (visibility === 'private') {
+        events = events.filter(e => e.visibility === 'PRIVATE');
+      }
+      // 'all' — no filter
+      
+      res.json({
+        success: true,
+        data: events,
+        count: events.length,
+      });
+    } catch (error) {
+      res.status(500).json({ success: false, error: 'Failed to get events' });
+    }
   });
+  
+  // Get full game replay timeline sorted chronologically
+  app.get('/api/v1/games/:gameId/replay', (req: Request, res: Response) => {
+    const { gameId } = req.params;
+    
+    try {
+      // Check if game exists (both repository and legacy)
+      const game = gameRepository.getGame(gameId);
+      let legacyExists = false;
+      
+      if (!game && legacyAdapter) {
+        const state = legacyAdapter.getGameState(gameId);
+        legacyExists = !!state;
+      }
+      
+      if (!game && !legacyExists) {
+        return res.status(404).json({ success: false, error: 'Game not found' });
+      }
+      
+      // Get all events and sort chronologically
+      const events = gameRepository.getEvents(gameId);
+      const timeline = events.sort(
+        (a, b) => a.timestamp.getTime() - b.timestamp.getTime()
+      );
+      
+      res.json({
+        success: true,
+        data: timeline,
+        count: timeline.length,
+      });
+    } catch (error) {
+      res.status(500).json({ success: false, error: 'Failed to get replay' });
+    }
+  });
+  
+  // ==================== SSE EVENT STREAMING ====================
   
   // Get list of active SSE connections
   app.get('/api/v1/games/:gameId/sse-status', (req: Request, res: Response) => {
@@ -146,6 +225,9 @@ export function setupRoutes(app: Express, context: ServerContext): void {
     try {
       const { useLegacy, config, hostName, numPlayers, personaSeeds, legacyConfig } = req.body;
       
+      // Extract roleModels from config or top-level
+      const roleModels = config?.roleModels || req.body.roleModels;
+      
       if (useLegacy && legacyAdapter) {
         // Use legacy game engine
         try {
@@ -153,6 +235,7 @@ export function setupRoutes(app: Express, context: ServerContext): void {
             numPlayers: numPlayers || 5,
             personaSeeds,
             gameConfig: legacyConfig || config,
+            roleModels,
           });
           
           res.status(201).json({
@@ -457,6 +540,63 @@ export function setupRoutes(app: Express, context: ServerContext): void {
       });
     } catch (error) {
       res.status(500).json({ success: false, error: 'Failed to calculate cost' });
+    }
+  });
+  
+  // List available models from providers catalog
+  app.get('/api/v1/models', async (req: Request, res: Response) => {
+    try {
+      const { fetchModelMetadata, getCacheStats } = await import('@mafia/shared/providers/model-metadata.js');
+      
+      // Fetch latest model metadata
+      await fetchModelMetadata();
+      
+      const provider = req.query.provider as string | undefined;
+      
+      if (provider) {
+        // Filter by provider
+        const { searchModelsByProvider } = await import('@mafia/shared/providers/model-metadata.js');
+        const models = await searchModelsByProvider(provider);
+        res.json({
+          success: true,
+          data: models,
+          count: models.length,
+        });
+      } else {
+        // Return all models from the providers factory
+        const { getAvailableProviders, getProviderModels } = await import('@mafia/shared/providers/factory.js');
+        const providers = getAvailableProviders();
+        const stats = getCacheStats();
+        
+        // Collect models from each provider
+        const providerModels: Array<{ provider: string; modelId: string; displayName: string }> = [];
+        for (const p of providers) {
+          try {
+            const models = await getProviderModels(p, 20);
+            for (const m of models) {
+              providerModels.push({
+                provider: p,
+                modelId: m.id,
+                displayName: m.name,
+              });
+            }
+          } catch (e) {
+            // Skip providers that fail
+          }
+        }
+        
+        res.json({
+          success: true,
+          data: {
+            providers,
+            models: providerModels,
+            totalCached: stats.size,
+            cacheAge: stats.age,
+          },
+        });
+      }
+    } catch (error) {
+      res.status(500).json({ success: false, error: 'Failed to list models' });
     }
   });
   
