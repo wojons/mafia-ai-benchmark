@@ -25,8 +25,8 @@ try {
 }
 
 // Load the legacy game engine
-// The game engine is at the project root, two levels up from services/
-const gameEnginePath = path.resolve(__dirname, '..', '..', 'game-engine.js');
+// The game engine is at the project root: games/legacy/game-engine.js
+const gameEnginePath = path.resolve(__dirname, '..', '..', '..', 'games', 'legacy', 'game-engine.js');
 const { MafiaGame } = require(gameEnginePath);
 
 function emit(type, data) {
