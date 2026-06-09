@@ -51,9 +51,8 @@ export function setupRoutes(app: Express, context: ServerContext): void {
       
       console.log(`📡 SSE client connected to game ${gameId}`);
       
-      // Subscribe to event bus for this game
-      const unsubscribe = eventBus.subscribe(
-        '*',
+      // Subscribe to event bus for this game (wildcard)
+      const unsubscribe = eventBus.subscribeAll(
         (event: any) => {
           if (event.gameId === gameId) {
             res.write(`data: ${JSON.stringify(event)}\n\n`);
@@ -220,31 +219,30 @@ export function setupRoutes(app: Express, context: ServerContext): void {
     }
   });
   
-  // Create game - supports legacy engine via useLegacy flag
+  // Create game - always uses legacy engine when available, fallback to standard
   app.post('/api/v1/games', (req: Request, res: Response) => {
     try {
-      const { useLegacy, config, hostName, numPlayers, personaSeeds, legacyConfig } = req.body;
+      const { config, hostName, numPlayers, personaSeeds, legacyConfig, models, roleModels } = req.body;
       
-      // Extract roleModels from config or top-level
-      const roleModels = config?.roleModels || req.body.roleModels;
+      // Extract roleModels from multiple possible sources
+      const resolvedRoleModels = roleModels || config?.roleModels || req.body.roleModels || models;
       
-      if (useLegacy && legacyAdapter) {
-        // Use legacy game engine
+      if (legacyAdapter) {
+        // Use legacy game engine (default path — runs real LLM-powered games)
         try {
           const gameState = legacyAdapter.startGame({
             numPlayers: numPlayers || 5,
             personaSeeds,
             gameConfig: legacyConfig || config,
-            roleModels,
+            roleModels: resolvedRoleModels,
           });
           
           res.status(201).json({
             success: true,
             data: {
-              id: gameState.gameId,
-              status: 'IN_PROGRESS',
+              gameId: gameState.gameId,
+              status: 'starting',
               config: { engineType: 'legacy', numPlayers: numPlayers || 5 },
-              engineType: 'legacy',
             },
           });
         } catch (error) {
@@ -256,7 +254,7 @@ export function setupRoutes(app: Express, context: ServerContext): void {
         return;
       }
       
-      // Standard game creation
+      // Fallback: standard game creation (no legacy engine available)
       const game = gameEngine.createGame({
         config: req.body.config,
         hostName: req.body.hostName,
@@ -265,7 +263,7 @@ export function setupRoutes(app: Express, context: ServerContext): void {
       res.status(201).json({
         success: true,
         data: {
-          id: game.id,
+          gameId: game.id,
           status: game.status,
           config: game.config,
         },

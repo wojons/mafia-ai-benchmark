@@ -210,6 +210,7 @@ export class LegacyGameAdapter extends EventEmitter {
         
       case 'event':
         state.eventCount++;
+        console.log(`[LegacyAdapter:${gameId}] Event #${state.eventCount}: ${message.eventType || 'UNKNOWN'}`);
         this.translateAndPublishEvent(gameId, message, state.eventCount);
         break;
         
@@ -345,6 +346,14 @@ export class LegacyGameAdapter extends EventEmitter {
     
     // Publish to EventBus
     this.eventBus.publish(gameEvent);
+    
+    // Store event in repository for REST retrieval
+    try {
+      const { id, gameId: _, timestamp, ...eventData } = gameEvent;
+      this.gameRepository.addEvent(gameId, eventData as any);
+    } catch (e: any) {
+      console.error(`[LegacyAdapter] Failed to store event: ${e?.message || e}`);
+    }
     
     // Try to persist through game repository if we have one
     try {

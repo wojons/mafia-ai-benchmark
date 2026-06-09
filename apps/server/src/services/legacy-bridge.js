@@ -12,7 +12,7 @@
 const path = require('path');
 
 // Load environment variables from the workspace .env
-const dotenvPath = path.resolve(__dirname, '..', '..', '.env');
+const dotenvPath = path.resolve(__dirname, '..', '..', '..', '..', '.env');
 try {
   require('dotenv').config({ path: dotenvPath });
 } catch (e) {
@@ -24,9 +24,15 @@ try {
   }
 }
 
+// Ensure console.setGameContext exists before loading engine
+// (game-engine.js sets it up only when pino is available)
+if (typeof console.setGameContext !== 'function') {
+  console.setGameContext = function(ctx) { /* no-op in bridge mode */ };
+}
+
 // Load the legacy game engine
 // The game engine is at the project root: games/legacy/game-engine.js
-const gameEnginePath = path.resolve(__dirname, '..', '..', '..', 'games', 'legacy', 'game-engine.js');
+const gameEnginePath = path.resolve(__dirname, '..', '..', '..', '..', 'game-engine.js');
 const { MafiaGame } = require(gameEnginePath);
 
 function emit(type, data) {
