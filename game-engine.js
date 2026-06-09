@@ -4,6 +4,70 @@
 require("dotenv").config();
 
 // ============================================
+// STRUCTURED LOGGING (pino-based JSON output)
+// ============================================
+// Monkey-patches console.log/error/warn to output structured JSON via pino
+// while preserving human-readable emoji output on stderr for terminal viewing.
+// Set LOG_STRUCTURED=false to disable and use plain console.
+(function setupStructuredLogging() {
+  if (process.env.LOG_STRUCTURED === 'false') return;
+
+  const orig = { log: console.log, error: console.error, warn: console.warn };
+
+  try {
+    const pino = require('pino');
+    const p = pino({
+      messageKey: 'msg',
+      level: process.env.LOG_LEVEL || 'info',
+      formatters: { level(label) { return { level: label }; } },
+      timestamp: pino.stdTimeFunctions.isoTime,
+    });
+
+    // Redirect all console.log -> pino.info (JSON to stdout)
+    // Also mirror to stderr for human-readable terminal output
+    console.log = function (...args) {
+      const msg = args.map(a => typeof a === 'string' ? a : JSON.stringify(a)).join(' ');
+      p.info(msg);
+      orig.log.apply(console, args); // Preserve terminal output
+    };
+    console.error = function (...args) {
+      const msg = args.map(a => typeof a === 'string' ? a : JSON.stringify(a)).join(' ');
+      p.error(msg);
+      orig.error.apply(console, args);
+    };
+    console.warn = function (...args) {
+      const msg = args.map(a => typeof a === 'string' ? a : JSON.stringify(a)).join(' ');
+      p.warn(msg);
+      orig.warn.apply(console, args);
+    };
+
+    // Set correlation IDs for game context
+    let gameCtx = {};
+    console.setGameContext = function (ctx) { gameCtx = ctx; };
+    const pWithCtx = function () { return p.child(gameCtx); };
+    // Re-bind to use child logger with context
+    const _log = console.log, _err = console.error, _wrn = console.warn;
+    console.log = function (...args) {
+      const msg = args.map(a => typeof a === 'string' ? a : JSON.stringify(a)).join(' ');
+      p.child(gameCtx).info(msg);
+      orig.log.apply(console, args);
+    };
+    console.error = function (...args) {
+      const msg = args.map(a => typeof a === 'string' ? a : JSON.stringify(a)).join(' ');
+      p.child(gameCtx).error(msg);
+      orig.error.apply(console, args);
+    };
+    console.warn = function (...args) {
+      const msg = args.map(a => typeof a === 'string' ? a : JSON.stringify(a)).join(' ');
+      p.child(gameCtx).warn(msg);
+      orig.warn.apply(console, args);
+    };
+  } catch (_) {
+    // pino not available — fall back to original console
+  }
+})();
+
+// ============================================
 // STATISTICS & SCORING SYSTEM
 // ============================================
 const {
@@ -126,7 +190,7 @@ async function generatePersona(seed = undefined, temperature = 1.0) {
 
   try {
     const response = await fetch(
-      "https://openrouter.ai/api/v1/chat/completions",
+      API_ENDPOINT,
       {
         method: "POST",
         headers: {
@@ -621,6 +685,8 @@ if (require.main === module) {
   console.log("=".repeat(70) + "\n");
 }
 const API_KEY = process.env.OPENAI_API_KEY;
+const API_BASE_URL = process.env.OPENAI_BASE_URL || 'https://openrouter.ai/api/v1';
+const API_ENDPOINT = `${API_BASE_URL}/chat/completions`;
 
 // Player Model Configuration System (flexible, scalable model assignment)
 let playerModelConfig = null;
@@ -2213,6 +2279,7 @@ class MafiaGame {
     // Generate unique game ID
     this.gameId =
       "game-" + Date.now() + "-" + Math.random().toString(36).substring(2, 10);
+    console.setGameContext({ gameId: this.gameId });
     console.log(E.GAME + " Game ID: " + this.gameId);
 
     // Generate roles dynamically based on player count
@@ -3245,6 +3312,7 @@ class MafiaGame {
 
   async runNightPhase(gameId) {
     this.round++;
+    console.setGameContext({ gameId: this.gameId, round: this.round, phase: 'NIGHT' });
     const alivePlayers = this.players.filter((p) => p.isAlive);
     const aliveMafia = alivePlayers.filter((p) => p.isMafia);
     // Use playerHasRole to properly filter multi-role players
@@ -4159,6 +4227,7 @@ class MafiaGame {
   }
 
   async runDayPhase(gameId) {
+    console.setGameContext({ gameId: this.gameId, round: this.round, phase: 'DAY' });
     const alivePlayers = this.players.filter((p) => p.isAlive);
     const aliveMafia = alivePlayers.filter((p) => p.isMafia);
     const aliveTown = alivePlayers.filter((p) => !p.isMafia);
@@ -4633,7 +4702,7 @@ class MafiaGame {
       const requestBodySize = JSON.stringify(requestBody).length; // Rough estimate in bytes
 
       const response = await fetch(
-        "https://openrouter.ai/api/v1/chat/completions",
+        API_ENDPOINT,
         {
           method: "POST",
           headers: {
@@ -4680,7 +4749,7 @@ class MafiaGame {
       if (this.apiTracker) {
         try {
           this.apiTracker.trackCall(this.gameId, player.id || player.name, {
-            endpoint: "https://openrouter.ai/api/v1/chat/completions",
+            endpoint: API_ENDPOINT,
             duration: duration,
             statusCode: statusCode,
             success: success && parsed.valid,
@@ -4791,7 +4860,7 @@ class MafiaGame {
       // Track failed API call
       if (this.apiTracker) {
         this.apiTracker.trackCall(this.gameId, player.id || player.name, {
-          endpoint: "https://openrouter.ai/api/v1/chat/completions",
+          endpoint: API_ENDPOINT,
           duration: duration,
           statusCode: statusCode || 0,
           success: false,

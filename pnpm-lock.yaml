@@ -8,6 +8,9 @@ importers:
 
   .:
     dependencies:
+      pino:
+        specifier: ^9.14.0
+        version: 9.14.0
       sql.js:
         specifier: ^1.13.0
         version: 1.13.0
@@ -76,6 +79,9 @@ importers:
 
   apps/server:
     dependencies:
+      '@mafia/shared':
+        specifier: workspace:*
+        version: link:../../packages/shared
       '@types/express':
         specifier: ^4.17.0
         version: 4.17.25
