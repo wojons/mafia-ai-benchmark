@@ -7,12 +7,22 @@
 
 import { Express, Request, Response, NextFunction } from 'express';
 import { ServerContext } from '../index.js';
+import { LegacyGameAdapter } from '../services/legacy-game-adapter.js';
 
 // Store for SSE connections per game
 const gameSSESubscriptions: Map<string, Set<Response>> = new Map();
 
 export function setupRoutes(app: Express, context: ServerContext): void {
   const { gameEngine, agentCoordinator, statsCollector, gameRepository, eventBus } = context;
+  
+  // Initialize legacy game adapter
+  let legacyAdapter: LegacyGameAdapter | null = null;
+  try {
+    legacyAdapter = LegacyGameAdapter.getInstance(eventBus, gameRepository);
+    console.log('✅ Legacy game adapter initialized');
+  } catch (e) {
+    console.warn('⚠️ Legacy game adapter not available:', (e as Error).message);
+  }
   
   // ==================== SSE EVENT STREAMING ====================
   
@@ -96,25 +106,74 @@ export function setupRoutes(app: Express, context: ServerContext): void {
       
       const games = gameRepository.listGames(filters);
       
+      // Also include legacy games if adapter is available
+      const legacyGames: any[] = [];
+      if (legacyAdapter) {
+        for (const gameId of legacyAdapter.getActiveGames()) {
+          const state = legacyAdapter.getGameState(gameId);
+          if (state) {
+            legacyGames.push({
+              id: gameId,
+              status: state.status === 'RUNNING' ? 'IN_PROGRESS' : 'ENDED',
+              players: 0,
+              createdAt: state.startedAt.toISOString(),
+              config: { engineType: 'legacy' },
+            });
+          }
+        }
+      }
+      
+      const allGames = [...games.map(g => ({
+        id: g.id,
+        status: g.status,
+        players: g.players.length,
+        createdAt: g.createdAt,
+        config: g.config,
+      })), ...legacyGames];
+      
       res.json({
         success: true,
-        data: games.map(g => ({
-          id: g.id,
-          status: g.status,
-          players: g.players.length,
-          createdAt: g.createdAt,
-          config: g.config,
-        })),
-        count: games.length,
+        data: allGames,
+        count: allGames.length,
       });
     } catch (error) {
       res.status(500).json({ success: false, error: 'Failed to list games' });
     }
   });
   
-  // Create game
+  // Create game - supports legacy engine via useLegacy flag
   app.post('/api/v1/games', (req: Request, res: Response) => {
     try {
+      const { useLegacy, config, hostName, numPlayers, personaSeeds, legacyConfig } = req.body;
+      
+      if (useLegacy && legacyAdapter) {
+        // Use legacy game engine
+        try {
+          const gameState = legacyAdapter.startGame({
+            numPlayers: numPlayers || 5,
+            personaSeeds,
+            gameConfig: legacyConfig || config,
+          });
+          
+          res.status(201).json({
+            success: true,
+            data: {
+              id: gameState.gameId,
+              status: 'IN_PROGRESS',
+              config: { engineType: 'legacy', numPlayers: numPlayers || 5 },
+              engineType: 'legacy',
+            },
+          });
+        } catch (error) {
+          res.status(500).json({ 
+            success: false, 
+            error: 'Failed to start legacy game: ' + (error as Error).message 
+          });
+        }
+        return;
+      }
+      
+      // Standard game creation
       const game = gameEngine.createGame({
         config: req.body.config,
         hostName: req.body.hostName,
@@ -139,6 +198,22 @@ export function setupRoutes(app: Express, context: ServerContext): void {
       const game = gameRepository.getGame(req.params.gameId);
       
       if (!game) {
+        // Check legacy games
+        if (legacyAdapter) {
+          const state = legacyAdapter.getGameState(req.params.gameId);
+          if (state) {
+            return res.json({
+              success: true,
+              data: {
+                id: state.gameId,
+                status: state.status === 'RUNNING' ? 'IN_PROGRESS' : 'ENDED',
+                config: { engineType: 'legacy' },
+                eventCount: state.eventCount,
+                startedAt: state.startedAt,
+              },
+            });
+          }
+        }
         return res.status(404).json({ success: false, error: 'Game not found' });
       }
       
@@ -206,6 +281,38 @@ export function setupRoutes(app: Express, context: ServerContext): void {
     }
   });
   
+  // ==================== LEGACY ENGINE ENDPOINTS ====================
+  
+  // List active legacy games
+  app.get('/api/v1/legacy-games', (req: Request, res: Response) => {
+    if (!legacyAdapter) {
+      return res.status(503).json({ success: false, error: 'Legacy engine not available' });
+    }
+    
+    const activeGames = legacyAdapter.getActiveGames().map(gameId => {
+      const state = legacyAdapter.getGameState(gameId);
+      return {
+        gameId,
+        status: state?.status,
+        eventCount: state?.eventCount,
+        startedAt: state?.startedAt,
+        error: state?.error,
+      };
+    });
+    
+    res.json({ success: true, data: activeGames });
+  });
+  
+  // Stop a legacy game
+  app.post('/api/v1/legacy-games/:gameId/stop', (req: Request, res: Response) => {
+    if (!legacyAdapter) {
+      return res.status(503).json({ success: false, error: 'Legacy engine not available' });
+    }
+    
+    const stopped = legacyAdapter.stopGame(req.params.gameId);
+    res.json({ success: stopped, data: { gameId: req.params.gameId, stopped } });
+  });
+
   // Submit night action
   app.post('/api/v1/games/:gameId/night-action', (req: Request, res: Response) => {
     try {
