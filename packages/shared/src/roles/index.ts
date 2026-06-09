@@ -198,14 +198,7 @@ export const ROLES: Map<RoleType, RoleConfig> = new Map([
     type: 'VILLAGER',
     team: 'TOWN',
     description: 'An ordinary townsperson with no special abilities, but valuable voting power.',
-    abilities: [
-      {
-        name: 'Vote',
-        description: 'Participate in day voting to lynch suspected mafia',
-        frequency: 'always',
-        targetType: 'any',
-      },
-    ],
+    abilities: [],
     constraints: [],
     winCondition: {
       team: 'TOWN',
@@ -290,9 +283,9 @@ export function getInvestigationTarget(game: Game, sheriffId: string): string | 
   return nightAction?.targetId;
 }
 
-export function getInvestigationResult(game: Game, sheriffId: string): 'MAFIA' | 'NOT_MAFIA' | undefined {
-  const targetId = getInvestigationTarget(game, sheriffId);
-  if (!targetId) return undefined;
+export function getInvestigationResult(game: Game, sheriffId: string, targetId: string): 'MAFIA' | 'NOT_MAFIA' | undefined {
+  const investigator = game.players.find(p => p.id === sheriffId);
+  if (!investigator || investigator.role !== 'SHERIFF') return undefined;
   
   const target = game.players.find(p => p.id === targetId);
   if (!target) return undefined;
@@ -314,7 +307,10 @@ export function generateRolePrompt(player: Player, game: Game): string {
   
   const teammates = player.role === 'MAFIA' ? getMafiaTeammates(game, player.id) : [];
   
-  let prompt = `# IDENTITY\n`;
+  let prompt = `# GAME STATE\n`;
+  prompt += `Day ${game.currentState.dayNumber}: Phase ${game.currentState.phase}\n`;
+  
+  prompt += `\n# IDENTITY\n`;
   prompt += `You are playing the game of Mafia.\n`;
   prompt += `Your TRUE IDENTITY is: ${player.role}\n`;
   
