@@ -14,14 +14,17 @@ import {
   GamePhase,
   Vote,
   NightAction,
-  LLMProvider
-} from '../src/index.js';
-import { createProvider, ProviderConfig } from '../src/providers/index.js';
-import { getRoleConfig, generateRolePrompt } from '../src/roles/index.js';
+  LLMProvider,
+  createProvider,
+  ProviderConfig,
+  getRoleConfig,
+  generateRolePrompt,
+} from '../../index.js';
 
 // Configuration
 const OPENAI_API_KEY = process.env.OPENAI_API_KEY || process.env.OPENROUTER_API_KEY;
-const MODEL = process.env.MODEL || 'openai/gpt-4o-mini';
+const OPENAI_BASE_URL = process.env.OPENAI_BASE_URL || 'https://api.openai.com/v1';
+const MODEL = process.env.MODEL || 'qwen3.6-35b-fast';
 const PROVIDER = 'OPENAI';
 
 // Test player names
@@ -173,6 +176,7 @@ async function getAgentResponse(
     const config: ProviderConfig = {
       provider: PROVIDER,
       apiKey: OPENAI_API_KEY,
+      baseUrl: OPENAI_BASE_URL,
       model: MODEL,
       temperature: 0.7,
       maxTokens: 1000,
