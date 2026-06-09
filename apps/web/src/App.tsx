@@ -11,6 +11,7 @@ import StatsPanel from './components/StatsPanel';
 import Settings from './components/Settings';
 import Loading from './components/Loading';
 import SplitPaneView from './components/SplitPaneView';
+import TimelineView from './components/TimelineView';
 
 function App() {
   const { initialize, connected } = useGameStore();
@@ -40,6 +41,7 @@ function App() {
             <Route path="/game/:gameId" element={<GameBoard />} />
             <Route path="/watch/:gameId" element={<GameWatcher />} />
             <Route path="/observe/:gameId" element={<SplitPaneView />} />
+            <Route path="/timeline/:gameId" element={<TimelineView />} />
             <Route path="/stats" element={<StatsPanel />} />
             <Route path="/settings" element={<Settings />} />
             <Route path="*" element={<Navigate to="/" replace />} />

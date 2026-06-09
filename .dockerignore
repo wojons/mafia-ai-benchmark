@@ -1,0 +1,40 @@
+# Dependencies
+node_modules/
+.pnpm-store/
+
+# Build output (rebuilt in Docker)
+dist/
+
+# Git
+.git/
+.gitignore
+.gitattributes
+
+# IDE / Editor
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+
+# Environment (mounted at runtime)
+.env
+.env.*
+!.env.sample
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Docs & specs
+specs/
+.memory-bank/
+.axiom/
+.opencode/
+AGENTS.md
+
+# Test & coverage
+coverage/
+*.test.ts
+*.test.tsx
+__tests__/

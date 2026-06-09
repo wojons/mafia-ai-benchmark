@@ -859,6 +859,28 @@ export function setupRoutes(app: Express, context: ServerContext): void {
       res.status(500).json({ success: false, error: 'Failed to generate report' });
     }
   });
+
+  // Compare models head-to-head
+  app.get('/api/v1/benchmark/compare', (req: Request, res: Response) => {
+    try {
+      const modelsParam = req.query.models as string | undefined;
+      const modelFilter = modelsParam
+        ? modelsParam.split(',').map(m => m.trim()).filter(Boolean)
+        : undefined;
+
+      const report = statsCollector.getCompareReport(modelFilter);
+
+      res.json({
+        success: true,
+        data: report,
+      });
+    } catch (error) {
+      res.status(500).json({
+        success: false,
+        error: 'Failed to generate comparison report',
+      });
+    }
+  });
 }
 
 export default setupRoutes;
