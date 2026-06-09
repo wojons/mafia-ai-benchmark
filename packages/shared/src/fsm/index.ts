@@ -89,6 +89,12 @@ export class GameFSM {
     // Record state history
     this.context.stateHistory.push(this.game.currentState.phase);
     
+    // Set game start timestamp on first transition away from SETUP
+    if (!this.game.startedAt && phase !== 'SETUP') {
+      this.game.startedAt = new Date();
+      this.game.status = 'IN_PROGRESS';
+    }
+    
     // Update game state
     this.game.currentState.phase = phase;
     
@@ -100,6 +106,14 @@ export class GameFSM {
     if (event) {
       this.emit('stateChange', event);
     }
+  }
+  
+  public enter(): void {
+    this.context.currentState.enter(this.game);
+  }
+  
+  public exit(): void {
+    this.context.currentState.exit(this.game);
   }
   
   public update(deltaTime: number): void {
@@ -533,6 +547,7 @@ class DayDiscussionState implements FSMState {
     game.currentState.phase = 'DAY_DISCUSSION';
     game.currentState.timeRemaining = game.config.dayPhaseDuration;
     game.currentState.votes = [];
+    game.currentState.dayNumber += 1;
     
     console.log(`[FSM] Entering DAY_DISCUSSION (Day ${game.currentState.dayNumber})`);
     
