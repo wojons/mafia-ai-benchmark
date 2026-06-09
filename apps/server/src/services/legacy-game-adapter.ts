@@ -92,6 +92,19 @@ export class LegacyGameAdapter extends EventEmitter {
     
     console.log(`[LegacyAdapter] Starting legacy game ${gameId} with args:`, args);
     
+    // Insert game into repository so foreign key constraints are satisfied for events
+    try {
+      // Use raw insert to avoid GameConfig type mismatch (legacy adapter has fewer fields)
+      const db = (this.gameRepository as any).db;
+      if (db) {
+        db.prepare(`INSERT INTO games (id, status, config, created_at) VALUES (?, 'IN_PROGRESS', ?, ?)`)
+          .run(gameId, JSON.stringify({ numPlayers: config.numPlayers || 5, engineType: 'legacy' }), Date.now());
+        db.prepare(`UPDATE games SET status = 'ENDED' WHERE id = ?`); // prepare for later
+      }
+    } catch (e: any) {
+      console.error(`[LegacyAdapter] Failed to create game in repository: ${e?.message || e}`);
+    }
+    
     // Build environment with per-role model assignments
     const env: NodeJS.ProcessEnv = { ...process.env };
     if (config.roleModels) {
