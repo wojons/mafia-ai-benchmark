@@ -39,6 +39,7 @@ export function setupRoutes(app: Express, context: ServerContext): void {
     
     // Subscribe to event bus for this game
     const unsubscribe = eventBus.subscribe(
+      '*',
       (event: any) => {
         if (event.gameId === gameId) {
           res.write(`data: ${JSON.stringify(event)}\n\n`);

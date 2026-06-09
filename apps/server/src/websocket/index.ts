@@ -183,7 +183,7 @@ export class WebSocketHandler {
       `game:${gameId}`,
       (event) => {
         // Filter by visibility if needed
-        this.broadcastToGame(gameId, event, { excludeClientId: clientId });
+        this.broadcastToGame(gameId, event as unknown as Record<string, unknown>, { excludeClientId: clientId });
       }
     );
     
@@ -317,7 +317,7 @@ export class WebSocketHandler {
     client.ws.send(JSON.stringify({
       ...message,
       timestamp: new Date().toISOString(),
-      requestId: (message as WSMessage).requestId,
+      requestId: (message as unknown as WSMessage).requestId,
     }));
   }
   

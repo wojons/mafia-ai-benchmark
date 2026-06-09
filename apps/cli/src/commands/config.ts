@@ -10,11 +10,13 @@ import chalk from 'chalk';
 
 export class ConfigCommand extends Command {
   constructor() {
-    super('config', 'View and modify configuration');
+    super('config');
+    this.description('View and modify configuration');
     
     this.addCommand(
       (() => {
-        const cmd = new Command('show', 'Show current configuration');
+        const cmd = new Command('show');
+        cmd.description('Show current configuration');
         cmd.option('--json', 'Output as JSON');
         cmd.action(async () => {
           await this.showConfig(cmd.opts());
@@ -25,7 +27,8 @@ export class ConfigCommand extends Command {
     
     this.addCommand(
       (() => {
-        const cmd = new Command('set', 'Set a configuration value');
+        const cmd = new Command('set');
+        cmd.description('Set a configuration value');
         cmd.argument('<key>', 'Configuration key');
         cmd.argument('<value>', 'Configuration value');
         cmd.action(async (key, value) => {
@@ -37,7 +40,8 @@ export class ConfigCommand extends Command {
     
     this.addCommand(
       (() => {
-        const cmd = new Command('reset', 'Reset configuration to defaults');
+        const cmd = new Command('reset');
+        cmd.description('Reset configuration to defaults');
         cmd.option('--force', 'Skip confirmation');
         cmd.action(async (opts) => {
           await this.resetConfig(opts.force);
@@ -92,7 +96,8 @@ export class ConfigCommand extends Command {
     if (!force) {
       console.log(chalk.yellow('\n⚠️  This will reset all configuration to defaults.\n'));
       
-      const inquirer = await import('inquirer');
+      const inquirerMod = await import('inquirer');
+      const inquirer = (inquirerMod as any).default || inquirerMod;
       const { confirm } = await inquirer.prompt([
         {
           type: 'confirm',

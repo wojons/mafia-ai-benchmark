@@ -6,15 +6,17 @@
 
 import { 
   AgentPolicy, 
-  AgentResponse, 
-  AgentMemory,
   AgentContext,
+  createAgent
+} from '@mafia/shared/agents';
+import { 
   Game, 
   Player, 
   GameEvent,
   GamePhase,
   LLMProvider,
-  createAgent
+  AgentResponse,
+  AgentMemory
 } from '@mafia/shared/types';
 import { EventBus } from './event-bus.js';
 import { StatsCollector } from './stats-collector.js';
@@ -141,7 +143,7 @@ export class AgentCoordinator {
       }
       
       // Initialize agent if needed
-      await agent.initialize(game.id, player);
+      await agent.initialize(game.id, player, {});
       
       // Generate thinking
       const thinking = await agent.think(context);
@@ -179,6 +181,7 @@ export class AgentCoordinator {
         cost: response.metadata.cost,
         provider: response.metadata.provider,
         model: response.metadata.model,
+        timestamp: startTime,
       });
       
       // Emit think event (private)

@@ -13,10 +13,12 @@ import {
   StreamResponse,
   StreamChunk,
   ProviderStats,
+  ProviderCapabilities,
   LLMError,
   ERROR_CODES,
   calculateCost
 } from './index.js';
+import { LLMProvider } from '../types/index.js';
 
 export class XAIProvider implements LLMProviderAdapter {
   readonly provider: LLMProvider = 'XAI';
@@ -113,7 +115,7 @@ export class XAIProvider implements LLMProviderAdapter {
       messages,
       temperature: request.temperature ?? this.config.temperature ?? 0.7,
       max_tokens: request.maxTokens ?? this.config.maxTokens ?? 8192,
-      stream,
+      streaming,
     };
   }
   
@@ -132,7 +134,7 @@ export class XAIProvider implements LLMProviderAdapter {
       await this.handleHttpError(response);
     }
     
-    const data = await response.json();
+    const data = await response.json() as Record<string, unknown>;
     return this.parseResponse(data);
   }
   
@@ -247,7 +249,7 @@ export class XAIProvider implements LLMProviderAdapter {
   
   private async handleHttpError(response: Response): Promise<void> {
     const status = response.status;
-    const data = await response.json().catch(() => ({}));
+    const data = await response.json().catch(() => ({})) as Record<string, unknown>;
     
     let code: keyof typeof ERROR_CODES = 'SERVER_ERROR';
     let message = `HTTP ${status}: ${response.statusText}`;

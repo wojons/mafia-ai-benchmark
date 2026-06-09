@@ -16,7 +16,8 @@ import { GameEngine } from './services/game-engine.js';
 import { AgentCoordinator } from './services/agent-coordinator.js';
 import { EventBus } from './services/event-bus.js';
 import { StatsCollector } from './services/stats-collector.js';
-import { GameRepository, createDatabase } from './db/repository.js';
+import GameRepositoryDefault, { GameRepository } from './db/repository.js';
+import { createDatabase } from './db/migrate.js';
 import { setupRoutes } from './routes/index.js';
 import { setupWebSocket } from './websocket/index.js';
 
@@ -40,9 +41,8 @@ async function main(): Promise<void> {
   // Initialize database
   console.log('📦 Initializing database...');
   const dbPath = process.env.DB_PATH || './data/mafia.db';
-  const { getDatabase } = await import('./db/migrate.js');
-  const migrator = getDatabase(dbPath);
-  const gameRepository = new GameRepository(migrator.getDatabase());
+  const migrator = createDatabase(dbPath);
+  const gameRepository = new GameRepositoryDefault((migrator as any).db);
   console.log('✅ Database initialized');
   
   // Initialize services

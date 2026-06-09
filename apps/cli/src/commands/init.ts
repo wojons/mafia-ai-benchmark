@@ -7,15 +7,13 @@
 import { Command } from 'commander';
 import fs from 'fs';
 import path from 'path';
-import { fileURLToPath } from 'url';
 import chalk from 'chalk';
 import inquirer from 'inquirer';
 
-const __dirname = path.dirname(fileURLToPath(import.meta.url));
-
 export class InitCommand extends Command {
   constructor() {
-    super('init', 'Initialize Mafia AI Benchmark configuration');
+    super('init');
+    this.description('Initialize Mafia AI Benchmark configuration');
     
     this.option('-f, --force', 'Overwrite existing configuration', false);
     this.option('-q, --quiet', 'Skip interactive prompts', false);
@@ -23,7 +21,7 @@ export class InitCommand extends Command {
   }
   
   async run(): Promise<void> {
-    const { force, quiet, default: useDefault } = this.parseOptions();
+    const { force, quiet, default: useDefault } = this.opts();
     
     const configPath = './mafia.config.json';
     
@@ -185,12 +183,13 @@ export class InitCommand extends Command {
   
   private generateConfig(answers: Record<string, unknown>): Record<string, unknown> {
     const roleConfig: Array<{ role: string; count: number }> = [];
-    
-    if (answers.roles.includes('mafia')) roleConfig.push({ role: 'MAFIA', count: 3 });
-    if (answers.roles.includes('doctor')) roleConfig.push({ role: 'DOCTOR', count: 1 });
-    if (answers.roles.includes('sheriff')) roleConfig.push({ role: 'SHERIFF', count: 1 });
-    if (answers.roles.includes('vigilante')) roleConfig.push({ role: 'VIGILANTE', count: 1 });
-    if (answers.roles.includes('villager')) {
+    const roles = answers.roles as string[];
+
+    if (roles.includes('mafia')) roleConfig.push({ role: 'MAFIA', count: 3 });
+    if (roles.includes('doctor')) roleConfig.push({ role: 'DOCTOR', count: 1 });
+    if (roles.includes('sheriff')) roleConfig.push({ role: 'SHERIFF', count: 1 });
+    if (roles.includes('vigilante')) roleConfig.push({ role: 'VIGILANTE', count: 1 });
+    if (roles.includes('villager')) {
       const filled = roleConfig.reduce((sum, r) => sum + r.count, 0);
       roleConfig.push({ role: 'VILLAGER', count: (answers.numPlayers as number) - filled });
     }

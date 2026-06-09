@@ -116,7 +116,7 @@ export class QwenProvider implements LLMProviderAdapter {
       messages,
       temperature: request.temperature ?? this.config.temperature ?? 0.7,
       max_tokens: request.maxTokens ?? this.config.maxTokens ?? 4096,
-      stream,
+      streaming,
     };
   }
   
@@ -135,7 +135,7 @@ export class QwenProvider implements LLMProviderAdapter {
       await this.handleHttpError(response);
     }
     
-    const data = await response.json();
+    const data = await response.json() as Record<string, unknown>;
     return this.parseResponse(data);
   }
   
@@ -250,7 +250,7 @@ export class QwenProvider implements LLMProviderAdapter {
   
   private async handleHttpError(response: Response): Promise<void> {
     const status = response.status;
-    const data = await response.json().catch(() => ({}));
+    const data = await response.json().catch(() => ({})) as Record<string, unknown>;
     
     let code: keyof typeof ERROR_CODES = 'SERVER_ERROR';
     let message = `HTTP ${status}: ${response.statusText}`;

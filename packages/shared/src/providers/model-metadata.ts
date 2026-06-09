@@ -136,6 +136,7 @@ export async function fetchModelMetadata(forceRefresh = false): Promise<Map<stri
           outputPerMillion: cost.output || 0,
           cacheReadPerMillion: cost.cache_read,
           hasPricing: cost.input !== undefined || cost.output !== undefined,
+          isMissingPricing: cost.input === undefined && cost.output === undefined,
         };
         
         // Extract limits
@@ -222,12 +223,10 @@ export function calculateCost(
     return {
       cost: 0,
       pricing: {
-        modelId,
-        inputPerMillion: -6.66,
-        outputPerMillion: -6.66,
+        inputPerMillion: NO_PRICING_MARKER,
+        outputPerMillion: NO_PRICING_MARKER,
         hasPricing: false,
         isMissingPricing: true,
-        noPricingMarker: -6.66,
       },
       formatted: 'No pricing data available',
     };

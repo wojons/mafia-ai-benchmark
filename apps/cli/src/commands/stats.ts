@@ -7,9 +7,33 @@
 import { Command } from 'commander';
 import chalk from 'chalk';
 
+interface Stats {
+  totalGames: number;
+  activeGames: number;
+  completedGames: number;
+  mafiaWins: number;
+  townWins: number;
+  avgDuration: number;
+  topModels: Array<{
+    provider: string;
+    model: string;
+    gamesPlayed: number;
+    winRate: number;
+    avgTokens: number;
+    avgCost: number;
+  }>;
+  totalTokens: number;
+  totalCost: number;
+  avgCostPerGame: number;
+  totalAPICalls: number;
+  avgLatency: number;
+  errorRate: number;
+}
+
 export class StatsCommand extends Command {
   constructor() {
-    super('stats', 'Display game and model statistics');
+    super('stats');
+    this.description('Display game and model statistics');
     
     this.option('--json', 'Output as JSON');
     this.option('--games', 'Show game statistics');
@@ -18,7 +42,7 @@ export class StatsCommand extends Command {
   }
   
   async run(): Promise<void> {
-    const { json, games, models, verbose } = this.parseOptions();
+    const { json, games: _games, models: _models, verbose } = this.opts();
     
     console.log(chalk.cyan('\n📊 Mafia AI Benchmark Statistics\n'));
     
@@ -87,7 +111,7 @@ export class StatsCommand extends Command {
     }
   }
   
-  private async fetchStats(): Promise<Record<string, unknown>> {
+  private async fetchStats(): Promise<Stats> {
     // TODO: Fetch from server
     // Simulated data
     return {

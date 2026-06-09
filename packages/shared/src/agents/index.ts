@@ -88,7 +88,7 @@ export interface AgentThinking {
   strategy: string;
   targets: string[];
   concerns: string[];
-  plan: string;
+  plan: string[];
 }
 
 // Agent implementation
@@ -429,20 +429,22 @@ export class MafiaAgent implements AgentPolicy {
           plan.push('Avoid targeting other mafia');
           plan.push('Prepare defense for next day');
           break;
-        case 'DOCTOR':
+        case 'DOCTOR': {
           const lastProtected = memory.privateInfo.protectedBy;
           const potentialTargets = game.players.filter(
             p => p.isAlive && p.id !== lastProtected
           );
           plan.push(`Select protection target from ${potentialTargets.length} options`);
           break;
-        case 'SHERIFF':
+        }
+        case 'SHERIFF': {
           const investigated = memory.privateInfo.investigationResults.map(r => r.targetId);
           const potentialTargets = game.players.filter(
             p => p.isAlive && !investigated.includes(p.id)
           );
           plan.push(`Investigate one of ${potentialTargets.length} uninvolved players`);
           break;
+        }
         case 'VIGILANTE':
           if (memory.privateInfo.shotsRemaining && memory.privateInfo.shotsRemaining > 0) {
             plan.push('Decide whether to use shot tonight');

@@ -138,7 +138,7 @@ const Settings: React.FC = () => {
               max="100"
               value={settings.voiceVolume * 100}
               onChange={(e) =>
-                handleSettingChange('voiceVolume', e.target.value / 100)
+                handleSettingChange('voiceVolume', Number(e.target.value) / 100)
               }
               className="range-input"
             />

@@ -116,7 +116,7 @@ export class GroqProvider implements LLMProviderAdapter {
       messages,
       temperature: request.temperature ?? this.config.temperature ?? 0.7,
       max_tokens: request.maxTokens ?? this.config.maxTokens ?? 4096,
-      stream,
+      streaming,
     };
   }
   
@@ -134,7 +134,7 @@ export class GroqProvider implements LLMProviderAdapter {
       await this.handleHttpError(response);
     }
     
-    const data = await response.json();
+    const data = await response.json() as Record<string, unknown>;
     return this.parseResponse(data);
   }
   
@@ -261,14 +261,14 @@ export class GroqProvider implements LLMProviderAdapter {
     
     if (response.usage) {
       this.stats.totalTokens += response.usage.totalTokens;
-      const cost = calculateCost('GROQ', this.config.model, response.usage.promptTokens, response.usage.completionTokens);
+      const cost = calculateCost(this.config.model, response.usage.promptTokens, response.usage.completionTokens);
       this.stats.totalCost += cost.cost;
     }
   }
   
   countTokens(text: string): number { return Math.ceil(text.length / 4); }
   estimateCost(promptTokens: number, completionTokens: number): number {
-    return calculateCost('GROQ', this.config.model, promptTokens, completionTokens);
+    return calculateCost(this.config.model, promptTokens, completionTokens).cost;
   }
   validateConfig(): boolean { return !!(this.config.apiKey && this.config.model); }
   getStats(): ProviderStats { return { ...this.stats }; }

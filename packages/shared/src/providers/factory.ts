@@ -27,10 +27,9 @@ import { LMStudioProvider } from './lmstudio.js';
 import { CustomProvider } from './custom.js';
 import { MetaProvider } from './meta.js';
 import { QwenProvider } from './qwen.js';
-import { XaiProvider } from './xai.js';
+import { XAIProvider } from './xai.js';
 
-// Provider registry
-const PROVIDERS: Map<string, new (config: ProviderConfig) => LLMProviderAdapter> = new Map([
+const PROVIDERS: Map<string, new (...args: any[]) => LLMProviderAdapter> = new Map([
   ['OPENAI', OpenAIProvider],
   ['ANTHROPIC', AnthropicProvider],
   ['GOOGLE', GoogleProvider],
@@ -41,8 +40,8 @@ const PROVIDERS: Map<string, new (config: ProviderConfig) => LLMProviderAdapter>
   ['CUSTOM', CustomProvider],
   ['META', MetaProvider],
   ['QWEN', QwenProvider],
-  ['XAI', XaiProvider],
-]);
+  ['XAI', XAIProvider],
+] as Array<[string, new (...args: any[]) => LLMProviderAdapter]>);
 
 // Provider metadata (minimal, just names and defaults)
 const PROVIDER_INFO: Map<string, { name: string; defaultModel: string }> = new Map([

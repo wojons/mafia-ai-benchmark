@@ -4,6 +4,8 @@
  * All core types used throughout the Mafia AI Benchmark system.
  */
 
+import type { GameEvent } from '../events/index.js';
+
 // Player types
 export interface Player {
   id: string;
@@ -19,7 +21,8 @@ export type RoleType =
   | 'DOCTOR' 
   | 'SHERIFF' 
   | 'VIGILANTE' 
-  | 'VILLAGER';
+  | 'VILLAGER'
+  | 'UNASSIGNED';
 
 export type TeamType = 'MAFIA' | 'TOWN';
 

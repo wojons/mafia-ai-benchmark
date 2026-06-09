@@ -121,7 +121,7 @@ export class OllamaProvider implements LLMProviderAdapter {
       messages,
       temperature: request.temperature ?? this.config.temperature ?? 0.7,
       max_tokens: request.maxTokens ?? this.config.maxTokens ?? 4096,
-      stream,
+      streaming,
     };
   }
   
@@ -136,7 +136,7 @@ export class OllamaProvider implements LLMProviderAdapter {
       await this.handleHttpError(response);
     }
     
-    const data = await response.json();
+    const data = await response.json() as Record<string, unknown>;
     return this.parseResponse(data);
   }
   

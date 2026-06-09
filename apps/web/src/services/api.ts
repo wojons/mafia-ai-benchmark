@@ -36,7 +36,7 @@ async function fetchAPI<T>(endpoint: string, options: FetchOptions = {}): Promis
   
   // Handle empty responses
   const text = await response.text();
-  return text ? JSON.parse(text) : null;
+  return text ? JSON.parse(text) : null as unknown as T;
 }
 
 // Games API

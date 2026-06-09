@@ -44,7 +44,7 @@ export abstract class BaseCommand extends Command {
     }
   }
   
-  protected error(message: string): void {
+  protected showError(message: string): void {
     console.error(`❌ ${message}`);
   }
   
@@ -70,12 +70,12 @@ export abstract class BaseCommand extends Command {
     console.log(JSON.stringify(data, null, 2));
   }
   
-  protected async loadConfig(configPath?: string): Promise<Record<string, unknown>> {
+  protected async loadConfig(_configPath?: string): Promise<Record<string, unknown>> {
     // TODO: Load configuration from file
     return {};
   }
   
-  protected async saveConfig(config: Record<string, unknown>, configPath?: string): Promise<void> {
+  protected async saveConfig(_config: Record<string, unknown>, _configPath?: string): Promise<void> {
     // TODO: Save configuration to file
   }
 }

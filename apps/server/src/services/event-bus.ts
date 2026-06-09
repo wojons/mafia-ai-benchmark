@@ -221,7 +221,7 @@ export class EventBus {
         return false;
       }
       return true;
-    }).slice(-options?.limit || 1000);
+    }).slice(-(options?.limit ?? 1000));
   }
   
   /**

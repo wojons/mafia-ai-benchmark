@@ -538,7 +538,7 @@ export class GameEngine {
     const game = this.gameRepository.getGame(gameId);
     if (!game) return;
     
-    const newPhase = event.data.toPhase || event.metadata.phase;
+    const newPhase = (event.data as Record<string, unknown>).toPhase || event.metadata.phase;
     
     switch (newPhase) {
       case 'NIGHT_ACTIONS':

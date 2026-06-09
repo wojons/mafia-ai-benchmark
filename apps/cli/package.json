@@ -18,19 +18,20 @@
     "game:watch": "tsx src/cli/watch-game.ts"
   },
   "dependencies": {
-    "commander": "^12.0.0",
-    "inquirer": "^9.2.0",
     "chalk": "^5.3.0",
-    "ora": "^8.0.0",
+    "commander": "^12.0.0",
     "dotenv": "^16.4.0",
+    "inquirer": "^9.2.0",
+    "ora": "^8.0.0",
+    "uuid": "^9.0.0",
     "ws": "^8.16.0",
-    "zod": "^3.22.0",
-    "uuid": "^9.0.0"
+    "zod": "^3.22.0"
   },
   "devDependencies": {
-    "@types/node": "^20.0.0",
     "@types/inquirer": "^9.0.0",
+    "@types/node": "^20.0.0",
     "@types/uuid": "^9.0.0",
+    "@types/ws": "^8.18.1",
     "tsx": "^4.7.0",
     "typescript": "^5.4.0"
   },

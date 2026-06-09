@@ -12,7 +12,8 @@ export class WatchGameCommand extends Command {
   private ws: WebSocket | null = null;
   
   constructor() {
-    super('watch-game', 'Watch a game in real-time');
+    super('watch-game');
+    this.description('Watch a game in real-time');
     
     this.argument('<game-id>', 'Game ID to watch');
     this.option('-s, --server <url>', 'Server URL', 'ws://localhost:3000/ws');
@@ -20,8 +21,8 @@ export class WatchGameCommand extends Command {
   }
   
   async run(): Promise<void> {
-    const [gameId] = this.parseArguments();
-    const { server, noColor } = this.parseOptions();
+    const [gameId] = this.args;
+    const { server } = this.opts();
     
     console.log(chalk.cyan(`\n👀 Watching Game: ${gameId}\n`));
     
@@ -100,7 +101,7 @@ export class WatchGameCommand extends Command {
         break;
         
       case 'ERROR':
-        console.error(chalk.red(`Error: ${message.payload?.message}`));
+        console.error(chalk.red(`Error: ${(message.payload as Record<string, unknown>)?.message}`));
         break;
     }
   }

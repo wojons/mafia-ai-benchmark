@@ -10,7 +10,8 @@ import inquirer from 'inquirer';
 
 export class BenchmarkCommand extends Command {
   constructor() {
-    super('benchmark', 'Run automated benchmark suite');
+    super('benchmark');
+    this.description('Run automated benchmark suite');
     
     this.option('-g, --games <n>', 'Number of games to run', '10');
     this.option('--models <models>', 'Comma-separated list of models to benchmark');
@@ -21,7 +22,7 @@ export class BenchmarkCommand extends Command {
   }
   
   async run(): Promise<void> {
-    const { games, models, parallel, quick, export: exportPath, json } = this.parseOptions();
+    const { games, models, parallel, quick, export: exportPath, json } = this.opts();
     
     console.log(chalk.cyan('\n🏁 Mafia AI Benchmark Suite\n'));
     

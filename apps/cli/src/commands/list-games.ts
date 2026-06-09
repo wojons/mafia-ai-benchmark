@@ -6,11 +6,11 @@
 
 import { Command } from 'commander';
 import chalk from 'chalk';
-import { formatDistanceToNow } from 'date-fns';
 
 export class ListGamesCommand extends Command {
   constructor() {
-    super('list-games', 'List recent and active games');
+    super('list-games');
+    this.description('List recent and active games');
     
     this.option('--status <status>', 'Filter by status (setup, in_progress, ended)');
     this.option('--limit <n>', 'Maximum games to show', '10');
@@ -18,7 +18,7 @@ export class ListGamesCommand extends Command {
   }
   
   async run(): Promise<void> {
-    const { status, limit, json } = this.parseOptions();
+    const { status, limit, json } = this.opts();
     
     console.log(chalk.cyan('\n📋 Recent Games\n'));
     
@@ -55,7 +55,7 @@ export class ListGamesCommand extends Command {
     }
   }
   
-  private async fetchGames(status?: string, limit?: number): Promise<Array<{
+  private async fetchGames(_status?: string, _limit?: number): Promise<Array<{
     id: string;
     status: string;
     players: number;

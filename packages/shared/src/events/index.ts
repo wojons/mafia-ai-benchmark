@@ -5,7 +5,7 @@
  * Events are the core of the event-sourced game state.
  */
 
-import { RoleType, GamePhase, Agent } from '../types/index.js';
+import { Agent } from '../types/index.js';
 
 // Event visibility levels
 export type EventVisibility = 'PUBLIC' | 'PRIVATE' | 'ADMIN';

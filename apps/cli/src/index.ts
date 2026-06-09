@@ -28,8 +28,8 @@ program
 program.configureOutput({
   writeOut: (str) => process.stdout.write(str),
   writeErr: (str) => process.stderr.write(str),
-  getErrorHelpWidth: () => process.stdout.columns,
-  getOutputHelpWidth: () => process.stdout.columns,
+    getErrHelpWidth: () => process.stdout.columns,
+    getOutHelpWidth: () => process.stdout.columns,
 });
 
 // Register commands

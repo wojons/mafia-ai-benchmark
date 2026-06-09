@@ -7,13 +7,21 @@
 import { Command } from 'commander';
 import inquirer from 'inquirer';
 import chalk from 'chalk';
-import WebSocket from 'ws';
+
+interface GameConfig {
+  numPlayers: number;
+  llmProvider: string;
+  llmModel: string;
+  nightDuration: number;
+  dayDuration: number;
+  votingDuration: number;
+  roles: Array<{ role: string; count: number }>;
+}
 
 export class RunGameCommand extends Command {
-  private ws: WebSocket | null = null;
-  
   constructor() {
-    super('run-game', 'Run a Mafia game with AI agents');
+    super('run-game');
+    this.description('Run a Mafia game with AI agents');
     
     this.option('-c, --config <path>', 'Configuration file path', './mafia.config.json');
     this.option('--players <n>', 'Number of players', '10');
@@ -24,21 +32,21 @@ export class RunGameCommand extends Command {
   }
   
   async run(): Promise<void> {
-    const { config, players, provider, model, auto, watch } = this.parseOptions();
+    const { config, players, provider, model, auto, watch } = this.opts();
     
     console.log(chalk.cyan('\n🎮 Mafia AI Benchmark - Run Game\n'));
     
     // Load configuration
     let gameConfig = this.loadConfig(config);
-    
+
     if (!gameConfig) {
       gameConfig = this.getDefaultGameConfig();
     }
-    
+
     // Override with command line options
-    if (players) gameConfig.numPlayers = parseInt(players);
-    if (provider) gameConfig.llmProvider = provider;
-    if (model) gameConfig.llmModel = model;
+    if (players) gameConfig.numPlayers = parseInt(players as string);
+    if (provider) gameConfig.llmProvider = provider as string;
+    if (model) gameConfig.llmModel = model as string;
     
     // Display game configuration
     console.log(chalk.white('Game Configuration:'));
@@ -86,20 +94,20 @@ export class RunGameCommand extends Command {
     }
   }
   
-  private loadConfig(configPath: string): Record<string, unknown> | null {
+  private loadConfig(configPath: string): GameConfig | null {
     try {
-      const fs = await import('fs');
+      const fs = require('fs');
       if (fs.existsSync(configPath)) {
         const config = fs.readFileSync(configPath, 'utf-8');
-        return JSON.parse(config);
+        return JSON.parse(config) as GameConfig;
       }
     } catch {
       // Ignore errors
     }
     return null;
   }
-  
-  private getDefaultGameConfig(): Record<string, unknown> {
+
+  private getDefaultGameConfig(): GameConfig {
     return {
       numPlayers: 10,
       llmProvider: 'openai',
@@ -117,7 +125,7 @@ export class RunGameCommand extends Command {
     };
   }
   
-  private async startGame(config: Record<string, unknown>): Promise<void> {
+  private async startGame(_config: GameConfig): Promise<void> {
     // TODO: Connect to server and create game
     console.log(chalk.gray('  Connecting to server...'));
     console.log(chalk.gray('  Creating game...'));
@@ -150,31 +158,7 @@ export class RunGameCommand extends Command {
     });
     */
   }
-  
-  private displayEvent(event: Record<string, unknown>): void {
-    const type = event.type as string;
-    
-    switch (type) {
-      case 'PHASE_CHANGED':
-        console.log(chalk.cyan(`\n📍 Phase: ${event.toPhase}`));
-        break;
-      case 'PLAYER_JOINED':
-        console.log(chalk.green(`\n👤 ${event.name} joined the game`));
-        break;
-      case 'AGENT_SAYS_BROADCASTED':
-        console.log(chalk.white(`\n💬 ${event.playerName}: "${event.statement}"`));
-        break;
-      case 'PLAYER_KILLED':
-        console.log(chalk.red(`\n💀 ${event.playerName} was killed (${event.role})`));
-        break;
-      case 'PLAYER_LYNCHED':
-        console.log(chalk.red(`\n🪨 ${event.playerName} was lynched (${event.role})`));
-        break;
-      case 'WINNER_DETERMINED':
-        console.log(chalk.green(`\n🏆 ${event.winner} WINS!`));
-        break;
-    }
-  }
+
 }
 
 export default RunGameCommand;

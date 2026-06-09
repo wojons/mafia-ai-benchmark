@@ -102,13 +102,14 @@ export const useGameStore = create<GameStoreState>()(
         await websocket.connect();
         
         // Set up event listeners
-        websocket.on('GAME_EVENT', (event) => {
-          get().addEvent(event);
+        websocket.on('GAME_EVENT', (event: unknown) => {
+          get().addEvent(event as GameEvent);
         });
         
-        websocket.on('GAME_STATE', (data) => {
-          if (data.state) {
-            get().updateGameState(data.state);
+        websocket.on('GAME_STATE', (data: unknown) => {
+          const stateData = data as Record<string, unknown>;
+          if (stateData.state) {
+            get().updateGameState(stateData.state as GameState);
           }
         });
         
@@ -142,7 +143,7 @@ export const useGameStore = create<GameStoreState>()(
     // Fetch games
     fetchGames: async (filters) => {
       try {
-        const games = await api.getGames(filters);
+        const games = await api.games.getAll(filters) as unknown as Game[];
         set({ games });
       } catch (error) {
         console.error('Failed to fetch games:', error);
@@ -154,7 +155,7 @@ export const useGameStore = create<GameStoreState>()(
       set({ selectedGameId: gameId });
       
       try {
-        const game = await api.getGame(gameId);
+        const game = await api.games.get(gameId) as unknown as Game;
         if (game) {
           set({
             currentGame: game,
@@ -176,7 +177,7 @@ export const useGameStore = create<GameStoreState>()(
     // Create game
     createGame: async (config) => {
       try {
-        const game = await api.createGame(config);
+        const game = await api.games.create(config) as unknown as Game;
         await get().fetchGames();
         return game;
       } catch (error) {
@@ -188,7 +189,7 @@ export const useGameStore = create<GameStoreState>()(
     // Join game
     joinGame: async (gameId, playerName) => {
       try {
-        await api.joinGame(gameId, playerName);
+        await api.games.join(gameId, playerName);
         await get().selectGame(gameId);
       } catch (error) {
         console.error('Failed to join game:', error);
@@ -199,7 +200,7 @@ export const useGameStore = create<GameStoreState>()(
     // Start game
     startGame: async (gameId) => {
       try {
-        await api.startGame(gameId);
+        await api.games.start(gameId);
         await get().selectGame(gameId);
       } catch (error) {
         console.error('Failed to start game:', error);
@@ -247,7 +248,7 @@ export const useGameStore = create<GameStoreState>()(
     // Submit night action
     submitNightAction: async (gameId, playerId, action, targetId) => {
       try {
-        await api.submitNightAction(gameId, playerId, action, targetId);
+        await api.games.submitNightAction(gameId, playerId, action, targetId);
       } catch (error) {
         console.error('Failed to submit night action:', error);
         throw error;
@@ -257,7 +258,7 @@ export const useGameStore = create<GameStoreState>()(
     // Submit vote
     submitVote: async (gameId, voterId, targetId) => {
       try {
-        await api.submitVote(gameId, voterId, targetId);
+        await api.games.submitVote(gameId, voterId, targetId);
       } catch (error) {
         console.error('Failed to submit vote:', error);
         throw error;
@@ -267,7 +268,7 @@ export const useGameStore = create<GameStoreState>()(
     // Make accusation
     makeAccusation: async (gameId, accuserId, targetId, accusation, evidence) => {
       try {
-        await api.makeAccusation(gameId, accuserId, targetId, accusation, evidence);
+        await api.games.makeAccusation(gameId, accuserId, targetId, accusation, evidence);
       } catch (error) {
         console.error('Failed to make accusation:', error);
         throw error;
@@ -277,7 +278,7 @@ export const useGameStore = create<GameStoreState>()(
     // Claim role
     claimRole: async (gameId, playerId, role) => {
       try {
-        await api.claimRole(gameId, playerId, role as 'MAFIA' | 'DOCTOR' | 'SHERIFF' | 'VIGILANTE' | 'VILLAGER');
+        await api.games.claimRole(gameId, playerId, role as 'MAFIA' | 'DOCTOR' | 'SHERIFF' | 'VIGILANTE' | 'VILLAGER');
       } catch (error) {
         console.error('Failed to claim role:', error);
         throw error;

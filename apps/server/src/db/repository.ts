@@ -14,6 +14,10 @@ export class GameRepository {
   constructor(db: Database.Database) {
     this.db = db;
   }
+
+  getDatabase(): Database.Database {
+    return this.db;
+  }
   
   // ==================== GAMES ====================
   
@@ -384,6 +388,7 @@ export class GameRepository {
     winRate: number;
     avgTokens: number;
     avgCost: number;
+    avgLatency: number;
   }> {
     const rows = this.db.prepare(`
       SELECT 
@@ -407,9 +412,10 @@ export class GameRepository {
       model: row.model as string,
       gamesPlayed: row.games_played as number,
       wins: row.wins as number,
-      winRate: row.games_played > 0 ? (row.wins as number) / (row.games_played as number) : 0,
+      winRate: (row.games_played as number) > 0 ? (row.wins as number) / (row.games_played as number) : 0,
       avgTokens: row.avg_tokens as number || 0,
       avgCost: row.avg_cost as number || 0,
+      avgLatency: 0,
     }));
   }
 }
