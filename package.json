@@ -17,13 +17,15 @@
     "test": "turbo run test",
     "lint": "turbo run lint",
     "format": "prettier --write \"**/*.{ts,tsx,json,md}\"",
-    "server": "npm run dev --workspace=apps/server",
-    "web": "npm run dev --workspace=apps/web",
-    "cli": "npm run dev --workspace=apps/cli",
-    "shared": "npm run build --workspace=packages/shared",
-    "db:migrate": "npm run db:migrate --workspace=apps/server",
-    "game:run": "npm run game:run --workspace=apps/cli",
-    "game:watch": "npm run game:watch --workspace=apps/cli"
+    "server": "pnpm --filter @mafia/server dev",
+    "server:build": "pnpm --filter @mafia/server build",
+    "web": "pnpm --filter @mafia/web dev --port 5174",
+    "web:build": "pnpm --filter @mafia/web build",
+    "cli": "pnpm --filter @mafia/cli dev",
+    "shared": "pnpm --filter @mafia/shared build",
+    "db:migrate": "pnpm --filter @mafia/server db:migrate",
+    "game:run": "pnpm --filter @mafia/cli game:run",
+    "game:watch": "pnpm --filter @mafia/cli game:watch"
   },
   "devDependencies": {
     "@types/node": "^25.0.3",
