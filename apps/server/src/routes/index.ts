@@ -860,6 +860,35 @@ export function setupRoutes(app: Express, context: ServerContext): void {
     }
   });
 
+  // ==================== BENCHMARK EXPORT ====================
+
+  // Export comprehensive benchmark report
+  app.get('/api/v1/benchmark/export', (req: Request, res: Response) => {
+    try {
+      const format = (req.query.format as string) || 'json';
+      const games = req.query.games ? parseInt(req.query.games as string) : undefined;
+
+      const report = statsCollector.getExportReport(games);
+
+      if (format === 'csv') {
+        const csv = statsCollector.exportReportCSV(report);
+        res.setHeader('Content-Type', 'text/csv; charset=utf-8');
+        res.setHeader('Content-Disposition', 'attachment; filename="benchmark-export.csv"');
+        res.send(csv);
+      } else {
+        res.json({
+          success: true,
+          data: report,
+        });
+      }
+    } catch (error) {
+      res.status(500).json({
+        success: false,
+        error: 'Failed to export benchmark data',
+      });
+    }
+  });
+
   // Compare models head-to-head
   app.get('/api/v1/benchmark/compare', (req: Request, res: Response) => {
     try {

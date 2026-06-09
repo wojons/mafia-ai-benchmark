@@ -63,6 +63,7 @@ program.on('--help', () => {
   console.log('  $ mafiactl config show             # Show current configuration');
   console.log('  $ mafiactl stats                   # Show statistics');
   console.log('  $ mafiactl benchmark --games 10    # Run benchmark suite');
+  console.log('  $ mafiactl benchmark export        # Export benchmark data');
   console.log('');
   console.log('🔗 Links:');
   console.log('  Docs:  https://github.com/wojons/mafia-ai-benchmark');

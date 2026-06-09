@@ -12,6 +12,7 @@ import Settings from './components/Settings';
 import Loading from './components/Loading';
 import SplitPaneView from './components/SplitPaneView';
 import TimelineView from './components/TimelineView';
+import ThreeDViz from './components/ThreeDViz';
 
 function App() {
   const { initialize, connected } = useGameStore();
@@ -42,6 +43,7 @@ function App() {
             <Route path="/watch/:gameId" element={<GameWatcher />} />
             <Route path="/observe/:gameId" element={<SplitPaneView />} />
             <Route path="/timeline/:gameId" element={<TimelineView />} />
+            <Route path="/3d/:gameId" element={<ThreeDViz />} />
             <Route path="/stats" element={<StatsPanel />} />
             <Route path="/settings" element={<Settings />} />
             <Route path="*" element={<Navigate to="/" replace />} />

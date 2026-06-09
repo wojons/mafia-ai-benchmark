@@ -788,6 +788,318 @@ export class StatsCollector {
     
     return rows.join('\n');
   }
+
+  // ==================== EXPORT REPORT ====================
+
+  /**
+   * Generate comprehensive export report with per-game stats,
+   * per-model aggregates, game event logs, and cost breakdown.
+   */
+  getExportReport(games?: number): {
+    generatedAt: string;
+    summary: {
+      totalGames: number;
+      activeGames: number;
+      completedGames: number;
+      mafiaWins: number;
+      townWins: number;
+      avgDuration: number;
+      totalTokens: number;
+      totalCost: number;
+    };
+    games: Array<{
+      gameId: string;
+      status: string;
+      dayCount: number;
+      playerCount: number;
+      duration: number | null;
+      winner: string | null;
+      players: Array<{
+        playerId: string;
+        name: string;
+        role: string;
+        provider: string;
+        model: string;
+        survived: boolean;
+        won: boolean;
+        tokensUsed: number;
+        apiCalls: number;
+      }>;
+      events: Array<{
+        id: string;
+        type: string;
+        description: string;
+        playerId: string | null;
+        timestamp: string;
+        turnNumber: number;
+        phase: string;
+      }>;
+      costBreakdown: {
+        totalCost: number;
+        totalTokens: number;
+        promptTokens: number;
+        completionTokens: number;
+        apiCalls: number;
+        errorRate: number;
+        byModel: Array<{
+          provider: string;
+          model: string;
+          cost: number;
+          tokens: number;
+        }>;
+      };
+    }>;
+    modelAggregates: ReturnType<StatsCollector['getCompareReport']>['models'];
+    headToHead: ReturnType<StatsCollector['getCompareReport']>['headToHead'];
+  } {
+    const gameStats = this.getGameStats();
+    const compareReport = this.getCompareReport();
+
+    // Calculate totals
+    const totalTokens = this.gameRepository.getDatabase().prepare(
+      'SELECT COALESCE(SUM(total_tokens), 0) as total FROM token_usage'
+    ).get() as { total: number };
+    const totalCost = this.gameRepository.getDatabase().prepare(
+      'SELECT COALESCE(SUM(cost), 0) as total FROM token_usage'
+    ).get() as { total: number };
+
+    // Get recent games
+    const allGames = this.gameRepository.listGames({ limit: games || 50, offset: 0 });
+    const gameRows: Array<{
+      gameId: string;
+      status: string;
+      dayCount: number;
+      playerCount: number;
+      duration: number | null;
+      winner: string | null;
+      players: Array<{
+        playerId: string;
+        name: string;
+        role: string;
+        provider: string;
+        model: string;
+        survived: boolean;
+        won: boolean;
+        tokensUsed: number;
+        apiCalls: number;
+      }>;
+      events: Array<{
+        id: string;
+        type: string;
+        description: string;
+        playerId: string | null;
+        timestamp: string;
+        turnNumber: number;
+        phase: string;
+      }>;
+      costBreakdown: {
+        totalCost: number;
+        totalTokens: number;
+        promptTokens: number;
+        completionTokens: number;
+        apiCalls: number;
+        errorRate: number;
+        byModel: Array<{
+          provider: string;
+          model: string;
+          cost: number;
+          tokens: number;
+        }>;
+      };
+    }> = [];
+
+    for (const g of allGames) {
+      const gameId = g.id;
+      const players = this.gameRepository.getPlayers(gameId);
+      const events = this.gameRepository.getEvents(gameId);
+
+      // Player details with token/cost info
+      const playerDetails = players.map(p => {
+        const tokenUsage = this.getPlayerTokenUsage(gameId, p.id);
+        const apiCalls = this.getGameAPICalls(gameId).filter(c => c.playerId === p.id);
+        return {
+          playerId: p.id,
+          name: p.name,
+          role: p.role,
+          provider: (p as any).provider || '',
+          model: (p as any).model || '',
+          survived: p.isAlive,
+          won: false, // would need full game resolution to compute accurately
+          tokensUsed: tokenUsage.reduce((sum, t) => sum + t.totalTokens, 0),
+          apiCalls: apiCalls.length,
+        };
+      });
+
+      // Event log
+      const eventLog = events.map(e => ({
+        id: e.id,
+        type: e.type,
+        description: e.type,
+        playerId: e.actorId || null,
+        timestamp: e.timestamp.toISOString(),
+        turnNumber: e.metadata?.turnNumber || 0,
+        phase: e.metadata?.phase || '',
+      }));
+
+      // Cost breakdown per game
+      const gameCost = this.getTotalCost(gameId);
+      const gameTokens = this.getTotalTokens(gameId);
+      const gameAPICalls = this.getGameAPICalls(gameId);
+      const errorRate = this.getAPIErrorRate(gameId);
+
+      // Prompt/completion breakdown
+      const tokenBreakdown = this.gameRepository.getDatabase().prepare(
+        'SELECT COALESCE(SUM(prompt_tokens), 0) as prompt, COALESCE(SUM(completion_tokens), 0) as completion FROM token_usage WHERE game_id = ?'
+      ).get(gameId) as { prompt: number; completion: number };
+
+      // Cost by model for this game
+      const costByModel = this.gameRepository.getDatabase().prepare(
+        'SELECT provider, model, SUM(cost) as cost, SUM(total_tokens) as tokens FROM token_usage WHERE game_id = ? GROUP BY provider, model'
+      ).all(gameId) as Array<{ provider: string; model: string; cost: number; tokens: number }>;
+
+      const gameDuration = g.startedAt && g.endedAt
+        ? g.endedAt.getTime() - g.startedAt.getTime()
+        : null;
+
+      gameRows.push({
+        gameId,
+        status: g.status,
+        dayCount: (g.currentState?.dayNumber || 0),
+        playerCount: players.length,
+        duration: gameDuration,
+        winner: g.status === 'ENDED' ? (g as any).winner || null : null,
+        players: playerDetails,
+        events: eventLog,
+        costBreakdown: {
+          totalCost: gameCost,
+          totalTokens: gameTokens,
+          promptTokens: tokenBreakdown.prompt,
+          completionTokens: tokenBreakdown.completion,
+          apiCalls: gameAPICalls.length,
+          errorRate,
+          byModel: costByModel,
+        },
+      });
+    }
+
+    return {
+      generatedAt: new Date().toISOString(),
+      summary: {
+        totalGames: gameStats.totalGames,
+        activeGames: gameStats.activeGames,
+        completedGames: gameStats.completedGames,
+        mafiaWins: gameStats.mafiaWins,
+        townWins: gameStats.townWins,
+        avgDuration: gameStats.avgDuration,
+        totalTokens: totalTokens.total,
+        totalCost: Math.round(totalCost.total * 10000) / 10000,
+      },
+      games: gameRows,
+      modelAggregates: compareReport.models,
+      headToHead: compareReport.headToHead,
+    };
+  }
+
+  /**
+   * Convert export report to CSV string
+   */
+  exportReportCSV(report: ReturnType<StatsCollector['getExportReport']>): string {
+    const lines: string[] = [];
+
+    // --- SUMMARY ---
+    lines.push('# Summary');
+    lines.push('Metric,Value');
+    lines.push(`Total Games,${report.summary.totalGames}`);
+    lines.push(`Active Games,${report.summary.activeGames}`);
+    lines.push(`Completed Games,${report.summary.completedGames}`);
+    lines.push(`Mafia Wins,${report.summary.mafiaWins}`);
+    lines.push(`Town Wins,${report.summary.townWins}`);
+    lines.push(`Avg Duration (ms),${report.summary.avgDuration.toFixed(0)}`);
+    lines.push(`Total Tokens,${report.summary.totalTokens}`);
+    lines.push(`Total Cost,${report.summary.totalCost}`);
+    lines.push('');
+
+    // --- PER-GAME STATS ---
+    lines.push('# Per-Game Stats');
+    lines.push('Game ID,Status,Players,Duration (ms),Winner,Total Cost,Total Tokens,API Calls,Error Rate');
+    for (const g of report.games) {
+      lines.push([
+        g.gameId,
+        g.status,
+        g.playerCount,
+        g.duration ?? '',
+        g.winner ?? '',
+        g.costBreakdown.totalCost,
+        g.costBreakdown.totalTokens,
+        g.costBreakdown.apiCalls,
+        g.costBreakdown.errorRate,
+      ].join(','));
+    }
+    lines.push('');
+
+    // --- GAME EVENT LOGS ---
+    lines.push('# Game Event Logs');
+    lines.push('Game ID,Turn,Phase,Event Type,Player ID,Description,Timestamp');
+    for (const g of report.games) {
+      for (const e of g.events) {
+        const desc = e.description.replace(/"/g, '""');
+        lines.push([
+          g.gameId,
+          e.turnNumber,
+          e.phase,
+          e.type,
+          e.playerId ?? '',
+          `"${desc}"`,
+          e.timestamp,
+        ].join(','));
+      }
+    }
+    lines.push('');
+
+    // --- COST BREAKDOWN ---
+    lines.push('# Cost Breakdown');
+    lines.push('Game ID,Provider,Model,Cost,Tokens');
+    for (const g of report.games) {
+      for (const m of g.costBreakdown.byModel) {
+        lines.push([g.gameId, m.provider, m.model, m.cost, m.tokens].join(','));
+      }
+    }
+    lines.push('');
+
+    // --- MODEL AGGREGATES ---
+    lines.push('# Model Aggregates');
+    lines.push('Provider,Model,Games Played,Wins,Win Rate,Avg Tokens/Game,Avg Cost/Game,Avg Latency (ms),Avg Role Performance');
+    for (const m of report.modelAggregates) {
+      lines.push([
+        m.provider,
+        m.model,
+        m.gamesPlayed,
+        m.wins,
+        m.winRate,
+        m.avgTokensPerGame,
+        m.avgCostPerGame,
+        m.avgLatency,
+        m.avgRolePerformance,
+      ].join(','));
+    }
+    lines.push('');
+
+    // --- HEAD-TO-HEAD ---
+    lines.push('# Head-to-Head Matchups');
+    lines.push('Model A,Model B,Games Played,Model A Wins,Model B Wins,Ties');
+    for (const h of report.headToHead) {
+      lines.push([
+        h.modelA,
+        h.modelB,
+        h.gamesPlayed,
+        h.modelAWins,
+        h.modelBWins,
+        h.ties,
+      ].join(','));
+    }
+
+    return lines.join('\n');
+  }
 }
 
 export default StatsCollector;

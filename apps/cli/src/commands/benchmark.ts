@@ -7,6 +7,7 @@
 import { Command } from 'commander';
 import chalk from 'chalk';
 import inquirer from 'inquirer';
+import { ExportCommand } from './export.js';
 
 export class BenchmarkCommand extends Command {
   constructor() {
@@ -19,6 +20,9 @@ export class BenchmarkCommand extends Command {
     this.option('--quick', 'Quick benchmark (3 games)', false);
     this.option('--export <path>', 'Export results to file');
     this.option('--json', 'Output results as JSON');
+    
+    // Add export subcommand
+    this.addCommand(new ExportCommand());
   }
   
   async run(): Promise<void> {
