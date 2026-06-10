@@ -1,0 +1,27 @@
+Fix a syntax error in the FSM test file.
+
+File: /workspace/packages/shared/src/__tests__/fsm/fsm.test.ts
+
+Line 261 has an extra `});` closing brace that prematurely ends the outer `describe('GameFSM')` block. This orphans all subsequent test code (Voting tests, Player Elimination tests, Win Condition tests).
+
+Remove the extra `});` on line 261. Then verify the file structure is correct — all other describe/it blocks should be properly nested inside `describe('GameFSM')`.
+
+The file ending (after the fix) should look like:
+
+```
+    });  // closes it('town wins when no mafia remain')
+  });    // closes describe('Win Conditions')
+  // <line 261 was the extra });>
+
+  describe('Player Elimination', () => {
+    it('should mark player as eliminated', () => {
+      // ...
+    });
+    // ...
+  });
+});  // closes describe('GameFSM') — this is the FINAL closing of the file
+```
+
+Verification: Run `npx vitest run -- src/__tests__/fsm/` from packages/shared — should show 34 tests passing.
+
+CRITICAL: Do NOT run any other tests or make any other changes. Do NOT install anything. The container has no Python. Just write the fix to this one file.

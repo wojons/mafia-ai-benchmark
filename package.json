@@ -52,5 +52,6 @@
   "license": "MIT",
   "dependencies": {
     "sql.js": "^1.13.0"
-  }
+  },
+  "pnpm": {}
 }

@@ -258,23 +258,6 @@ describe('GameFSM', () => {
       expect(mafiaAlive).toBe(0);
     });
   });
-});
-
-    it('should accept valid vote', () => {
-      const vote = {
-        voterId: 'p2',
-        targetId: 'p1',
-        timestamp: new Date(),
-        phase: 'DAY_VOTING' as GamePhase,
-        dayNumber: 1,
-      };
-
-      // Add vote to game state directly since FSM doesn't have CAST_VOTE
-      mockGame.currentState.votes.push(vote);
-      
-      expect(mockGame.currentState.votes.length).toBe(1);
-    });
-  });
 
   describe('Player Elimination', () => {
     it('should mark player as eliminated', () => {

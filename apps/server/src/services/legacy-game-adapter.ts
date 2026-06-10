@@ -99,7 +99,6 @@ export class LegacyGameAdapter extends EventEmitter {
       if (db) {
         db.prepare(`INSERT INTO games (id, status, config, created_at) VALUES (?, 'IN_PROGRESS', ?, ?)`)
           .run(gameId, JSON.stringify({ numPlayers: config.numPlayers || 5, engineType: 'legacy' }), Date.now());
-        db.prepare(`UPDATE games SET status = 'ENDED' WHERE id = ?`); // prepare for later
       }
     } catch (e: any) {
       console.error(`[LegacyAdapter] Failed to create game in repository: ${e?.message || e}`);
@@ -169,6 +168,19 @@ export class LegacyGameAdapter extends EventEmitter {
         if (code !== 0 && state.status !== 'COMPLETED') {
           state.status = 'ERROR';
           state.error = `Process exited with code ${code}`;
+        }
+        // Update database status
+        try {
+          const db = (this.gameRepository as any).db;
+          if (db && state.status === 'COMPLETED') {
+            db.prepare(`UPDATE games SET status = 'ENDED', ended_at = ? WHERE id = ?`)
+              .run(Date.now(), gameId);
+          } else if (db && state.status === 'ERROR') {
+            db.prepare(`UPDATE games SET status = 'CANCELLED', ended_at = ? WHERE id = ?`)
+              .run(Date.now(), gameId);
+          }
+        } catch (e: any) {
+          console.error(`[LegacyAdapter] Failed to update game status: ${e?.message || e}`);
         }
       }
       console.log(`[LegacyAdapter] Game ${gameId} process ended (code ${code}), ${gameState.eventCount} events`);
@@ -271,7 +283,17 @@ export class LegacyGameAdapter extends EventEmitter {
    */
   private translateAndPublishEvent(gameId: string, legacyEvent: Record<string, unknown>, sequence: number): void {
     // Map legacy event types to server event types
+    // The bridge uses compact types: STATE_CHANGE, PHASE_CHANGE, MESSAGE, ACTION, REVEAL, VOTE
+    // We map them to the full server event types
     const typeMapping: Record<string, EventType> = {
+      // Bridge event types (from legacy-bridge.js)
+      'STATE_CHANGE': 'GAME_STARTED',        // State changes include game creation/start
+      'PHASE_CHANGE': 'PHASE_CHANGED',       // Phase transitions (setup→night→day→voting)
+      'MESSAGE': 'AGENT_SAYS_BROADCASTED',   // Agent THINK/SAYS with consciousness split
+      'ACTION': 'NIGHT_ACTION_SUBMITTED',    // Night actions (kill, protect, investigate)
+      'REVEAL': 'MORNING_REVEAL',            // Morning reveals and player eliminations
+      'VOTE': 'VOTE_CAST',                   // Daytime voting
+      // Legacy engine event types (from game-engine.js, for direct spawn without bridge)
       'PLAYER_JOINED': 'PLAYER_JOINED',
       'GAME_STARTED': 'GAME_STARTED',
       'ROLES_ASSIGNED': 'ROLES_ASSIGNED',
