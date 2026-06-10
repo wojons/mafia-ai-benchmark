@@ -8,6 +8,7 @@ services:
       dockerfile: apps/server/Dockerfile
     ports:
       - "${PORT:-3000}:3000"
+      - "3001:3001"
     env_file:
       - .env
     volumes:

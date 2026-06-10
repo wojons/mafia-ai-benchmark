@@ -1,27 +1,47 @@
-Fix a syntax error in the FSM test file.
+You are tower-axiom working on the Mafia AI Benchmark TypeScript monorepo.
 
-File: /workspace/packages/shared/src/__tests__/fsm/fsm.test.ts
+## CONTEXT
+- Project: mafia-ai-benchmark (~/mafia-ai-benchmark, pnpm monorepo, Node v22)
+- The server (apps/server) runs in Docker container via docker compose
+- Game 08fe5db2 completed successfully with 60 events (30 AGENT_SAYS_BROADCASTED, 12 VOTE_CAST, 7 NIGHT_ACTION_SUBMITTED, 6 PHASE_CHANGED, 3 MORNING_REVEAL, 2 GAME_STARTED)
+- The StatsCollector service (apps/server/src/services/stats-collector.ts) exists with getGameStats(), getModelComparison(), getAgentStats(), getExportReport(), getCompareReport(), exportReportCSV()
+- GET /api/v1/benchmark/export works but returns winner:null, mafiaWins:0, townWins:0, totalTokens:0, totalCost:0
+- GET /api/v1/benchmark/compare returns empty {models:[],headToHead:[],trends:[]}
+- GET /api/v1/benchmark/report returns 500 error
+- POST /api/v1/benchmark has a TODO stub — no runner implemented
 
-Line 261 has an extra `});` closing brace that prematurely ends the outer `describe('GameFSM')` block. This orphans all subsequent test code (Voting tests, Player Elimination tests, Win Condition tests).
+## WHAT TO FIX
+Fix the benchmark pipeline so it produces real stats from completed games.
 
-Remove the extra `});` on line 261. Then verify the file structure is correct — all other describe/it blocks should be properly nested inside `describe('GameFSM')`.
+### Step 1: Fix StatsCollector.getGameStats() to extract real data
+The export endpoint calls getExportReport() which queries the DB for games and events. But the derived stats (winner, wins, tokens, cost) are zero because the game events contain the data but aren't analyzed.
 
-The file ending (after the fix) should look like:
+Read apps/server/src/services/stats-collector.ts and trace getExportReport() → it queries GameRepository.getCompletedGames() and then maps each game. The winner determination and token counting must look at game events:
+- Events with type "GAME_OVER" or "WINNER" in the data field
+- Events with token/cost data in metadata
+- The MORNING_REVEAL events show who was eliminated
 
-```
-    });  // closes it('town wins when no mafia remain')
-  });    // closes describe('Win Conditions')
-  // <line 261 was the extra });>
+### Step 2: Fix getCompareReport() to return real model comparison
+The compare endpoint returns empty. It calls getCompareReport(modelFilter) which should aggregate stats per model. For legacy games, the model is always "qwen3.6-35b-fast" via NeuralWatt. Query the DB for completed games, group by model, compute stats.
 
-  describe('Player Elimination', () => {
-    it('should mark player as eliminated', () => {
-      // ...
-    });
-    // ...
-  });
-});  // closes describe('GameFSM') — this is the FINAL closing of the file
-```
+### Step 3: Fix generateReport() to not throw
+GET /api/v1/benchmark/report returns 500. Debug why — likely an uncaught error in getGameStats() or generateReport(). Add try/catch and return meaningful data even when individual queries fail.
 
-Verification: Run `npx vitest run -- src/__tests__/fsm/` from packages/shared — should show 34 tests passing.
+### VERIFICATION
+After your changes, verify with these host-side commands:
+1. `cd /home/kara/mafia-ai-benchmark && docker compose up -d server` — restart server
+2. `curl -s http://localhost:3000/api/v1/benchmark/export | grep -o '"winner":"[^"]*"'` — should show actual winner
+3. `curl -s http://localhost:3000/api/v1/benchmark/compare` — should return non-empty models array
+4. `curl -s http://localhost:3000/api/v1/benchmark/report` — should return 200 with stats
 
-CRITICAL: Do NOT run any other tests or make any other changes. Do NOT install anything. The container has no Python. Just write the fix to this one file.
+## CRITICAL RULES
+- Container has NO Python. DO NOT install anything. Just WRITE files.
+- Use `npx vitest run` from packages/shared/ for any test runs
+- DO NOT add new dependencies
+- DO NOT touch the game engine (game-engine.js) — only fix the stats collector
+- DO NOT create or switch branches
+- DO NOT remove any existing tests
+- DO NOT modify any API route signatures
+- Use TypeScript, not JavaScript
+- The DB is SQLite at apps/server/data/mafia.db
+- Game events are stored in the events table with type, data (JSON), metadata (JSON) columns
