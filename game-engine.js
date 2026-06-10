@@ -64,6 +64,7 @@ require("dotenv").config();
     };
   } catch (_) {
     // pino not available — fall back to original console
+    console.setGameContext = function (ctx) { /* no-op: pino not available */ };
   }
 })();
 

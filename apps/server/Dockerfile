@@ -25,6 +25,9 @@ RUN corepack enable && pnpm rebuild && \
 # --- Copy source code ---
 COPY packages/shared/ packages/shared/
 COPY apps/server/ apps/server/
+# --- Copy legacy game engine (required by bridge) ---
+COPY game-engine.js ./
+COPY src/ src/
 
 # --- Build shared package (needed for ESM exports like ./fsm) ---
 RUN corepack enable && pnpm --filter=@mafia/shared build
