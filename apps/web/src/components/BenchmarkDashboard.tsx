@@ -74,6 +74,7 @@ function getProviderColor(provider: string): string {
 }
 
 function formatDuration(ms: number): string {
+  if (!ms || isNaN(ms) || ms <= 0) return '\u2014';
   const seconds = Math.floor(ms / 1000);
   const minutes = Math.floor(seconds / 60);
   return `${minutes}m ${seconds % 60}s`;
@@ -102,14 +103,15 @@ const BenchmarkDashboard: React.FC = () => {
   const [gamesLoading, setGamesLoading] = useState(true);
 
   useEffect(() => {
-    statsAPI.getGameStats().then(setStats).catch(console.error).finally(() => setLoading(false));
+    statsAPI.getGameStats().then((res) => setStats((res as Record<string, unknown>).data as GameStats || res as GameStats)).catch(console.error).finally(() => setLoading(false));
   }, []);
 
   useEffect(() => {
     statsAPI
       .getModelComparison()
-      .then((data) => {
-        const arr = Array.isArray(data) ? data : ((data as Record<string, unknown>).data as ModelData[]) || [];
+      .then((res) => {
+        const data = (res as unknown as Record<string, unknown>).data || res;
+        const arr = Array.isArray(data) ? data : ((data as unknown as Record<string, unknown>).data as ModelData[]) || [];
         setModels(arr);
       })
       .catch(console.error)
@@ -119,8 +121,9 @@ const BenchmarkDashboard: React.FC = () => {
   useEffect(() => {
     statsAPI
       .getMatchups()
-      .then((data) => {
-        const arr = Array.isArray(data) ? data : ((data as Record<string, unknown>).data as MatchupData[]) || [];
+      .then((res) => {
+        const data = (res as unknown as Record<string, unknown>).data || res;
+        const arr = Array.isArray(data) ? data : ((data as unknown as Record<string, unknown>).data as MatchupData[]) || [];
         setMatchups(arr);
       })
       .catch(console.error)
@@ -130,7 +133,8 @@ const BenchmarkDashboard: React.FC = () => {
   useEffect(() => {
     gamesAPI
       .getAll({ limit: 50 })
-      .then((data) => {
+      .then((res) => {
+        const data = (res as unknown as Record<string, unknown>).data || res;
         const arr = Array.isArray(data) ? data : [];
         setGames(arr);
       })
@@ -170,7 +174,7 @@ const BenchmarkDashboard: React.FC = () => {
 
   const sortedModels = [...models].sort((a, b) => b.winRate - a.winRate);
   const barData = {
-    labels: sortedModels.map((m) => `${m.provider}/${m.model}`),
+    labels: sortedModels.map((m) => m.model.length > 22 ? m.model.substring(0, 20) + '…' : m.model),
     datasets: [
       {
         label: 'Win Rate %',

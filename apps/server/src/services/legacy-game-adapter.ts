@@ -241,7 +241,20 @@ export class LegacyGameAdapter extends EventEmitter {
         
       case 'done':
         state.status = 'COMPLETED';
-        console.log(`[LegacyAdapter:${gameId}] Game completed. Total events: ${message.totalEvents}`);
+        console.log(`[LegacyAdapter:${gameId}] Game completed. Winner: ${message.winner || 'UNKNOWN'}. Total events: ${message.totalEvents}`);
+        
+        // Update database with winner and completion
+        try {
+          const db = (this.gameRepository as any).db;
+          if (db) {
+            const winner = message.winner || 'UNKNOWN';
+            db.prepare(`UPDATE games SET status = 'ENDED', ended_at = ?, config = json_set(config, '$.winner', ?) WHERE id = ?`)
+              .run(Date.now(), winner, gameId);
+            console.log(`[LegacyAdapter:${gameId}] Database updated: winner=${winner}`);
+          }
+        } catch (e: any) {
+          console.error(`[LegacyAdapter] Failed to update game winner: ${e?.message || e}`);
+        }
         
         // Publish game ended event
         this.publishEvent({

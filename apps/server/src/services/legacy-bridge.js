@@ -127,6 +127,11 @@ async function main() {
           gameId: game.gameId,
           totalEvents: game.gameEvents ? game.gameEvents.length : 0,
           status: 'completed',
+          winner: game.winner || (game.gameEvents && game.gameEvents.length > 0 
+            ? (game.gameEvents[game.gameEvents.length - 1].content?.winner || null)
+            : null),
+          mafiaAlive: game.mafiaAlive,
+          townAlive: game.townAlive,
           timestamp: new Date().toISOString()
         });
         
