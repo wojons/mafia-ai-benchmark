@@ -289,7 +289,7 @@ export async function getModelCapabilities(modelId: string): Promise<ProviderCap
   
   const model = modelCache.get(modelId);
   if (model) {
-    return {
+    return applyCapabilityOverrides(modelId, {
       streaming: model.capabilities.streaming,
       functionCalling: model.capabilities.functionCalling,
       systemPrompt: model.capabilities.systemPrompt,
@@ -297,13 +297,13 @@ export async function getModelCapabilities(modelId: string): Promise<ProviderCap
       maxOutputLength: model.maxOutput,
       supportsTemperature: true,
       supportsStopTokens: true,
-    };
+    });
   }
   
   // Try to find by partial match
   for (const [id, model] of modelCache) {
     if (id.includes(modelId) || modelId.includes(id)) {
-      return {
+      return applyCapabilityOverrides(modelId, {
         streaming: model.capabilities.streaming,
         functionCalling: model.capabilities.functionCalling,
         systemPrompt: model.capabilities.systemPrompt,
@@ -311,12 +311,26 @@ export async function getModelCapabilities(modelId: string): Promise<ProviderCap
         maxOutputLength: model.maxOutput,
         supportsTemperature: true,
         supportsStopTokens: true,
-      };
+      });
     }
   }
   
   // Return sensible defaults
   return getDefaultCapabilities(modelId);
+}
+
+/**
+ * Apply model-specific capability overrides
+ * Some providers report incorrect capabilities from the API
+ */
+function applyCapabilityOverrides(modelId: string, capabilities: ProviderCapabilities): ProviderCapabilities {
+  const idLower = modelId.toLowerCase();
+  
+  if (idLower.includes('gemini')) {
+    capabilities.functionCalling = true;
+  }
+  
+  return capabilities;
 }
 
 /**

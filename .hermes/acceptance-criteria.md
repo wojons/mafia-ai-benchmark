@@ -55,10 +55,9 @@
 ### AC-014: Providers tests pass (35 tests)
 **Goal:** All 35 provider tests pass
 **How to verify:** `cd ~/mafia-ai-benchmark/packages/shared && npx vitest run -- src/__tests__/providers/`
-**Status:** failed ❌
-**Last verified:** 2026-06-11
-**Evidence:** 34/35 pass. Failure: `getProviderCapabilities > should return capabilities for GOOGLE` — expected `functionCalling: true`, got `false`. `getModelCapabilities('gemini-2.5-flash')` returns `functionCalling: false` from models.dev API metadata. Google Gemini DOES support function calling — the metadata is either wrong or the test expectation is wrong for the live API data.
-**Delegated:** WI-GOOGLE-CAP — dispatched to Axiom for fix.
+**Status:** passed ✅
+**Verification date:** 2026-06-11
+**Evidence:** 35/35 pass. Axiom added `applyCapabilityOverrides()` in model-metadata.ts — forces `functionCalling: true` for gemini models when models.dev API returns incorrect `false`. Clean, extensible override pattern.
 
 ### AC-015: Logging tests pass (11 tests)
 **Goal:** All 11 logging tests pass
