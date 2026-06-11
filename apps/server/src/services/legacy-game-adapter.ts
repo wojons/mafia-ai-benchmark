@@ -445,6 +445,32 @@ export class LegacyGameAdapter extends EventEmitter {
     });
     this.activeGames.clear();
   }
+
+  /**
+   * Extract unique players from game events.
+   * Groups by actor_id, gets playerName from AGENT_SAYS_BROADCASTED events.
+   */
+  static extractPlayersFromEvents(events: GameEvent[]): Array<{ id: string; name: string }> {
+    const actorIds = new Set<string>();
+    const nameByActor = new Map<string, string>();
+
+    for (const event of events) {
+      if (!event.actorId) continue;
+      actorIds.add(event.actorId);
+      if (!nameByActor.has(event.actorId) &&
+          event.type === 'AGENT_SAYS_BROADCASTED' &&
+          event.data &&
+          typeof event.data === 'object' &&
+          'playerName' in event.data) {
+        nameByActor.set(event.actorId, (event.data as Record<string, unknown>).playerName as string);
+      }
+    }
+
+    return Array.from(actorIds).map(id => ({
+      id,
+      name: nameByActor.get(id) || `Player ${id.substring(0, 8)}`,
+    }));
+  }
 }
 
 export default LegacyGameAdapter;

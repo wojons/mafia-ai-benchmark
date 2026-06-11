@@ -190,10 +190,15 @@ export function setupRoutes(app: Express, context: ServerContext): void {
         for (const gameId of legacyAdapter.getActiveGames()) {
           const state = legacyAdapter.getGameState(gameId);
           if (state) {
+            const events = gameRepository.getEvents(gameId);
+            const playerSet = new Set<string>();
+            for (const event of events) {
+              if (event.actorId) playerSet.add(event.actorId);
+            }
             legacyGames.push({
               id: gameId,
               status: state.status === 'RUNNING' ? 'IN_PROGRESS' : 'ENDED',
-              players: 0,
+              players: playerSet.size,
               createdAt: state.startedAt.toISOString(),
               config: { engineType: 'legacy' },
             });
@@ -283,6 +288,9 @@ export function setupRoutes(app: Express, context: ServerContext): void {
         if (legacyAdapter) {
           const state = legacyAdapter.getGameState(req.params.gameId);
           if (state) {
+            const events = gameRepository.getEvents(req.params.gameId);
+            const players = LegacyGameAdapter.extractPlayersFromEvents(events);
+
             return res.json({
               success: true,
               data: {
@@ -291,6 +299,7 @@ export function setupRoutes(app: Express, context: ServerContext): void {
                 config: { engineType: 'legacy' },
                 eventCount: state.eventCount,
                 startedAt: state.startedAt,
+                players,
               },
             });
           }
