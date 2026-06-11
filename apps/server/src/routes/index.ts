@@ -206,13 +206,23 @@ export function setupRoutes(app: Express, context: ServerContext): void {
         }
       }
       
-      const allGames = [...games.map(g => ({
-        id: g.id,
-        status: g.status,
-        players: g.players.length,
-        createdAt: g.createdAt,
-        config: g.config,
-      })), ...legacyGames];
+      const allGames = [...games.map(g => {
+        let playerCount = g.players.length;
+        if (playerCount === 0 && g.events.length > 0) {
+          const actorIds = new Set<string>();
+          for (const event of g.events) {
+            if (event.actorId) actorIds.add(event.actorId);
+          }
+          playerCount = actorIds.size;
+        }
+        return {
+          id: g.id,
+          status: g.status,
+          players: playerCount,
+          createdAt: g.createdAt,
+          config: g.config,
+        };
+      }), ...legacyGames];
       
       res.json({
         success: true,
@@ -305,6 +315,17 @@ export function setupRoutes(app: Express, context: ServerContext): void {
           }
         }
         return res.status(404).json({ success: false, error: 'Game not found' });
+      }
+
+      if (game.players.length === 0 && game.events.length > 0) {
+        game.players = LegacyGameAdapter.extractPlayersFromEvents(game.events).map(p => ({
+          id: p.id,
+          name: p.name,
+          role: 'UNASSIGNED' as const,
+          isAlive: true,
+          isMafia: false,
+          joinOrder: 0,
+        }));
       }
       
       res.json({
