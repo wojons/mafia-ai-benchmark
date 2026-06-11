@@ -8,6 +8,7 @@ import GameList from './components/GameList';
 import GameBoard from './components/GameBoard';
 import GameWatcher from './components/GameWatcher';
 import StatsPanel from './components/StatsPanel';
+import BenchmarkDashboard from './components/BenchmarkDashboard';
 import Settings from './components/Settings';
 import Loading from './components/Loading';
 import SplitPaneView from './components/SplitPaneView';
@@ -44,7 +45,8 @@ function App() {
             <Route path="/observe/:gameId" element={<SplitPaneView />} />
             <Route path="/timeline/:gameId" element={<TimelineView />} />
             <Route path="/3d/:gameId" element={<ThreeDViz />} />
-            <Route path="/stats" element={<StatsPanel />} />
+            <Route path="/stats" element={<BenchmarkDashboard />} />
+            <Route path="/benchmark" element={<BenchmarkDashboard />} />
             <Route path="/settings" element={<Settings />} />
             <Route path="*" element={<Navigate to="/" replace />} />
           </Routes>

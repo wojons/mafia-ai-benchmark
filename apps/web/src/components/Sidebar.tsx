@@ -10,7 +10,7 @@ const Sidebar: React.FC = () => {
   
   const quickActions = [
     { path: '/?action=new', label: 'New Game', icon: '➕', color: 'green' },
-    { path: '/stats', label: 'Statistics', icon: '📊', color: 'blue' },
+    { path: '/benchmark', label: '📊 Benchmark', icon: '📊', color: 'blue' },
     { path: '/settings', label: 'Settings', icon: '⚙️', color: 'gray' },
   ];
   
