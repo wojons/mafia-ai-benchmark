@@ -1,47 +1,28 @@
-You are tower-axiom working on the Mafia AI Benchmark TypeScript monorepo.
+You are tower-axiom. Fix the Mafia AI Benchmark web dashboard to show a real model comparison table.
 
-## CONTEXT
-- Project: mafia-ai-benchmark (~/mafia-ai-benchmark, pnpm monorepo, Node v22)
-- The server (apps/server) runs in Docker container via docker compose
-- Game 08fe5db2 completed successfully with 60 events (30 AGENT_SAYS_BROADCASTED, 12 VOTE_CAST, 7 NIGHT_ACTION_SUBMITTED, 6 PHASE_CHANGED, 3 MORNING_REVEAL, 2 GAME_STARTED)
-- The StatsCollector service (apps/server/src/services/stats-collector.ts) exists with getGameStats(), getModelComparison(), getAgentStats(), getExportReport(), getCompareReport(), exportReportCSV()
-- GET /api/v1/benchmark/export works but returns winner:null, mafiaWins:0, townWins:0, totalTokens:0, totalCost:0
-- GET /api/v1/benchmark/compare returns empty {models:[],headToHead:[],trends:[]}
-- GET /api/v1/benchmark/report returns 500 error
-- POST /api/v1/benchmark has a TODO stub — no runner implemented
+CONTEXT:
+- The web app at apps/web/src/components/StatsPanel.tsx has a placeholder "Model Performance" section with a non-functional "View Full Leaderboard →" button
+- The API has real model comparison data at /stats/models (wrapped in {success: true, data: [...]})
+- The API also has /benchmark/compare with richer data including rolePerformance and trends
+- The statsAPI service in apps/web/src/services/api.ts already has statsAPI.getModelComparison() and statsAPI.generateReport() methods
 
-## WHAT TO FIX
-Fix the benchmark pipeline so it produces real stats from completed games.
+WHAT TO BUILD:
+1. Update StatsPanel.tsx to fetch model comparison data from statsAPI.getModelComparison()
+2. Add a real model comparison table below the existing win-rate bars, replacing the placeholder button
+3. The table should show columns: Provider, Model, Games Played, Wins, Win Rate (as percentage bar), Avg Tokens, Avg Cost, Avg Latency
+4. Handle the API response wrapper: the endpoint returns {success: true, data: [...]} — extract the data array
+5. Add a "Benchmark Report" section that calls statsAPI.generateReport() and shows additional data if available (summary, recommendations)
+6. Use the existing CSS classes/styling patterns from StatsPanel (stat-card, stat-value, stat-label, stats-section, etc.)
+7. Make the table responsive and dark-mode compatible
 
-### Step 1: Fix StatsCollector.getGameStats() to extract real data
-The export endpoint calls getExportReport() which queries the DB for games and events. But the derived stats (winner, wins, tokens, cost) are zero because the game events contain the data but aren't analyzed.
+CRITICAL CONSTRAINTS:
+- DO NOT remove any existing functionality (overview cards, win-rate bars, header)
+- DO NOT add new npm dependencies
+- Use the existing type patterns from the component
+- For TypeScript, define inline interfaces for the model data shape
+- The table should gracefully handle empty states (no data yet)
+- Keep the same file: apps/web/src/components/StatsPanel.tsx
 
-Read apps/server/src/services/stats-collector.ts and trace getExportReport() → it queries GameRepository.getCompletedGames() and then maps each game. The winner determination and token counting must look at game events:
-- Events with type "GAME_OVER" or "WINNER" in the data field
-- Events with token/cost data in metadata
-- The MORNING_REVEAL events show who was eliminated
+VERIFICATION: After building, verify the file compiles with TypeScript. The component already imports from '../services/api'.
 
-### Step 2: Fix getCompareReport() to return real model comparison
-The compare endpoint returns empty. It calls getCompareReport(modelFilter) which should aggregate stats per model. For legacy games, the model is always "qwen3.6-35b-fast" via NeuralWatt. Query the DB for completed games, group by model, compute stats.
-
-### Step 3: Fix generateReport() to not throw
-GET /api/v1/benchmark/report returns 500. Debug why — likely an uncaught error in getGameStats() or generateReport(). Add try/catch and return meaningful data even when individual queries fail.
-
-### VERIFICATION
-After your changes, verify with these host-side commands:
-1. `cd /home/kara/mafia-ai-benchmark && docker compose up -d server` — restart server
-2. `curl -s http://localhost:3000/api/v1/benchmark/export | grep -o '"winner":"[^"]*"'` — should show actual winner
-3. `curl -s http://localhost:3000/api/v1/benchmark/compare` — should return non-empty models array
-4. `curl -s http://localhost:3000/api/v1/benchmark/report` — should return 200 with stats
-
-## CRITICAL RULES
-- Container has NO Python. DO NOT install anything. Just WRITE files.
-- Use `npx vitest run` from packages/shared/ for any test runs
-- DO NOT add new dependencies
-- DO NOT touch the game engine (game-engine.js) — only fix the stats collector
-- DO NOT create or switch branches
-- DO NOT remove any existing tests
-- DO NOT modify any API route signatures
-- Use TypeScript, not JavaScript
-- The DB is SQLite at apps/server/data/mafia.db
-- Game events are stored in the events table with type, data (JSON), metadata (JSON) columns
+DO NOT run any git commands. DO NOT modify any other files.

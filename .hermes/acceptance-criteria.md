@@ -197,7 +197,7 @@
 **Evidence:** Server running on :3000, returned `{"status":"healthy","uptime":22199}`
 
 ### AC-050: Benchmark pipeline — stats collection ✅ — 2026-06-10
-**Evidence:** All 3 benchmark endpoints return real data. `GET /api/v1/benchmark/report`: 14 total games, 1 completed, mafiaWinRate 1.0, modelPerformance with neuralwatt/qwen3.6-35b-fast (100% win rate). `GET /api/v1/benchmark/compare`: models array populated, trends with game-08fe5db2. `GET /api/v1/benchmark/export`: winner:MAFIA, mafiaWins:1. Stats derived from game events via Axiom's getGameWinnerFromEvents/getPlayersFromEvents/getAggregatedWins helpers. Fixed getModelStats() SQL crash (broken subquery in repo).
+**Evidence:** All 3 benchmark endpoints return real data. `GET /api/v1/benchmark/report`: 19 total games, 5 completed, mafiaWinRate 0.6 (3 mafia, 2 town), modelPerformance with neuralwatt/qwen3.6-35b-fast (100% win rate, 5/5). `GET /api/v1/benchmark/compare`: models array populated, trends with 5 completed games. `GET /api/v1/benchmark/export`: winner data populated. Stats derived from game events via Axiom's getGameWinnerFromEvents/getPlayersFromEvents/getAggregatedWins helpers. Fixed getModelStats() SQL crash (broken subquery in repo). Token/cost/latency tracking still 0 — per-call cost extraction not yet implemented.
 
 ### AC-051: Model comparison dashboard ✅
 **Verified:** 2026-06-11
