@@ -1,0 +1,17 @@
+# GitReins Configuration — Mafia AI Benchmark
+#
+# TypeScript/pnpm monorepo. Tests run via vitest.
+# GitReins v0.6.0+
+
+guards:
+  test_mode: "diff"
+  secrets: true
+  lint: true
+  tests: true
+  test_command: "pnpm vitest run --changed"
+
+evaluator:
+  max_iterations: 25
+  max_time: "5m"
+  max_output_tokens: "200k"
+  tool_call_weight: 0.1
