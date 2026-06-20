@@ -4,7 +4,7 @@
 # GitReins v0.6.0+
 
 guards:
-  test_mode: "diff"
+  test_mode: "full"
   secrets: true
   lint: true
   tests: true

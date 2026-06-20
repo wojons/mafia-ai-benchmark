@@ -39,7 +39,7 @@ PATH="$HOME/gitreins-poc/.venv/bin:$PATH" gitreins guard
 - **lint** — eslint / tsc --noEmit (WARNS on fail)
 - **tests** — runs vitest for changed packages only (BLOCKS on fail)
 
-### Test mode: diff
+### Test mode: full
 Only packages with staged changes are tested. Pre-existing failures in
 untouched code will NOT block your commit. If you change `pnpm-workspace.yaml`,
 `package.json`, `.gitreins/config.yaml`, or a config file, the full suite runs
