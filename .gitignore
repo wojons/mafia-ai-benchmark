@@ -45,3 +45,4 @@ Thumbs.db
 # OpenCode
 .opencode/
 .graph-harness/
+.gitreins/tasks.yaml

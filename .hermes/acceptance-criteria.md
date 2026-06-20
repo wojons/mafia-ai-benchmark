@@ -1,5 +1,5 @@
 # Acceptance Criteria for Mafia AI Benchmark
-**Cron Run #12:** 2026-06-14 14:04 UTC — All ACs re-verified. ⚠️ AC file was overwritten with Helios content by sibling cron session — restored from git (6c0a53b). Server healthy (uptime 3d). Tests: 150/150. Benchmark: 19 games, 5 completed, mafiaWinRate 0.6. Status: all-clear.
+**Cron Run #15:** 2026-06-15 21:12 UTC — All ACs re-verified. Server healthy (uptime 4.3d). Tests: 150/150 (6 files, 956ms). Benchmark: 19 games, 5 completed, mafiaWinRate 0.6. No regressions. Status: all-clear.
 
 ## Demo Infrastructure
 
