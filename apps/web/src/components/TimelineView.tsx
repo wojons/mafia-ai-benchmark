@@ -117,7 +117,7 @@ const TimelineView: React.FC = () => {
         const res = await api.games.getEvents(gameId!, 'all');
         if (!cancelled) {
           // Sort by sequence
-          const sorted = (res.data || []).sort(
+          const sorted = ((res.data || []) as unknown as TimelineEvent[]).sort(
             (a, b) => a.metadata.sequence - b.metadata.sequence
           );
           setEvents(sorted);

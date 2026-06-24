@@ -526,7 +526,8 @@ export class StatsCollector {
     avgCost: number;
     avgLatency: number;
   }> {
-    let dbStats;
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    let dbStats: any[];
     try {
       dbStats = this.gameRepository.getModelStats();
     } catch {

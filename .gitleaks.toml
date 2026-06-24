@@ -1,0 +1,39 @@
+# GitReins gitleaks configuration — Mafia AI Benchmark
+# Extends default gitleaks ruleset with project-specific exclusions.
+[extend]
+useDefault = true
+
+[allowlist]
+description = "Project allowlists — vendored deps, build artifacts, docs, dev env"
+
+paths = [
+  # Vendored dependencies — 754MB combined, no secrets here
+  '''node_modules/.*''',
+  '''\.pnpm-store/.*''',
+  '''apps/.*/node_modules/.*''',
+  '''packages/.*/node_modules/.*''',
+
+  # Build artifacts
+  '''apps/.*/dist/.*''',
+  '''\.turbo/.*''',
+
+  # OpenCode config (may contain API keys for dev container)
+  '''opencode\\.jsonc''',
+
+  # Development artifacts
+  '''\\.opencode/.*''',
+  '''\.graph-harness/.*''',
+
+  # GitReins internals (not secrets-bearing)
+  '''\.gitreins/history/.*''',
+  '''\.gitreins/config\.yaml\.bak''',
+
+  # Local dev environment (git-ignored, but gitleaks --no-git scans it)
+  '''\.env''',
+
+  # Documentation and specs (may contain example keys)
+  '''\.hermes/.*''',
+  '''\.memory-bank/.*''',
+  '''specs/.*''',
+  '''docs/.*''',
+]

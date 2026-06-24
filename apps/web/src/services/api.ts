@@ -134,6 +134,11 @@ export const gamesAPI = {
       joinOrder: number;
     }>>(`/games/${gameId}/players`);
   },
+  
+  getEvents: (gameId: string, visibility?: string) => {
+    const query = visibility ? `?visibility=${visibility}` : '';
+    return fetchAPI<{ data: Array<Record<string, unknown>>; count: number }>(`/games/${gameId}/events${query}`);
+  },
 };
 
 // Agents API
