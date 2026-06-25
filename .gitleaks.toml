@@ -18,10 +18,10 @@ paths = [
   '''\.turbo/.*''',
 
   # OpenCode config (may contain API keys for dev container)
-  '''opencode\\.jsonc''',
+  '''opencode\.jsonc''',
 
   # Development artifacts
-  '''\\.opencode/.*''',
+  '''\.opencode/.*''',
   '''\.graph-harness/.*''',
 
   # GitReins internals (not secrets-bearing)
@@ -36,4 +36,8 @@ paths = [
   '''\.memory-bank/.*''',
   '''specs/.*''',
   '''docs/.*''',
+
+  # Historical demo files with since-rotated keys (git history only, not on disk)
+  '''demo-game\.js''',
+  '''demo-game-split-pane\.js''',
 ]
