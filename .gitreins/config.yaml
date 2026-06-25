@@ -1,17 +1,30 @@
 # GitReins Configuration — Mafia AI Benchmark
-#
-# TypeScript/pnpm monorepo. Tests run via vitest.
-# GitReins v0.6.0+
-
+# TypeScript/pnpm monorepo. Tests run via Docker vitest inside server container.
 guards:
-  test_mode: "full"
+  test_mode: diff
   secrets: true
   lint: true
   tests: true
-  test_command: "pnpm vitest run --changed"
-
+  test_command: docker exec mafia-ai-benchmark-server-1 /app/apps/server/node_modules/.bin/vitest run --reporter=verbose 2>&1
+  lsp: true
+  lsp_tools:
+  - ts-lsp
+  static_analysis: false
 evaluator:
-  max_iterations: 25
-  max_time: "5m"
-  max_output_tokens: "200k"
+  max_iterations: 80
+  max_time: 15m
+  max_input_tokens: 16M
+  max_output_tokens: 0.2M
   tool_call_weight: 0.1
+  compaction_threshold: 0.9
+  code_context_budget: 0.7
+  lsp_diagnostics: true
+  static_analysis_diagnostics: false
+history:
+  enabled: true
+  storage: git
+  max_verdicts: 1000
+defaults:
+  model: deepseek-v4-flash
+  check_for_updates: true
+  update_check_ttl: 24h

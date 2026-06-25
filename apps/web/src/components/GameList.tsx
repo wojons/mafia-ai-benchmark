@@ -4,6 +4,21 @@ import { useGameStore } from '../stores/gameStore';
 import { useUIStore } from '../stores/uiStore';
 import { formatDistanceToNow } from 'date-fns';
 
+const AVAILABLE_MODELS = [
+  { label: 'DeepSeek V4 Flash (fast)', value: 'deepseek-v4-flash', provider: 'openrouter' },
+  { label: 'Qwen 3 Coder Next (balanced)', value: 'qwen3-coder-next', provider: 'openrouter' },
+  { label: 'Owl Alpha (free)', value: 'openrouter/owl-alpha', provider: 'openrouter' },
+  { label: 'Qwen 3.6 35B (LM Studio)', value: 'qwen/qwen3.6-35b-a3b', provider: 'custom:lmstudio' },
+  { label: 'Mistral Nemo (LM Studio)', value: 'mistral-nemo-instruct-2407', provider: 'custom:lmstudio' },
+];
+
+const MAFIA_ROLES: Array<{ role: string; label: string; icon: string }> = [
+  { role: 'MAFIA', label: 'Mafia', icon: '🔪' },
+  { role: 'SHERIFF', label: 'Sheriff', icon: '🔍' },
+  { role: 'DOCTOR', label: 'Doctor', icon: '💉' },
+  { role: 'VILLAGER', label: 'Villager', icon: '👤' },
+];
+
 const GameList: React.FC = () => {
   const navigate = useNavigate();
   const { games, fetchGames, createGame, connecting } = useGameStore();
@@ -14,6 +29,12 @@ const GameList: React.FC = () => {
     nightDuration: 60,
     dayDuration: 120,
     votingDuration: 30,
+  });
+  const [roleModels, setRoleModels] = useState<Record<string, { provider: string; model: string }>>({
+    MAFIA: { provider: 'openrouter', model: 'deepseek-v4-flash' },
+    SHERIFF: { provider: 'openrouter', model: 'deepseek-v4-flash' },
+    DOCTOR: { provider: 'openrouter', model: 'deepseek-v4-flash' },
+    VILLAGER: { provider: 'openrouter', model: 'deepseek-v4-flash' },
   });
   
   useEffect(() => {
@@ -27,7 +48,10 @@ const GameList: React.FC = () => {
   
   const handleCreateGame = async () => {
     try {
-      const game = await createGame(newGameConfig);
+      const game = await createGame({
+        ...newGameConfig,
+        roleModels,
+      });
       navigate(`/game/${game.id}`);
     } catch (error) {
       console.error('Failed to create game:', error);
@@ -242,6 +266,61 @@ const GameList: React.FC = () => {
                   min={10}
                   max={120}
                 />
+              </div>
+
+              {/* === Model Picker per Role === */}
+              <div className="form-section">
+                <h3>🧠 Role Models</h3>
+                <p className="form-hint">Assign a different LLM to each role</p>
+                {MAFIA_ROLES.map(({ role, label, icon }) => (
+                  <div key={role} className="form-group role-model-row">
+                    <label>
+                      <span className="role-icon">{icon}</span> {label}
+                    </label>
+                    <select
+                      value={
+                        roleModels[role]
+                          ? `${roleModels[role].provider}:${roleModels[role].model}`
+                          : ''
+                      }
+                      onChange={(e) => {
+                        const [provider, ...modelParts] = e.target.value.split(':');
+                        const model = modelParts.join(':');
+                        setRoleModels({
+                          ...roleModels,
+                          [role]: { provider, model },
+                        });
+                      }}
+                      className="model-select"
+                    >
+                      {AVAILABLE_MODELS.map((m) => (
+                        <option
+                          key={`${m.provider}:${m.value}`}
+                          value={`${m.provider}:${m.value}`}
+                        >
+                          {m.label}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+                ))}
+
+                {/* Quick-set: apply to all */}
+                <div className="form-group" style={{ marginTop: '0.5rem' }}>
+                  <button
+                    className="btn btn-small"
+                    onClick={() => {
+                      const first = AVAILABLE_MODELS[0];
+                      const all = { ...roleModels };
+                      MAFIA_ROLES.forEach(({ role }) => {
+                        all[role] = { provider: first.provider, model: first.value };
+                      });
+                      setRoleModels(all);
+                    }}
+                  >
+                    ⚡ Apply first to all roles
+                  </button>
+                </div>
               </div>
             </div>
             
