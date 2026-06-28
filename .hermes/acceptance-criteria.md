@@ -1,5 +1,5 @@
 # Acceptance Criteria for Mafia AI Benchmark
-**Cron Run #16:** 2026-06-25 04:08 UTC — Maintenance mode: all ACs re-verified. Server healthy (uptime 17.6h). Tests: 150/150 (6 files, 931ms). Build: 4/4 turbo (all cached). Benchmark: 6 games, 5 completed, mafiaWinRate 0.4 (2 MAFIA, 3 TOWN). GitReins: PASS ✅ (secrets: clean, lint: ok, tests: full). Fixed `.gitleaks.toml` — added historical demo-game*.js to allowlist (keys in git history from deleted files). AC-001 stale: references NeuralWatt but project uses OpenRouter. No new AC gaps detected. Status: all-clear.
+**Cron Run #22:** 2026-06-28 05:35 UTC — Maintenance mode: all-clear. Server healthy (uptime 3.26d, 52MB RSS). Tests: 150/150 (6 files, 1.00s). Build: clean (turbo 4/4, all cached). Benchmark: 54 games, 39 ENDED, 10 CANCELLED, 5 IN_PROGRESS. Mafia wins 9, Town wins 22 (mafiaWinRate ~23%). GitReins: Tier 1 PASS ✅ (secrets, lint, tests, lsp). opencode-mafia container absent (9th consecutive wake). Staleness: 41 specs, 0 uncovered features. No new commits since 06-25. Status: all-clear.
 
 ## Demo Infrastructure
 
