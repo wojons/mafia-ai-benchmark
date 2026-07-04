@@ -1,5 +1,5 @@
 # Acceptance Criteria for Mafia AI Benchmark
-**Cron Run #25:** 2026-06-30 19:56 UTC — Maintenance mode: all-clear. Server healthy (uptime 5.6d, 57MB RSS). Tests: 150/150 (950ms). Build: clean (turbo 4/4, all cached). TSC: clean (exit 0). Benchmark: 54 games, 35 completed, 9 IN_PROGRESS (stale, June 21). Mafia 12, Town 23 (mafiaWinRate 34.3%). GitReins: Tier 1 PASS ✅ (secrets, lint, tests, lsp). opencode-mafia container absent (11th consecutive wake). 0 specs. 0 uncovered features. No new commits since 06-25. Status: all-clear.
+**Cron Run #27:** 2026-07-04 01:05 UTC — Maintenance mode: all-clear. Server healthy (uptime 8.9d, 52MB RSS). Tests: 150/150 (0.98s). Build: clean (turbo 4/4, all cached). Benchmark: 54 games, 39 ended, 10 cancelled, 5 stale. GitReins: Tier 1 PASS (secrets, lint, tests, lsp). opencode-mafia container absent (13th consecutive wake). 41 design docs under specs/. 0 uncovered features. No new commits since 06-25. /tmp 80% — TMPDIR workaround used. Status: all-clear.
 
 ## Demo Infrastructure
 
@@ -131,8 +131,8 @@
 **Goal:** `GET /health` returns `{"status":"healthy"}`
 **How to verify:** `curl -s http://localhost:3000/health | grep healthy`
 **Status:** passed ✅
-**Verification date:** 2026-06-30
-**Evidence:** `{"status":"healthy","uptime":488034}` — 5.6 days uptime, 57MB RSS.
+**Verification date:** 2026-07-04
+**Evidence:** `{"status":"healthy","uptime":765788}` — 8.9d uptime, 52MB RSS.
 
 ### AC-071: POST /api/v1/games starts a game
 **Goal:** Game creation endpoint returns game ID and starts the bridge
@@ -179,13 +179,13 @@
 **Evidence:** 11/11 pass
 
 ### AC-060: Docker compose — full stack deployment ✅ — 2026-06-30
-**Evidence:** server-1 (Up 5d, healthy, :3000) + web-1 (Up 5d, :5174). Both ports listening.
+**Evidence:** server-1 (Up 8d, healthy, :3000) + web-1 (Up 8d, :5174). Both ports listening.
 
-### AC-070: Server health endpoint ✅ — 2026-06-30
-**Evidence:** healthy, 5.6d uptime, 57MB RSS
+### AC-070: Server health endpoint ✅ — 2026-07-04
+**Evidence:** healthy, 8.9d uptime, 52MB RSS
 
 ### AC-050: Benchmark pipeline — stats collection ✅ — 2026-06-10
-**Evidence:** 54 total games, 35 completed, mafiaWinRate 34.3%. All 3 benchmark endpoints return real data.
+**Evidence:** 54 total games, 39 ended, mafiaWinRate 34.3%. All 3 benchmark endpoints return real data.
 
 ### AC-051: Model comparison dashboard ✅ — 2026-06-11
 **Evidence:** StatsPanel.tsx with 8-column model comparison table, fetching /stats/models and /benchmark/report.
