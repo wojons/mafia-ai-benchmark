@@ -1,5 +1,5 @@
 # Acceptance Criteria for Mafia AI Benchmark
-**Cron Run #27:** 2026-07-04 01:05 UTC — Maintenance mode: all-clear. Server healthy (uptime 8.9d, 52MB RSS). Tests: 150/150 (0.98s). Build: clean (turbo 4/4, all cached). Benchmark: 54 games, 39 ended, 10 cancelled, 5 stale. GitReins: Tier 1 PASS (secrets, lint, tests, lsp). opencode-mafia container absent (13th consecutive wake). 41 design docs under specs/. 0 uncovered features. No new commits since 06-25. /tmp 80% — TMPDIR workaround used. Status: all-clear.
+**Cron Run #29:** 2026-07-07 13:12 UTC — Maintenance mode: all-clear. Server healthy (uptime 12.4d, 57MB RSS). Tests: 150/150 (1.09s). Benchmark: 54 games, 39 ended, 14 cancelled, 5 stale. Winners: 22 TOWN, 9 MAFIA (29.0% mafia win rate). opencode-mafia container absent (15th consecutive wake). /tmp 60% — healthy. No new commits since 06-25. Status: all-clear. 6th consecutive all-clear wake.
 
 ## Demo Infrastructure
 
@@ -131,8 +131,8 @@
 **Goal:** `GET /health` returns `{"status":"healthy"}`
 **How to verify:** `curl -s http://localhost:3000/health | grep healthy`
 **Status:** passed ✅
-**Verification date:** 2026-07-04
-**Evidence:** `{"status":"healthy","uptime":765788}` — 8.9d uptime, 52MB RSS.
+**Verification date:** 2026-07-07
+**Evidence:** `{"status":"healthy","uptime":1068628}` — 12.4d uptime, 57MB RSS.
 
 ### AC-071: POST /api/v1/games starts a game
 **Goal:** Game creation endpoint returns game ID and starts the bridge
