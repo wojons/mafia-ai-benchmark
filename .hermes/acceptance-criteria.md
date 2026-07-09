@@ -1,5 +1,5 @@
 # Acceptance Criteria for Mafia AI Benchmark
-**Cron Run #33:** 2026-07-08 23:50 UTC — Maintenance mode: all-clear. Server healthy (uptime 13.8d, 59MB RSS). Tests: 150/150 (1.09s). Benchmark: 55 games, 41 ENDED (+5 from prior), 33.3% mafia win rate. Docker: server + web up 13d. opencode-mafia container absent (18th consecutive). Disk: 73% (1.3T/1.8T). No code changes since 06-25 (13 days). No new games since last wake. Status: all-clear. 11th consecutive all-clear wake.
+**Cron Run #35:** 2026-07-09 08:12 UTC — Maintenance mode: all-clear. Server healthy (uptime 14.2d, 59MB RSS). Tests: 150/150 (1.03s). Benchmark: 55 games, 41 ENDED (+5 from prior), 33.3% mafia win rate. Docker: server + web up 2 weeks. opencode-mafia container absent (20th consecutive). Disk: 69% (1.3T/1.8T). No code changes since 06-25 (14 days). No new games since last wake. Status: all-clear. 13th consecutive all-clear wake.
 
 ## Demo Infrastructure
 
