@@ -49,7 +49,7 @@ export class EventBus {
     eventType: string | string[],
     handler: EventHandler,
     options?: { filter?: EventFilter; once?: boolean }
-  ): () => void {
+  ): (() => void) & { id: string } {
     const subscription: EventSubscription = {
       id: crypto.randomUUID(),
       eventType,
@@ -57,7 +57,7 @@ export class EventBus {
       filter: options?.filter,
       once: options?.once || false,
     };
-    
+
     if (Array.isArray(eventType)) {
       eventType.forEach(type => {
         if (!this.subscriptions.has(type)) {
@@ -71,17 +71,22 @@ export class EventBus {
       }
       this.subscriptions.get(eventType)!.push(subscription);
     }
-    
+
     this.stats.totalSubscriptions++;
-    
-    // Return unsubscribe function
-    return () => this.unsubscribe(subscription.id);
+
+    // Return an unsubscribe function that also exposes the subscription id.
+    // Keeping it callable preserves backwards compatibility with code that
+    // treats the return value as a bare `() => void`, while exposing `.id`
+    // lets callers unsubscribe via `eventBus.unsubscribe(sub.id)`.
+    const unsubscribe = () => this.unsubscribe(subscription.id);
+    unsubscribe.id = subscription.id;
+    return unsubscribe;
   }
-  
+
   /**
    * Subscribe to all events (wildcard)
    */
-  subscribeAll(handler: EventHandler, options?: { filter?: EventFilter }): () => void {
+  subscribeAll(handler: EventHandler, options?: { filter?: EventFilter }): (() => void) & { id: string } {
     const subscription: EventSubscription = {
       id: crypto.randomUUID(),
       eventType: '*',
@@ -89,11 +94,14 @@ export class EventBus {
       filter: options?.filter,
       once: false,
     };
-    
+
     this.wildcardSubscriptions.push(subscription);
     this.stats.totalSubscriptions++;
-    
-    return () => this.unsubscribe(subscription.id);
+
+    // Same callable + id pattern as `subscribe` — see note above.
+    const unsubscribe = () => this.unsubscribe(subscription.id);
+    unsubscribe.id = subscription.id;
+    return unsubscribe;
   }
   
   /**

@@ -19,7 +19,10 @@ function createMockEvent(type: string, data: Record<string, unknown> = {}): Game
     timestamp: new Date(),
     metadata: {
       turnNumber: 1,
-      dayNumber: 1,
+      // Honor the caller-supplied dayNumber so filter tests can distinguish
+      // between events on different days; fall back to 1 for callers that
+      // don't care.
+      dayNumber: (data.dayNumber as number) ?? 1,
       phase: 'SETUP',
       sequence: 1,
     },
