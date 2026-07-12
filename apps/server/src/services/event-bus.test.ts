@@ -5,7 +5,7 @@
  */
 
 import { describe, it, expect, beforeEach, vi } from 'vitest';
-import { EventBus } from '../../services/event-bus';
+import { EventBus } from './event-bus';
 import { GameEvent } from '@mafia/shared/types';
 
 // Mock GameEvent factory
