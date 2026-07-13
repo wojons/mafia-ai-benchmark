@@ -40,11 +40,11 @@
 - README Quick Start says `cd /config/workspace/mafia` — updated to generic `cd mafia-ai-benchmark`.
 - **AC:** README Quick Start section references correct path. Verified: zero matches for `/config/workspace/mafia`.
 
-## [ ] SPEC-SWEEP-001: Write axiom-level spec for benchmark runner
+## [x] SPEC-SWEEP-001: Write axiom-level spec for benchmark runner (completed 2026-07-12)
+- **Commit:** 64bf41d
 - **Priority:** medium
-- **Source:** TODO at apps/server/src/routes/index.ts:859
-- Write a 10-section axiom-level spec (Overview→Dependencies→Interface→Behavior→Data→States→Errors→Testing→Security→Performance) for the benchmark runner feature.
-- **AC:** Spec file exists under specs/ with exact TypeScript interfaces, test scenarios, error paths, and data flow diagram.
+- 879 lines, 11 sections, 13 TypeScript interfaces, state machine, error catalog (E1-E8), test scenarios (T1-T8).
+- Guard PASS. Manual AC verification: all 8 criteria met.
 
 ## [ ] SPEC-SWEEP-002: Write axiom-level spec for player model assignment
 - **Priority:** medium
