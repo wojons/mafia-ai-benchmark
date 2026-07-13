@@ -14,8 +14,8 @@ vi.mock('commander', async (importOriginal) => {
   return {
     ...actual,
     Command: class extends OrigCommand {
-      parseAsync(..._args: unknown[]): Promise<void> {
-        return Promise.resolve();
+      async parseAsync(..._args: unknown[]): Promise<this> {
+        return Promise.resolve(this as unknown as this);
       }
     },
   };
