@@ -21,12 +21,11 @@
 - **AC:** All 39 tests in event-bus.test.ts pass. Do NOT modify tests — fix the implementation.
 - **Verification:** `cd apps/server && npx vitest run src/services/event-bus.test.ts`
 
-## [ ] TEST-CLI: Add test files for apps/cli package
+## [x] TEST-CLI: Add test files for apps/cli package (completed 2026-07-12)
+- **Commit:** 58ec988
 - **Priority:** medium
-- **Files:** apps/cli/src/ (create __tests__/ directory with test files)
-- The CLI package has zero test files. Add basic smoke tests covering CLI entry point.
-- **AC:** At least 3 meaningful tests added. `pnpm test --filter @mafia/cli` exits 0.
-- **Verification:** `cd apps/cli && npx vitest run`
+- **Files:** apps/cli/src/__tests__/index.test.ts, base-command.test.ts, init-command.test.ts
+- 20 tests across 3 test files. All pass. Guard PASS.
 
 ## [ ] INFRA-SPECS: Review, organize, and commit untracked specs/docs
 - **Priority:** low
