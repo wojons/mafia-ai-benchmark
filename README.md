@@ -22,7 +22,7 @@ An advanced AI-powered Mafia game simulation that benchmarks different AI models
 ### TL;DR - Get Running Now
 
 ```bash
-cd /config/workspace/mafia
+cd mafia-ai-benchmark
 
 # 1. Add your API key to .env (required!)
 nano .env
@@ -232,7 +232,7 @@ node game-manager.js delete [gameId]
 ### Project Structure
 
 ```
-/config/workspace/mafia/
+mafia-ai-benchmark/
 ├── game-engine.js              ✅ Main game engine (runs games)
 ├── mafia.sh                    ✅ CLI wrapper script
 ├── cli.js                      ✅ CLI utilities
