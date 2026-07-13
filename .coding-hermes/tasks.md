@@ -32,3 +32,28 @@
 - **Priority:** low
 - 57 files, 4205 lines: specs/ (7 new files), .memory-bank/ (48 files), VERSION, CHANGELOG.md.
 - Guard PASS. Remaining 34 spec files already tracked in git.
+
+## [ ] DOC-SWEEP-001: Fix README.md path from `/config/workspace/mafia` to actual location
+- **Priority:** low
+- **Files:** README.md
+- README Quick Start says `cd /config/workspace/mafia` — update to project's actual path or relative instructions.
+- **AC:** README Quick Start section references correct path. Test: grep for `/config/workspace/mafia` in README.md returns nothing.
+
+## [ ] SPEC-SWEEP-001: Write axiom-level spec for benchmark runner
+- **Priority:** medium
+- **Source:** TODO at apps/server/src/routes/index.ts:859
+- Write a 10-section axiom-level spec (Overview→Dependencies→Interface→Behavior→Data→States→Errors→Testing→Security→Performance) for the benchmark runner feature.
+- **AC:** Spec file exists under specs/ with exact TypeScript interfaces, test scenarios, error paths, and data flow diagram.
+
+## [ ] SPEC-SWEEP-002: Write axiom-level spec for player model assignment
+- **Priority:** medium
+- **Source:** TODO at apps/server/src/routes/index.ts:646
+- Write a 10-section axiom-level spec for player model assignment in game repository.
+- **AC:** Spec file exists under specs/ with exact TypeScript interfaces, repository method signatures, error paths, and data flow diagram.
+
+## [ ] CI-SWEEP-001: Set up GitHub Actions CI pipeline
+- **Priority:** medium
+- **Files:** .github/workflows/ci.yml (new)
+- No CI pipeline currently configured — GitHub Actions returns 404.
+- Set up CI workflow: pnpm install → pnpm build → per-package vitest run.
+- **AC:** CI runs on push to main, all 4 packages build and 211 tests pass.
