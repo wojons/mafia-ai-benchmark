@@ -27,8 +27,8 @@
 - **Files:** apps/cli/src/__tests__/index.test.ts, base-command.test.ts, init-command.test.ts
 - 20 tests across 3 test files. All pass. Guard PASS.
 
-## [ ] INFRA-SPECS: Review, organize, and commit untracked specs/docs
+## [x] INFRA-SPECS: Review, organize, and commit untracked specs/docs (completed 2026-07-12)
+- **Commit:** 1fd7ed3
 - **Priority:** low
-- **Files:** specs/ (41 files, 25K lines), VERSION, CHANGELOG.md, .memory-bank/
-- All are untracked. Review for quality, organize if needed, add to git, commit.
-- **AC:** specs/ committed with a descriptive commit message. `.gitignore` updated for any files that shouldn't be tracked.
+- 57 files, 4205 lines: specs/ (7 new files), .memory-bank/ (48 files), VERSION, CHANGELOG.md.
+- Guard PASS. Remaining 34 spec files already tracked in git.
