@@ -33,11 +33,12 @@
 - 57 files, 4205 lines: specs/ (7 new files), .memory-bank/ (48 files), VERSION, CHANGELOG.md.
 - Guard PASS. Remaining 34 spec files already tracked in git.
 
-## [ ] DOC-SWEEP-001: Fix README.md path from `/config/workspace/mafia` to actual location
+## [x] DOC-SWEEP-001: Fix README.md path from `/config/workspace/mafia` to actual location (completed 2026-07-12)
+- **Commit:** bbdd4c6
 - **Priority:** low
 - **Files:** README.md
-- README Quick Start says `cd /config/workspace/mafia` — update to project's actual path or relative instructions.
-- **AC:** README Quick Start section references correct path. Test: grep for `/config/workspace/mafia` in README.md returns nothing.
+- README Quick Start says `cd /config/workspace/mafia` — updated to generic `cd mafia-ai-benchmark`.
+- **AC:** README Quick Start section references correct path. Verified: zero matches for `/config/workspace/mafia`.
 
 ## [ ] SPEC-SWEEP-001: Write axiom-level spec for benchmark runner
 - **Priority:** medium
