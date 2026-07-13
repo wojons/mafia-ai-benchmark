@@ -46,11 +46,13 @@
 - 879 lines, 11 sections, 13 TypeScript interfaces, state machine, error catalog (E1-E8), test scenarios (T1-T8).
 - Guard PASS. Manual AC verification: all 8 criteria met.
 
-## [ ] SPEC-SWEEP-002: Write axiom-level spec for player model assignment
+## [x] SPEC-SWEEP-002: Write axiom-level spec for player model assignment (completed 2026-07-13)
+- **Commit:** SPEC-SWEEP-002
 - **Priority:** medium
 - **Source:** TODO at apps/server/src/routes/index.ts:646
-- Write a 10-section axiom-level spec for player model assignment in game repository.
-- **AC:** Spec file exists under specs/ with exact TypeScript interfaces, repository method signatures, error paths, and data flow diagram.
+- 1112 lines, 11 sections, 9 TypeScript interfaces, 10 error codes (E1-E10), 4 DDL tables, Mermaid data flow diagram.
+- Spec: `specs/player-model-assignment.md` — documents existing PlayerModelConfig, DB schema, API routes, and formalizes GameRepository method signatures for the TODO at line 646.
+- Guard PASS. Manual AC verification: 6/6 criteria met.
 
 ## [ ] CI-SWEEP-001: Set up GitHub Actions CI pipeline
 - **Priority:** medium
