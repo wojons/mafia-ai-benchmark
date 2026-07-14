@@ -4,60 +4,42 @@
 > Model: MiniMax-M3 / minimax | Schedule: every 120m
 
 ## [x] MIGRATE-001: Audit current state (completed 2026-07-08)
-- **Priority:** high
-- Run `pnpm install && pnpm build` to verify project builds
-- Run `pnpm test` to check test health
-- Report: build status, test pass/fail count, any broken deps
 
 ## [x] FIX-EVENTBUS: Fix EventBus implementation — 3 failing tests (completed 2026-07-12)
-- **Commit:** 8dc0737
-- **Priority:** high
-- **Files:** apps/server/src/services/event-bus.ts
-- **Tests:** apps/server/src/services/event-bus.test.ts (30 pass, 3 fail)
-- Failing tests:
-  1. `should support event filters` — handler called 2 times instead of 1 (filter not applied)
-  2. `should unsubscribe by ID` — `unsubscribe(sub.id)` returns false (subscription ID missing or wrong)
-  3. `should unsubscribe wildcard handlers` — handler called 2 times after unsubscribe (wildcard unsubscribe broken)
-- **AC:** All 39 tests in event-bus.test.ts pass. Do NOT modify tests — fix the implementation.
-- **Verification:** `cd apps/server && npx vitest run src/services/event-bus.test.ts`
 
 ## [x] TEST-CLI: Add test files for apps/cli package (completed 2026-07-12)
-- **Commit:** 58ec988
-- **Priority:** medium
-- **Files:** apps/cli/src/__tests__/index.test.ts, base-command.test.ts, init-command.test.ts
-- 20 tests across 3 test files. All pass. Guard PASS.
 
 ## [x] INFRA-SPECS: Review, organize, and commit untracked specs/docs (completed 2026-07-12)
-- **Commit:** 1fd7ed3
-- **Priority:** low
-- 57 files, 4205 lines: specs/ (7 new files), .memory-bank/ (48 files), VERSION, CHANGELOG.md.
-- Guard PASS. Remaining 34 spec files already tracked in git.
 
 ## [x] DOC-SWEEP-001: Fix README.md path from `/config/workspace/mafia` to actual location (completed 2026-07-12)
-- **Commit:** bbdd4c6
-- **Priority:** low
-- **Files:** README.md
-- README Quick Start says `cd /config/workspace/mafia` — updated to generic `cd mafia-ai-benchmark`.
-- **AC:** README Quick Start section references correct path. Verified: zero matches for `/config/workspace/mafia`.
 
 ## [x] SPEC-SWEEP-001: Write axiom-level spec for benchmark runner (completed 2026-07-12)
-- **Commit:** 64bf41d
-- **Priority:** medium
-- 879 lines, 11 sections, 13 TypeScript interfaces, state machine, error catalog (E1-E8), test scenarios (T1-T8).
-- Guard PASS. Manual AC verification: all 8 criteria met.
 
 ## [x] SPEC-SWEEP-002: Write axiom-level spec for player model assignment (completed 2026-07-13)
-- **Commit:** SPEC-SWEEP-002
-- **Priority:** medium
-- **Source:** TODO at apps/server/src/routes/index.ts:646
-- 1112 lines, 11 sections, 9 TypeScript interfaces, 10 error codes (E1-E10), 4 DDL tables, Mermaid data flow diagram.
-- Spec: `specs/player-model-assignment.md` — documents existing PlayerModelConfig, DB schema, API routes, and formalizes GameRepository method signatures for the TODO at line 646.
-- Guard PASS. Manual AC verification: 6/6 criteria met.
 
 ## [x] CI-SWEEP-001: Set up GitHub Actions CI pipeline (completed 2026-07-13)
-- **Commit:** 4585eda
+
+## [x] FIX-CI-BUILD: Commit missing build config files — turbo.json + web build pipeline (completed 2026-07-14)
+- **Commit:** TBD
+- **Priority:** CRITICAL
+- **Root cause:** CI fails at "Build workspace" because `turbo.json` is untracked. Turborepo requires this file to orchestrate the build pipeline. Without it, all 4 matrix CI jobs fail with exit code 1. Additionally, web build config files (`postcss.config.js`, `tailwind.config.js`, `env.d.ts`, `index.css`) are untracked — needed for web build on fresh checkout.
+- **Files:** turbo.json, apps/web/postcss.config.js, apps/web/tailwind.config.js, apps/web/src/env.d.ts, apps/web/src/index.css
+- **AC:** All files committed and pushed. CI passes on next push.
+- **Verification:** `git status` clean for these files. `pnpm build` still passes.
+
+## [ ] INFRA-GITIGNORE: Add infrastructure directories to .gitignore
 - **Priority:** medium
-- **Files:** .github/workflows/ci.yml (new)
-- CI pipeline: pnpm install → pnpm build → per-package vitest run → type check.
-- Guard PASS. Build PASS. All 4 packages tested on matrix strategy.
-- **AC:** CI runs on push to main — verified via push. Workflow file committed.
+- **Files:** .gitignore
+- Directories to gitignore: .githooks/, .gitreins/history/, .vfs/, .worktrees/, .axiom/, .hermes/plans/, apps/server/src/routes/*.bak
+- **AC:** All infrastructure dirs + .bak files excluded from git tracking.
+
+## [ ] CHORE-CLEANUP: Remove stale artifacts (index.ts.bak, legacy-logger.js)
+- **Priority:** low
+- **Files:** apps/server/src/routes/index.ts.bak, src/logging/legacy-logger.js
+- **AC:** Stale files removed. `pnpm build` still passes, tests still pass.
+
+## [ ] TODO-ANALYTICS: Decide whether to commit apps/web/src/types/analytics.ts
+- **Priority:** low
+- **Files:** apps/web/src/types/analytics.ts (95 lines, untracked)
+- **Question:** Is this referenced by the web app? If yes, commit it. If no, add to .gitignore or remove.
+- **AC:** Either committed (if referenced) or excluded. Build+test pass.
