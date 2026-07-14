@@ -20,7 +20,7 @@
 ## [x] CI-SWEEP-001: Set up GitHub Actions CI pipeline (completed 2026-07-13)
 
 ## [x] FIX-CI-BUILD: Commit missing build config files — turbo.json + web build pipeline (completed 2026-07-14)
-- **Commit:** TBD
+- **Commit:** 8eb1fa9
 - **Priority:** CRITICAL
 - **Root cause:** CI fails at "Build workspace" because `turbo.json` is untracked. Turborepo requires this file to orchestrate the build pipeline. Without it, all 4 matrix CI jobs fail with exit code 1. Additionally, web build config files (`postcss.config.js`, `tailwind.config.js`, `env.d.ts`, `index.css`) are untracked — needed for web build on fresh checkout.
 - **Files:** turbo.json, apps/web/postcss.config.js, apps/web/tailwind.config.js, apps/web/src/env.d.ts, apps/web/src/index.css
