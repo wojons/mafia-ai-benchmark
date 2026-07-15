@@ -38,8 +38,27 @@ jobs:
       - name: Build workspace
         run: pnpm run build
 
+      - name: Start server (apps/server only)
+        if: matrix.package == 'apps/server'
+        run: |
+          cd apps/server
+          npx tsx src/index.ts &
+          echo "SERVER_PID=$!" >> $GITHUB_ENV
+          # Wait for server to be ready (up to 30s)
+          for i in $(seq 1 30); do
+            if curl -s http://localhost:3000/health > /dev/null 2>&1; then
+              echo "Server ready after ${i}s"
+              break
+            fi
+            sleep 1
+          done
+
       - name: Run tests (${{ matrix.package }})
         run: cd ${{ matrix.package }} && npx vitest run
+
+      - name: Stop server (apps/server only)
+        if: matrix.package == 'apps/server' && env.SERVER_PID != ''
+        run: kill $SERVER_PID 2>/dev/null || true
 
   lint:
     runs-on: ubuntu-latest
