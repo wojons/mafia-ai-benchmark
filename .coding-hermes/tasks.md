@@ -27,7 +27,8 @@
 - **AC:** All files committed and pushed. CI passes on next push.
 - **Verification:** `git status` clean for these files. `pnpm build` still passes.
 
-## [ ] INFRA-GITIGNORE: Add infrastructure directories to .gitignore
+## [x] INFRA-GITIGNORE: Add infrastructure directories to .gitignore (completed 2026-07-14)
+- **Commit:** 7c797e3
 - **Priority:** medium
 - **Files:** .gitignore
 - Directories to gitignore: .githooks/, .gitreins/history/, .vfs/, .worktrees/, .axiom/, .hermes/plans/, apps/server/src/routes/*.bak
