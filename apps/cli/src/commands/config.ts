@@ -5,7 +5,8 @@
  */
 
 import { Command } from 'commander';
-import fs from 'fs';
+import * as fs from 'fs';
+import * as path from 'path';
 import chalk from 'chalk';
 
 export class ConfigCommand extends Command {
@@ -87,9 +88,20 @@ export class ConfigCommand extends Command {
   
   async setConfig(key: string, value: string): Promise<void> {
     console.log(chalk.cyan(`\nSetting ${key} = ${value}\n`));
-    
-    // TODO: Update config file
-    console.log(chalk.green('✓ Configuration updated\n'));
+
+    const config = this.loadConfig();
+    const existing = config as Record<string, unknown>;
+
+    // Attempt to parse numeric / boolean values; keep strings otherwise
+    let parsedValue: unknown = value;
+    if (value === 'true') parsedValue = true;
+    else if (value === 'false') parsedValue = false;
+    else if (/^-?\d+(\.\d+)?$/.test(value)) parsedValue = Number(value);
+
+    existing[key] = parsedValue;
+    this.saveConfig(existing);
+
+    console.log(chalk.green(`✓ Configuration updated — ${key} = ${JSON.stringify(parsedValue)}\n`));
   }
   
   async resetConfig(force: boolean): Promise<void> {
@@ -113,19 +125,34 @@ export class ConfigCommand extends Command {
       }
     }
     
-    // TODO: Reset config file
+    // Reset config file to defaults
+    const defaultConfig = {
+      numPlayers: 10,
+      llmProvider: 'openai',
+      llmModel: 'gpt-5.1',
+      nightDuration: 60,
+      dayDuration: 120,
+      votingDuration: 30,
+    };
+    this.saveConfig(defaultConfig);
     console.log(chalk.green('✓ Configuration reset to defaults\n'));
   }
   
   private loadConfig(): Record<string, unknown> {
+    const file = path.resolve(process.cwd(), 'mafia.config.json');
     try {
-      if (fs.existsSync('./mafia.config.json')) {
-        return JSON.parse(fs.readFileSync('./mafia.config.json', 'utf-8'));
+      if (fs.existsSync(file)) {
+        return JSON.parse(fs.readFileSync(file, 'utf-8'));
       }
     } catch {
       // Ignore errors
     }
     return {};
+  }
+
+  private saveConfig(config: Record<string, unknown>): void {
+    const file = path.resolve(process.cwd(), 'mafia.config.json');
+    fs.writeFileSync(file, JSON.stringify(config, null, 2), 'utf-8');
   }
 }
 

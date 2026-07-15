@@ -29,10 +29,13 @@ export class RunGameCommand extends Command {
     this.option('--model <name>', 'LLM model', 'gpt-5.1');
     this.option('--auto', 'Run without confirmation', false);
     this.option('--watch', 'Watch game in real-time', false);
+    this.option('--server <url>', 'Server base URL (default: http://localhost:3000)');
   }
   
   async run(): Promise<void> {
-    const { config, players, provider, model, auto, watch } = this.opts();
+    const { config, players, provider, model, auto, watch, server } = this.opts();
+    
+    const serverUrl = server || process.env.MAFIA_SERVER_URL || 'http://localhost:3000';
     
     console.log(chalk.cyan('\n🎮 Mafia AI Benchmark - Run Game\n'));
     
@@ -78,18 +81,23 @@ export class RunGameCommand extends Command {
     console.log(chalk.cyan('Starting game...\n'));
     
     try {
-      // TODO: Connect to server and start game
-      await this.startGame(gameConfig);
+      const gameId = await this.startGame(gameConfig, serverUrl);
       
       if (watch) {
         console.log(chalk.cyan('\n👀 Watching game in real-time...\n'));
-        await this.watchGame();
+        console.log(chalk.gray('Use: mafiactl watch-game ' + gameId + ' for full real-time updates\n'));
       } else {
-        console.log(chalk.green('\n✅ Game started successfully!\n'));
-        console.log(chalk.gray('Use: mafiactl watch-game <game-id> to watch the game\n'));
+        console.log(chalk.green('\n✅ Game started successfully!'));
+        console.log(chalk.gray('  Game ID: ' + gameId));
+        console.log(chalk.gray('\nUse: mafiactl watch-game ' + gameId + ' to watch the game\n'));
       }
-    } catch (error) {
-      console.error(chalk.red('\n❌ Failed to start game:'), error);
+    } catch (error: any) {
+      if (error.cause?.code === 'ECONNREFUSED' || error.message?.includes('fetch')) {
+        console.error(chalk.red(`\n❌ Cannot connect to server at ${serverUrl}`));
+        console.error(chalk.gray('   Make sure the server is running: pnpm run dev --filter=@mafia/server'));
+      } else {
+        console.error(chalk.red(`\n❌ Failed to start game: ${error.message}`));
+      }
       process.exit(1);
     }
   }
@@ -125,38 +133,33 @@ export class RunGameCommand extends Command {
     };
   }
   
-  private async startGame(_config: GameConfig): Promise<void> {
-    // TODO: Connect to server and create game
-    console.log(chalk.gray('  Connecting to server...'));
-    console.log(chalk.gray('  Creating game...'));
-    console.log(chalk.gray('  Assigning roles...'));
-    console.log(chalk.gray('  Starting game loop...'));
+  private async startGame(config: GameConfig, serverUrl: string): Promise<string> {
+    console.log(chalk.gray(`  Connecting to server (${serverUrl})...`));
     
-    // Simulate game start
-    await new Promise(resolve => setTimeout(resolve, 1000));
-  }
-  
-  private async watchGame(): Promise<void> {
-    console.log(chalk.cyan('Real-time game updates will appear here...\n'));
-    
-    // Connect to WebSocket
-    // TODO: Implement WebSocket connection
-    /*
-    this.ws = new WebSocket('ws://localhost:3000/ws');
-    
-    this.ws.on('open', () => {
-      console.log(chalk.green('Connected to game server'));
+    const url = `${serverUrl}/api/v1/games`;
+    const response = await fetch(url, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        config,
+        numPlayers: config.numPlayers,
+      }),
+      signal: AbortSignal.timeout(30000),
     });
     
-    this.ws.on('message', (data) => {
-      const event = JSON.parse(data.toString());
-      this.displayEvent(event);
-    });
+    if (!response.ok) {
+      const errorText = await response.text();
+      throw new Error(`Server returned ${response.status}: ${errorText}`);
+    }
     
-    this.ws.on('close', () => {
-      console.log(chalk.gray('\nDisconnected from game server'));
-    });
-    */
+    const body = await response.json() as { success: boolean; data: { gameId: string; status: string } };
+    const gameId = body.data?.gameId;
+    
+    if (!gameId) {
+      throw new Error('Server response did not include a gameId');
+    }
+    
+    return gameId;
   }
 
 }

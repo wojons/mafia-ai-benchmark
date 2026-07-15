@@ -15,15 +15,18 @@ export class ListGamesCommand extends Command {
     this.option('--status <status>', 'Filter by status (setup, in_progress, ended)');
     this.option('--limit <n>', 'Maximum games to show', '10');
     this.option('--json', 'Output as JSON');
+    this.option('--server <url>', 'Server base URL (default: http://localhost:3000)');
   }
   
   async run(): Promise<void> {
-    const { status, limit, json } = this.opts();
+    const { status, limit, json, server } = this.opts();
+    
+    const serverUrl = server || process.env.MAFIA_SERVER_URL || 'http://localhost:3000';
     
     console.log(chalk.cyan('\n📋 Recent Games\n'));
     
     try {
-      const games = await this.fetchGames(status, parseInt(limit));
+      const games = await this.fetchGames(serverUrl, status, parseInt(limit));
       
       if (json) {
         console.log(JSON.stringify(games, null, 2));
@@ -50,39 +53,63 @@ export class ListGamesCommand extends Command {
       });
       
       console.log(chalk.gray('\nTotal: ' + games.length + ' games\n'));
-    } catch (error) {
-      console.error(chalk.red('Failed to fetch games:', error));
+    } catch (error: any) {
+      if (error.cause?.code === 'ECONNREFUSED' || error.message?.includes('fetch')) {
+        console.error(chalk.red(`\n❌ Cannot connect to server at ${serverUrl}`));
+        console.error(chalk.gray('   Make sure the server is running: pnpm run dev --filter=@mafia/server'));
+      } else {
+        console.error(chalk.red(`\n❌ Failed to fetch games: ${error.message}`));
+      }
     }
   }
   
-  private async fetchGames(_status?: string, _limit?: number): Promise<Array<{
+  private async fetchGames(serverUrl: string, status?: string, limit?: number): Promise<Array<{
     id: string;
     status: string;
     players: number;
     createdAt: string;
   }>> {
-    // TODO: Fetch from server
-    // Simulated data for now
-    return [
-      {
-        id: 'game-abc123',
-        status: 'IN_PROGRESS',
-        players: 10,
-        createdAt: '2 minutes ago',
-      },
-      {
-        id: 'game-def456',
-        status: 'ENDED',
-        players: 10,
-        createdAt: '1 hour ago',
-      },
-      {
-        id: 'game-ghi789',
-        status: 'ENDED',
-        players: 8,
-        createdAt: '3 hours ago',
-      },
-    ];
+    const params = new URLSearchParams();
+    if (status) params.set('status', status.toUpperCase());
+    if (limit) params.set('limit', limit.toString());
+    const query = params.toString();
+    const url = `${serverUrl}/api/v1/games${query ? '?' + query : ''}`;
+
+    console.log(chalk.gray(`📡 Fetching games from ${url}...`));
+
+    const response = await fetch(url, {
+      method: 'GET',
+      headers: { 'Accept': 'application/json' },
+      signal: AbortSignal.timeout(30000),
+    });
+
+    if (!response.ok) {
+      const errorText = await response.text();
+      throw new Error(`Server returned ${response.status}: ${errorText}`);
+    }
+
+    const body = await response.json() as { success: boolean; data: Array<Record<string, unknown>> };
+    const games = Array.isArray(body.data) ? body.data : [];
+
+    return games.map((g) => {
+      const createdAtRaw = g.createdAt as string | number | Date | undefined;
+      let createdAtStr: string;
+      if (!createdAtRaw) {
+        createdAtStr = 'unknown';
+      } else if (typeof createdAtRaw === 'number') {
+        createdAtStr = new Date(createdAtRaw).toLocaleString();
+      } else if (createdAtRaw instanceof Date) {
+        createdAtStr = createdAtRaw.toLocaleString();
+      } else {
+        createdAtStr = String(createdAtRaw);
+      }
+      return {
+        id: (g.id as string) || 'unknown',
+        status: (g.status as string) || 'UNKNOWN',
+        players: (g.players as number) || 0,
+        createdAt: createdAtStr,
+      };
+    });
   }
   
   private getStatusColor(status: string): (text: string) => string {

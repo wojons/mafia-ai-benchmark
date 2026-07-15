@@ -39,15 +39,18 @@ export class StatsCommand extends Command {
     this.option('--games', 'Show game statistics');
     this.option('--models', 'Show model comparison');
     this.option('--verbose', 'Show detailed statistics');
+    this.option('--server <url>', 'Server base URL (default: http://localhost:3000)');
   }
   
   async run(): Promise<void> {
-    const { json, games: _games, models: _models, verbose } = this.opts();
+    const { json, games: _games, models: _models, verbose, server } = this.opts();
+    
+    const serverUrl = server || process.env.MAFIA_SERVER_URL || 'http://localhost:3000';
     
     console.log(chalk.cyan('\n📊 Mafia AI Benchmark Statistics\n'));
     
     try {
-      const stats = await this.fetchStats();
+      const stats = await this.fetchStats(serverUrl);
       
       if (json) {
         console.log(JSON.stringify(stats, null, 2));
@@ -106,34 +109,76 @@ export class StatsCommand extends Command {
       }
       
       console.log('');
-    } catch (error) {
-      console.error(chalk.red('Failed to fetch statistics:', error));
+    } catch (error: any) {
+      if (error.cause?.code === 'ECONNREFUSED' || error.message?.includes('fetch')) {
+        console.error(chalk.red(`\n❌ Cannot connect to server at ${serverUrl}`));
+        console.error(chalk.gray('   Make sure the server is running: pnpm run dev --filter=@mafia/server'));
+      } else {
+        console.error(chalk.red(`\n❌ Failed to fetch statistics: ${error.message}`));
+      }
     }
   }
   
-  private async fetchStats(): Promise<Stats> {
-    // TODO: Fetch from server
-    // Simulated data
+  private async fetchStats(serverUrl: string): Promise<Stats> {
+    const url = `${serverUrl}/api/v1/stats`;
+    const modelUrl = `${serverUrl}/api/v1/stats/models`;
+
+    console.log(chalk.gray(`📡 Fetching statistics from ${url}...`));
+
+    // Fetch game stats
+    const response = await fetch(url, {
+      method: 'GET',
+      headers: { 'Accept': 'application/json' },
+      signal: AbortSignal.timeout(30000),
+    });
+
+    if (!response.ok) {
+      const errorText = await response.text();
+      throw new Error(`Server returned ${response.status}: ${errorText}`);
+    }
+
+    const body = await response.json() as { success: boolean; data: Record<string, unknown> };
+    const data = (body.data || {}) as Record<string, unknown>;
+
+    // Fetch model comparison (best-effort — non-fatal if unavailable)
+    let topModels: Stats['topModels'] = [];
+    try {
+      const modelResponse = await fetch(modelUrl, {
+        method: 'GET',
+        headers: { 'Accept': 'application/json' },
+        signal: AbortSignal.timeout(30000),
+      });
+      if (modelResponse.ok) {
+        const modelBody = await modelResponse.json() as { success: boolean; data: Array<Record<string, unknown>> };
+        const models = Array.isArray(modelBody.data) ? modelBody.data : [];
+        topModels = models.map((m) => ({
+          provider: (m.provider as string) || 'unknown',
+          model: (m.model as string) || 'unknown',
+          gamesPlayed: (m.gamesPlayed as number) || 0,
+          winRate: (m.winRate as number) || 0,
+          avgTokens: (m.avgTokens as number) || 0,
+          avgCost: (m.avgCost as number) || 0,
+        }));
+      }
+    } catch {
+      // Model stats unavailable — continue with empty list
+    }
+
+    // Map server data → Stats interface, defaulting fields the server may not provide
     return {
-      totalGames: 156,
-      activeGames: 3,
-      completedGames: 153,
-      mafiaWins: 72,
-      townWins: 81,
-      avgDuration: 1250000, // ms
-      totalTokens: 45800000,
-      totalCost: 342.50,
-      avgCostPerGame: 2.24,
-      totalAPICalls: 4520,
-      avgLatency: 245,
-      errorRate: 0.02,
-      topModels: [
-        { provider: 'anthropic', model: 'claude-sonnet-4.5', gamesPlayed: 45, winRate: 0.58, avgTokens: 125000, avgCost: 1.85 },
-        { provider: 'openai', model: 'gpt-5.1', gamesPlayed: 38, winRate: 0.55, avgTokens: 98000, avgCost: 1.22 },
-        { provider: 'google', model: 'gemini-2.5-pro', gamesPlayed: 32, winRate: 0.52, avgTokens: 112000, avgCost: 0.95 },
-        { provider: 'xai', model: 'grok-4-fast', gamesPlayed: 24, winRate: 0.48, avgTokens: 85000, avgCost: 0.42 },
-        { provider: 'groq', model: 'llama-3.3-70b', gamesPlayed: 17, winRate: 0.45, avgTokens: 45000, avgCost: 0.18 },
-      ],
+      totalGames: (data.totalGames as number) || 0,
+      activeGames: (data.activeGames as number) || 0,
+      completedGames: (data.completedGames as number) || 0,
+      mafiaWins: (data.mafiaWins as number) || 0,
+      townWins: (data.townWins as number) || 0,
+      avgDuration: (data.avgDuration as number) || 0,
+      totalTokens: (data.totalTokens as number) || 0,
+      totalCost: (data.totalCost as number) || 0,
+      avgCostPerGame: (data.avgCostPerGame as number) || 0,
+      totalAPICalls: (data.totalAPICalls as number) || 0,
+      avgLatency: (data.avgLatency as number) || 0,
+      errorRate: (data.errorRate as number) || 0,
+      topModels,
     };
   }
   
