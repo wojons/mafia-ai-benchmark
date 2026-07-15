@@ -44,3 +44,5 @@
 - **Files:** apps/web/src/types/analytics.ts (95 lines, untracked)
 - **Question:** Is this referenced by the web app? If yes, commit it. If no, add to .gitignore or remove.
 - **AC:** Either committed (if referenced) or excluded. Build+test pass.
+
+## [ ] Fix CI: wojons/mafia-ai-benchmark — run #7 — log access denied, check manually
