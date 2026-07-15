@@ -8,6 +8,22 @@ import Database from 'better-sqlite3';
 import { v4 as uuidv4 } from 'uuid';
 import { Game, Player, GameEvent, GameConfig, PlayerStats } from '@mafia/shared/types';
 
+/** Row shape from player_model_assignments table. */
+export interface PlayerModelAssignmentRow {
+  id: string;
+  game_id: string;
+  player_id: string | null;
+  player_name: string | null;
+  role: string | null;
+  player_index: number | null;
+  provider: string;
+  model: string;
+  temperature: number;
+  max_tokens: number;
+  priority: number;
+  created_at: number;
+}
+
 export class GameRepository {
   private db: Database.Database;
   
@@ -417,6 +433,97 @@ export class GameRepository {
       avgCost: row.avg_cost as number || 0,
       avgLatency: 0,
     }));
+  }
+
+  // ==================== PLAYER MODEL ASSIGNMENTS ====================
+
+  /**
+   * Assign a model to a specific player slot.
+   * Inserts or replaces the player_model_assignments row for this game + playerIndex.
+   */
+  assignPlayerModel(
+    gameId: string,
+    playerIndex: number,
+    config: { provider: string; model: string; temperature?: number; maxTokens?: number; priority?: number; playerName?: string }
+  ): PlayerModelAssignmentRow {
+    const id = uuidv4();
+    const now = Date.now();
+    const temperature = config.temperature ?? 0.7;
+    const maxTokens = config.maxTokens ?? 500;
+    const priority = config.priority ?? 0;
+
+    this.db.prepare(`
+      INSERT OR REPLACE INTO player_model_assignments
+        (id, game_id, player_index, provider, model, temperature, max_tokens, priority, player_name, created_at)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    `).run(id, gameId, playerIndex, config.provider, config.model, temperature, maxTokens, priority, config.playerName || null, now);
+
+    return this.db.prepare('SELECT * FROM player_model_assignments WHERE id = ?').get(id) as PlayerModelAssignmentRow;
+  }
+
+  /**
+   * Assign a model to all players with a given role.
+   */
+  assignRoleModel(
+    gameId: string,
+    role: string,
+    config: { provider: string; model: string; temperature?: number; maxTokens?: number; priority?: number }
+  ): PlayerModelAssignmentRow {
+    const id = uuidv4();
+    const now = Date.now();
+    const temperature = config.temperature ?? 0.7;
+    const maxTokens = config.maxTokens ?? 500;
+    const priority = config.priority ?? 0;
+
+    this.db.prepare(`
+      INSERT INTO player_model_assignments
+        (id, game_id, role, provider, model, temperature, max_tokens, priority, created_at)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+    `).run(id, gameId, role.toUpperCase(), config.provider, config.model, temperature, maxTokens, priority, now);
+
+    return this.db.prepare('SELECT * FROM player_model_assignments WHERE id = ?').get(id) as PlayerModelAssignmentRow;
+  }
+
+  /**
+   * Assign models to multiple slots in a batch.
+   */
+  bulkAssignModels(
+    gameId: string,
+    assignments: Array<{ playerIndex?: number; role?: string; provider: string; model: string; temperature?: number; maxTokens?: number; priority?: number }>
+  ): Array<{ success: boolean; data?: PlayerModelAssignmentRow; error?: string }> {
+    const now = Date.now();
+
+    return assignments.map((a, idx) => {
+      if (!a.provider || !a.model) {
+        return { success: false, error: `Entry ${idx}: provider and model are required` };
+      }
+      const id = uuidv4();
+      const temperature = a.temperature ?? 0.7;
+      const maxTokens = a.maxTokens ?? 500;
+      const priority = a.priority ?? 0;
+
+      try {
+        this.db.prepare(`
+          INSERT OR REPLACE INTO player_model_assignments
+            (id, game_id, player_index, role, provider, model, temperature, max_tokens, priority, created_at)
+          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        `).run(id, gameId, a.playerIndex ?? null, (a.role ?? null) as string | null, a.provider, a.model, temperature, maxTokens, priority, now);
+
+        const row = this.db.prepare('SELECT * FROM player_model_assignments WHERE id = ?').get(id) as PlayerModelAssignmentRow;
+        return { success: true, data: row };
+      } catch (err) {
+        return { success: false, error: `Entry ${idx}: ${(err as Error).message}` };
+      }
+    });
+  }
+
+  /**
+   * Get all model assignments for a game.
+   */
+  getGameModelAssignments(gameId: string): PlayerModelAssignmentRow[] {
+    return this.db.prepare(
+      'SELECT * FROM player_model_assignments WHERE game_id = ? ORDER BY player_index ASC, created_at ASC'
+    ).all(gameId) as PlayerModelAssignmentRow[];
   }
 }
 

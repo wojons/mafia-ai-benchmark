@@ -629,104 +629,135 @@ export function setupRoutes(app: Express, context: ServerContext): void {
   });
   
   // ==================== PLAYER MODEL CONFIGURATION ====================
-  
+
   // Set model for a specific player in a game
   app.post('/api/v1/games/:gameId/players/:playerIndex/model', async (req: Request, res: Response) => {
     try {
       const { gameId, playerIndex } = req.params;
-      const { provider, model, temperature, maxTokens } = req.body;
-      
+      const { provider, model, temperature, maxTokens, priority } = req.body;
+
       if (!provider || !model) {
         return res.status(400).json({
           success: false,
           error: 'provider and model are required',
         });
       }
-      
-      // TODO: Implement player model assignment in game repository
-      const assignment = {
-        gameId,
-        playerIndex: parseInt(playerIndex),
+
+      // Verify game exists
+      const game = gameRepository.getGame(gameId);
+      if (!game) {
+        return res.status(404).json({ success: false, error: `Game not found: ${gameId}` });
+      }
+
+      const assignment = gameRepository.assignPlayerModel(gameId, parseInt(playerIndex), {
         provider,
         model,
         temperature: temperature || 0.7,
         maxTokens: maxTokens || 500,
-        createdAt: Date.now(),
-      };
-      
-      // For now, just return success
+        priority: priority || 0,
+      });
+
       res.json({
         success: true,
         data: {
-          message: 'Player model assignment saved',
-          ...assignment,
+          id: assignment.id,
+          gameId: assignment.game_id,
+          playerIndex: assignment.player_index,
+          provider: assignment.provider,
+          model: assignment.model,
+          temperature: assignment.temperature,
+          maxTokens: assignment.max_tokens,
+          priority: assignment.priority,
+          createdAt: assignment.created_at,
         },
       });
     } catch (error) {
       res.status(500).json({ success: false, error: 'Failed to set player model' });
     }
   });
-  
+
   // Set model for all players with a specific role
   app.post('/api/v1/games/:gameId/role/:role/model', async (req: Request, res: Response) => {
     try {
       const { gameId, role } = req.params;
-      const { provider, model, temperature, maxTokens } = req.body;
-      
+      const { provider, model, temperature, maxTokens, priority } = req.body;
+
       if (!provider || !model) {
         return res.status(400).json({
           success: false,
           error: 'provider and model are required',
         });
       }
-      
-      const assignment = {
-        gameId,
-        role,
+
+      // Verify game exists
+      const game = gameRepository.getGame(gameId);
+      if (!game) {
+        return res.status(404).json({ success: false, error: `Game not found: ${gameId}` });
+      }
+
+      const assignment = gameRepository.assignRoleModel(gameId, role, {
         provider,
         model,
         temperature: temperature || 0.7,
         maxTokens: maxTokens || 500,
-        createdAt: Date.now(),
-      };
-      
+        priority: priority || 0,
+      });
+
       res.json({
         success: true,
         data: {
-          message: `Role-based model assignment saved for ${role}`,
-          ...assignment,
+          id: assignment.id,
+          gameId: assignment.game_id,
+          role: assignment.role,
+          provider: assignment.provider,
+          model: assignment.model,
+          temperature: assignment.temperature,
+          maxTokens: assignment.max_tokens,
+          priority: assignment.priority,
+          createdAt: assignment.created_at,
         },
       });
     } catch (error) {
       res.status(500).json({ success: false, error: 'Failed to set role model' });
     }
   });
-  
+
   // Bulk update player models
   app.post('/api/v1/games/:gameId/models/bulk', async (req: Request, res: Response) => {
     try {
       const { gameId } = req.params;
       const { assignments } = req.body;
-      
+
       if (!assignments || !Array.isArray(assignments)) {
         return res.status(400).json({
           success: false,
           error: 'assignments array is required',
         });
       }
-      
-      const results = assignments.map((a: any) => ({
-        playerIndex: a.playerIndex || a.role,
-        provider: a.provider,
-        model: a.model,
-        status: 'saved',
-      }));
-      
+
+      // Verify game exists
+      const game = gameRepository.getGame(gameId);
+      if (!game) {
+        return res.status(404).json({ success: false, error: `Game not found: ${gameId}` });
+      }
+
+      const results = gameRepository.bulkAssignModels(gameId, assignments);
+
       res.json({
         success: true,
         data: {
-          message: `${results.length} model assignments saved`,
-          assignments: results,
+          message: `${results.filter(r => r.success).length} of ${results.length} assignments saved`,
+          results: results.map(r => r.success ? {
+            status: 'saved',
+            id: r.data!.id,
+            playerIndex: r.data!.player_index,
+            role: r.data!.role,
+            provider: r.data!.provider,
+            model: r.data!.model,
+          } : {
+            status: 'failed',
+            error: r.error,
+          }),
         },
       });
     } catch (error) {
