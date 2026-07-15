@@ -5,6 +5,8 @@
  */
 
 import { Command } from 'commander';
+import * as fs from 'fs';
+import * as path from 'path';
 
 export interface CLIOptions {
   verbose?: boolean;
@@ -70,13 +72,21 @@ export abstract class BaseCommand extends Command {
     console.log(JSON.stringify(data, null, 2));
   }
   
-  protected async loadConfig(_configPath?: string): Promise<Record<string, unknown>> {
-    // TODO: Load configuration from file
+  protected async loadConfig(configPath?: string): Promise<Record<string, unknown>> {
+    const file = configPath || path.resolve(process.cwd(), 'mafia.config.json');
+    try {
+      if (fs.existsSync(file)) {
+        return JSON.parse(fs.readFileSync(file, 'utf-8'));
+      }
+    } catch {
+      // Ignore parse / read errors — treat as no config
+    }
     return {};
   }
-  
-  protected async saveConfig(_config: Record<string, unknown>, _configPath?: string): Promise<void> {
-    // TODO: Save configuration to file
+
+  protected async saveConfig(config: Record<string, unknown>, configPath?: string): Promise<void> {
+    const file = configPath || path.resolve(process.cwd(), 'mafia.config.json');
+    fs.writeFileSync(file, JSON.stringify(config, null, 2), 'utf-8');
   }
 }
 
