@@ -48,7 +48,9 @@
 - **Files:** .github/workflows/ci.yml
 - **Commit:** 67bf1c8
 
-## [ ] SWEEP-001: Fix .gitreins/config.yaml test_command — Docker required but no container
+## [x] SWEEP-001: Fix .gitreins/config.yaml test_command — Docker required but no container (completed 2026-07-15)
+- **Commit:** 5555321
+- **Resolution:** Changed `test_command` from Docker exec to native `cd apps/server && npx vitest run`. All 39 server tests pass. `gitreins guard` PASS.
 - **Priority:** medium
 - **Root cause:** `.gitreins/config.yaml` sets `test_command: docker exec mafia-ai-benchmark-server-1 ...` but no Docker container exists locally. Causes `gitreins guard` to always fail tests. Tests pass natively via `cd apps/server && npx vitest run`.
 - **Fix:** Change test_command to run natively: `cd apps/server && npx vitest run` or auto-detect.
