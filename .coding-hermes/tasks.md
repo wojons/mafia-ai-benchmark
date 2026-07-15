@@ -63,11 +63,9 @@
 - **Files:** apps/cli/src/commands/stats.ts, base-command.ts, list-games.ts, config.ts, run-game.ts
 - **Resolution:** All 9 TODO stubs removed. stats.ts fetchStats() → GET /api/v1/stats. list-games.ts fetchGames() → GET /api/v1/games. run-game.ts startGame() → POST /api/v1/games. base-command.ts loadConfig/saveConfig → fs read/write. config.ts setConfig/resetConfig → fs write. 0 TODOs remain. tsc --noEmit clean for CLI. gitreins guard PASS.
 
-## [ ] SPEC-SWEEP-003: Implement player model assignment persistence in game repository
-- **Priority:** medium
-- **Files:** apps/server/src/routes/index.ts:646, apps/server/src/repositories/
-- **Issue:** POST /api/v1/games/:gameId/players/:playerIndex/model receives provider/model but constructs a response object inline without persisting to the game repository. The TODO at line 646 says "Implement player model assignment in game repository."
-- **AC:** Player model assignments are persisted to the game repository. Game state reflects assigned models when queried. Endpoint validates gameId and playerIndex exist before assignment.
+## [x] SPEC-SWEEP-003: Implement player model assignment persistence in game repository (completed 2026-07-15)
+- **Commit:** b023701
+- **Resolution:** Added assignPlayerModel(), assignRoleModel(), bulkAssignModels(), getGameModelAssignments() to GameRepository. Wired 3 route handlers (POST player model, POST role model, POST bulk) to call repository methods instead of returning canned responses. Game existence validated in routes (404 if not found). tsc --noEmit clean. All 39 server tests pass. gitreins guard PASS.
 
 ## [ ] SPEC-SWEEP-004: Implement benchmark runner
 - **Priority:** medium
