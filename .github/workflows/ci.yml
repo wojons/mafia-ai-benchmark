@@ -42,6 +42,7 @@ jobs:
         if: matrix.package == 'apps/server'
         run: |
           cd apps/server
+          mkdir -p data
           npx tsx src/index.ts &
           echo "SERVER_PID=$!" >> $GITHUB_ENV
           # Wait for server to be ready (up to 30s)
