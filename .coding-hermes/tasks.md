@@ -35,11 +35,11 @@
 - **AC:** All infrastructure dirs + .bak files excluded from git tracking.
 
 ## [x] CHORE-CLEANUP: Remove stale artifacts (index.ts.bak, legacy-logger.js) (completed 2026-07-15)
-- **Commit:** <pending>
+- **Commit:** 81fd5ce
 - **Resolution:** Both files removed. `src/logging/` directory (now empty) also removed. Build passes (4 tasks, all cached). All 191 tests pass (server 39, shared 150, web 2).
 
 ## [x] TODO-ANALYTICS: Decide whether to commit apps/web/src/types/analytics.ts (completed 2026-07-15)
-- **Commit:** <pending>
+- **Commit:** 81fd5ce
 - **Resolution:** analytics.ts has ZERO references in apps/web/src/ (grep confirmed). Left untracked — not committed. Per AC, excluded.
 
 ## [ ] Fix CI: wojons/mafia-ai-benchmark — run #7 — server tests ECONNREFUSED
