@@ -62,3 +62,27 @@
 - **Priority:** low
 - **Files:** apps/cli/src/commands/stats.ts, base-command.ts, list-games.ts, config.ts, run-game.ts
 - **Resolution:** All 9 TODO stubs removed. stats.ts fetchStats() → GET /api/v1/stats. list-games.ts fetchGames() → GET /api/v1/games. run-game.ts startGame() → POST /api/v1/games. base-command.ts loadConfig/saveConfig → fs read/write. config.ts setConfig/resetConfig → fs write. 0 TODOs remain. tsc --noEmit clean. gitreins guard PASS.
+
+## [ ] SPEC-SWEEP-003: Implement player model assignment persistence in game repository
+- **Priority:** medium
+- **Files:** apps/server/src/routes/index.ts:646, apps/server/src/repositories/
+- **Issue:** POST /api/v1/games/:gameId/players/:playerIndex/model receives provider/model but constructs a response object inline without persisting to the game repository. The TODO at line 646 says "Implement player model assignment in game repository."
+- **AC:** Player model assignments are persisted to the game repository. Game state reflects assigned models when queried. Endpoint validates gameId and playerIndex exist before assignment.
+
+## [ ] SPEC-SWEEP-004: Implement benchmark runner
+- **Priority:** medium
+- **Files:** apps/server/src/routes/index.ts:859, apps/server/src/benchmark/
+- **Issue:** POST /api/v1/benchmark accepts a config but returns a canned response without running any benchmarks. The TODO at line 859 says "Implement benchmark runner."
+- **AC:** POST /api/v1/benchmark starts a real benchmark run. GET /api/v1/benchmark/report and /api/v1/benchmark/export return actual data from completed runs. Benchmark results are persisted.
+
+## [ ] SERVER-TODO-001: Implement player model assignment in game repository
+- **Priority:** low
+- **Files:** apps/server/src/routes/index.ts (line 647), apps/server/src/db/repository.ts
+- **Issue:** POST /api/v1/games/:gameId/players/:playerIndex/model accepts provider/model but doesn't persist to the database. Response is hardcoded — no actual storage.
+- **AC:** Model assignments are persisted in the game repository and retrievable. POST returns saved assignment with confirmation.
+
+## [ ] SERVER-TODO-002: Implement benchmark runner
+- **Priority:** low
+- **Files:** apps/server/src/routes/index.ts (line 859)
+- **Issue:** POST /api/v1/benchmark accepts a config but doesn't actually run any games. Response is hardcoded "Benchmark started" with no real execution.
+- **AC:** POST /api/v1/benchmark creates and runs games, returns real benchmark job ID with progress tracking.
