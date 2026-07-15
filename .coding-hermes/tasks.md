@@ -57,8 +57,8 @@
 - **Files:** .gitreins/config.yaml
 - **AC:** `gitreins guard` passes locally. All 39 server tests pass.
 
-## [ ] SWEEP-002: Wire CLI commands to server — 11 TODO stubs across 5 CLI files
+## [x] SWEEP-002: Wire CLI commands to server — 11 TODO stubs across 5 CLI files (completed 2026-07-15)
+- **Commit:** e9ddf05 (+ 73473d6)
 - **Priority:** low
 - **Files:** apps/cli/src/commands/stats.ts, base-command.ts, list-games.ts, config.ts, run-game.ts
-- **Issue:** All CLI commands use simulated data via TODO stubs instead of connecting to the real server API. 10 of 11 TODOs are "TODO: Connect to server / Fetch from server / Implement".
-- **AC:** CLI commands make real HTTP requests to the server API. Stub data replaced with actual API calls.
+- **Resolution:** All 9 TODO stubs removed. stats.ts fetchStats() → GET /api/v1/stats. list-games.ts fetchGames() → GET /api/v1/games. run-game.ts startGame() → POST /api/v1/games. base-command.ts loadConfig/saveConfig → fs read/write. config.ts setConfig/resetConfig → fs write. 0 TODOs remain. tsc --noEmit clean. gitreins guard PASS.
