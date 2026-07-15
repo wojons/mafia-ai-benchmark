@@ -42,7 +42,18 @@ temp/
 Thumbs.db
 .DS_Store
 
+# Infrastructure / agent tooling
+.githooks/
+.gitreins/history/
+.vfs/
+.worktrees/
+.axiom/
+.hermes/plans/
+
 # OpenCode
 .opencode/
 .graph-harness/
 .gitreins/tasks.yaml
+
+# Stale artifacts
+*.bak
