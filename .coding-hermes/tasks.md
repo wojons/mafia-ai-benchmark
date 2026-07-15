@@ -46,4 +46,4 @@
 - **Root cause (2026-07-15):** Server API tests in `apps/server` try to connect to `localhost:3000` at test time. CI runner has no server process → ECONNREFUSED. Locally all 39 tests pass (server available). 2 test files fail on CI with 9/39 tests failing. Build workspace step passes green — only test execution fails.
 - **Fix (2026-07-15):** Added server start/mkdir/health-check/stop steps to CI workflow. Server starts from compiled `dist/index.js` after build, waits up to 30s for health endpoint, runs vitest, then kills server. `mkdir -p data` ensures SQLite DB can be created.
 - **Files:** .github/workflows/ci.yml
-- **Commit:** (pending)
+- **Commit:** 67bf1c8
