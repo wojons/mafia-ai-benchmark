@@ -47,3 +47,16 @@
 - **Fix (2026-07-15):** Added server start/mkdir/health-check/stop steps to CI workflow. Server starts from compiled `dist/index.js` after build, waits up to 30s for health endpoint, runs vitest, then kills server. `mkdir -p data` ensures SQLite DB can be created.
 - **Files:** .github/workflows/ci.yml
 - **Commit:** 67bf1c8
+
+## [ ] SWEEP-001: Fix .gitreins/config.yaml test_command — Docker required but no container
+- **Priority:** medium
+- **Root cause:** `.gitreins/config.yaml` sets `test_command: docker exec mafia-ai-benchmark-server-1 ...` but no Docker container exists locally. Causes `gitreins guard` to always fail tests. Tests pass natively via `cd apps/server && npx vitest run`.
+- **Fix:** Change test_command to run natively: `cd apps/server && npx vitest run` or auto-detect.
+- **Files:** .gitreins/config.yaml
+- **AC:** `gitreins guard` passes locally. All 39 server tests pass.
+
+## [ ] SWEEP-002: Wire CLI commands to server — 11 TODO stubs across 5 CLI files
+- **Priority:** low
+- **Files:** apps/cli/src/commands/stats.ts, base-command.ts, list-games.ts, config.ts, run-game.ts
+- **Issue:** All CLI commands use simulated data via TODO stubs instead of connecting to the real server API. 10 of 11 TODOs are "TODO: Connect to server / Fetch from server / Implement".
+- **AC:** CLI commands make real HTTP requests to the server API. Stub data replaced with actual API calls.
