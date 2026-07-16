@@ -76,8 +76,6 @@
 - **Commit:** 8f6eca1
 - **Resolution:** Parallel tick added `listRuns()` to BenchmarkRunner (line 276). Foreman discovery sweep found build failure: duplicate method at line 537. Removed duplicate. Build: 4/4 successful. Tests: 39/39 pass. Guard: PASS.
 
-## [ ] DOC-SWEEP-002: Update QUICK_START.md for monorepo structure
-- **Priority:** low
-- **Files:** QUICK_START.md
-- **Root cause:** QUICK_START.md heavily references old pre-monorepo entry points (`node game-engine.js`, `./mafia.sh`). The project migrated to a pnpm workspace with `apps/server`, `apps/cli`, `apps/web`, `packages/shared`. QUICK_START.md should document the monorepo commands: `pnpm install`, `pnpm --filter @mafia/server start`, `pnpm test`, etc.
-- **AC:** QUICK_START.md updated to reference monorepo setup commands instead of legacy `game-engine.js`/`mafia.sh`. All mentioned commands work on a fresh checkout.
+## [x] DOC-SWEEP-002: Update QUICK_START.md for monorepo structure (completed 2026-07-16)
+- **Commit:** (pending)
+- **Resolution:** Rewrote QUICK_START.md for monorepo. Replaced `cd /config/workspace/mafia` with repo clone path, `node game-engine.js` with `pnpm --filter @mafia/server dev` / `pnpm --filter @mafia/cli game:run`, `./mafia.sh` with pnpm commands. Added pnpm install step, server commands table, CLI commands table, root commands table, project structure section. Updated from "PERSONA EDITION v3" to "Monorepo Edition". Verified: `pnpm build` (4/4), `pnpm --filter @mafia/server test:run` (39/39), `pnpm --filter @mafia/shared build` (pass). gitreins guard PASS.
