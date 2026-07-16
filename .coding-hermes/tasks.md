@@ -100,10 +100,6 @@
 - **Commit:** 3680a2f (combined with DOC-SWEEP-003)
 - **Resolution:** Combined with DOC-SWEEP-003. README.md: 4 instances of 209+→191 (features line, project structure, test coverage, status). SYSTEM_STATUS.md: 31/31→191/191 with per-package breakdown (server 39, shared 150, web 2).
 
-## [ ] FIX-PATH-REGEXP: path-to-regexp override breaks Express — server won't start
-- **Priority:** CRITICAL
-- **Root cause:** `pnpm-workspace.yaml` override `path-to-regexp: ">=0.1.13"` resolves to v8.4.2, which exports `{ pathToRegexp }` (named). Express 4.22.1 uses `pathRegexp` as a default function from the 0.1.x API. Result: `TypeError: pathRegexp is not a function` — server fails to start, all CI server tests fail.
-- **Express 4.22.1 already requires `~0.1.12`** — which is the PATCHED version for GHSA-37ch-88jc-xwx2. The override is unnecessary and harmful.
-- **Fix:** Scope override to `>=0.1.12 <0.2.0` to keep within the 0.1.x API compatible line.
-- **Files:** pnpm-workspace.yaml
-- **AC:** `pnpm install` succeeds. Server starts (`pnpm --filter @mafia/server exec tsx src/index.ts` — no TypeError). All 191 tests pass. CI server tests green.
+## [x] FIX-PATH-REGEXP: path-to-regexp override breaks Express — server won't start
+- **Commit:** 91837ac
+- **Resolution:** Scoped override from `>=0.1.13` to `>=0.1.12 <0.2.0`. Express 4.22.1 already requires `~0.1.12` (patched for GHSA-37ch-88jc-xwx2). The unbound `>=0.1.13` resolved to v8.4.2 which exports `{pathToRegexp}` (named) — incompatible with Express's `pathRegexp` default-function API. Server now starts cleanly: DB init, legacy adapter, WebSocket, HTTP on :3000. All 191 tests pass. gitreins guard PASS.
