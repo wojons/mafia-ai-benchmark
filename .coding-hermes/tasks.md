@@ -67,8 +67,7 @@
 - **Commit:** b023701
 - **Resolution:** Added assignPlayerModel(), assignRoleModel(), bulkAssignModels(), getGameModelAssignments() to GameRepository. Wired 3 route handlers (POST player model, POST role model, POST bulk) to call repository methods instead of returning canned responses. Game existence validated in routes (404 if not found). tsc --noEmit clean. All 39 server tests pass. gitreins guard PASS.
 
-## [ ] SPEC-SWEEP-004: Implement benchmark runner
-- **Priority:** medium
-- **Files:** apps/server/src/routes/index.ts:859, apps/server/src/benchmark/
-- **Issue:** POST /api/v1/benchmark accepts a config but returns a canned response without running any benchmarks. The TODO at line 859 says "Implement benchmark runner."
-- **AC:** POST /api/v1/benchmark starts a real benchmark run. GET /api/v1/benchmark/report and /api/v1/benchmark/export return actual data from completed runs. Benchmark results are persisted.
+## [x] SPEC-SWEEP-004: Implement benchmark runner (completed 2026-07-16)
+- **Commit:** 44571a3
+- **Resolution:** Replaced the canned benchmark response with a real implementation. POST /api/v1/benchmark now creates 1-N games using the legacy adapter (primary) or game engine (fallback) with player model assignments. Each game is started immediately. Benchmark runs are tracked in-memory (benchmarkRuns Map) and games are persisted to the database via GameRepository. Reports and exports already read from the database via StatsCollector so they return real data. +87/-8 lines in routes/index.ts.
+- **Verification:** tsc --noEmit clean, all 191 tests pass (server 39, shared 150, web 2), gitreins guard PASS.
