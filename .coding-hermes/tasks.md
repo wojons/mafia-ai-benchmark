@@ -81,7 +81,7 @@
 - **Resolution:** Rewrote QUICK_START.md for monorepo. Replaced `cd /config/workspace/mafia` with repo clone path, `node game-engine.js` with `pnpm --filter @mafia/server dev` / `pnpm --filter @mafia/cli game:run`, `./mafia.sh` with pnpm commands. Added pnpm install step, server commands table, CLI commands table, root commands table, project structure section. Updated from "PERSONA EDITION v3" to "Monorepo Edition". Verified: `pnpm build` (4/4), `pnpm --filter @mafia/server test:run` (39/39), `pnpm --filter @mafia/shared build` (pass). gitreins guard PASS.
 
 ## [x] DOC-SWEEP-003: Fix stale legacy command references in README.md (completed 2026-07-16)
-- **Commit:** TBD
+- **Commit:** 3680a2f
 - **Resolution:** Replaced all `node game-engine.js` references with `pnpm --filter @mafia/cli game:run`. Replaced `./mafia.sh` with pnpm CLI commands. Updated Scripts Guide → Commands Guide with CLI, Server, and Root command tables. Updated Project Structure tree for monorepo (apps/server, apps/cli, apps/web, packages/shared). Removed stale "Coming Soon" entries (HTTP API, Web UI — both exist). Fixed test counts (209+→191) and notes.
 
 ## [ ] SEC — 3 HIGH vulns: ws (GHSA-96hv-2xvq-fx4p), path-to-regexp (GHSA-37ch-88jc-xwx2), socket.io-parser (GHSA-677m-j7p3-52f9)
@@ -91,5 +91,5 @@
 - **AC:** `pnpm audit --production` returns 0 HIGH vulns. ws >=8.21.0, path-to-regexp >=0.1.13, socket.io-parser >=4.2.6. `pnpm build` still passes (4/4). All 191 tests pass.
 
 ## [x] DOC — Fix stale test counts: README.md (209→191), SYSTEM_STATUS.md (31→191) (completed 2026-07-16)
-- **Commit:** TBD (combined with DOC-SWEEP-003)
+- **Commit:** 3680a2f (combined with DOC-SWEEP-003)
 - **Resolution:** Combined with DOC-SWEEP-003. README.md: 4 instances of 209+→191 (features line, project structure, test coverage, status). SYSTEM_STATUS.md: 31/31→191/191 with per-package breakdown (server 39, shared 150, web 2).
