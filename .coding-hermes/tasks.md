@@ -75,3 +75,9 @@
 ## [x] FIX-BUILD-001: Fix duplicate listRuns method — build break (completed 2026-07-16)
 - **Commit:** 8f6eca1
 - **Resolution:** Parallel tick added `listRuns()` to BenchmarkRunner (line 276). Foreman discovery sweep found build failure: duplicate method at line 537. Removed duplicate. Build: 4/4 successful. Tests: 39/39 pass. Guard: PASS.
+
+## [ ] DOC-SWEEP-002: Update QUICK_START.md for monorepo structure
+- **Priority:** low
+- **Files:** QUICK_START.md
+- **Root cause:** QUICK_START.md heavily references old pre-monorepo entry points (`node game-engine.js`, `./mafia.sh`). The project migrated to a pnpm workspace with `apps/server`, `apps/cli`, `apps/web`, `packages/shared`. QUICK_START.md should document the monorepo commands: `pnpm install`, `pnpm --filter @mafia/server start`, `pnpm test`, etc.
+- **AC:** QUICK_START.md updated to reference monorepo setup commands instead of legacy `game-engine.js`/`mafia.sh`. All mentioned commands work on a fresh checkout.

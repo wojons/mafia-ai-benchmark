@@ -13,7 +13,7 @@ An advanced AI-powered Mafia game simulation that benchmarks different AI models
 - **☀️ Day Phase**: Discussion, voting, lynching
 - **📊 Event Sourcing**: Complete game audit trail with visibility levels
 - **💰 Cost Tracking**: Track API costs per game and player
-- **🧪 409+ Tests**: Comprehensive test coverage
+- **🧪 209+ Tests**: Comprehensive test coverage
 
 ## 🚀 Quick Start
 
@@ -38,7 +38,7 @@ node game-engine.js
 ### What You'll See
 
 ```
-🎮 Mafia AI Benchmark - PERSONA EDITION v3
+🎮 Mafia AI Benchmark - Monorepo Edition
 🔒 Generating personas...
   😈 Vincent Marino (MAFIA) - Traits: analytical, reserved, meticulous
   😈 Francesco 'Frankie' Moretti (MAFIA) - Traits: empathetic, determined
@@ -245,7 +245,7 @@ mafia-ai-benchmark/
 │   ├── roles/                       ✅ Role definitions
 │   ├── events/                      ✅ Event definitions
 │   ├── providers/                   ✅ AI provider configs
-│   └── __tests__/                   ✅ 409+ tests
+│   └── __tests__/                   ✅ 209+ tests
 ├── specs/                           ✅ Technical specs
 │   ├── correct-night-flow.md
 │   ├── persona-system.md
@@ -263,7 +263,7 @@ cd packages/shared
 npm test
 ```
 
-**Test Coverage**: 409+ passing tests (FSM, Roles, Providers, Personas, Events, Types, Integration)
+**Test Coverage**: 209+ passing tests (FSM, Roles, Providers, Personas, Events, Types, Integration)
 
 ### Game Events
 
@@ -347,7 +347,7 @@ MIT License - see LICENSE file
 
 ---
 
-**Status**: ✅ Production Ready | ✅ Fully Documented | ✅ 409+ Tests Passing
+**Status**: ✅ Production Ready | ✅ Fully Documented | ✅ 209+ Tests Passing
 
 **Quick Start**: See [QUICK_START.md](QUICK_START.md) for 5-minute setup guide!
 
