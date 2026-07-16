@@ -6,7 +6,7 @@
 
 | Category | Feature | Status | Tests |
 |----------|---------|--------|-------|
-| **HTTP API** | All REST endpoints | ✅ Working | 31/31 ✅ |
+| **HTTP API** | All REST endpoints | ✅ Working | 191/191 ✅ |
 | **CLI** | All 15 commands | ✅ Working | ✅ Manual tests pass |
 | **Game Management** | Create, start, stop, add players | ✅ Working | ✅ Integration tests |
 | **Model Configuration** | Player & role model settings | ✅ Working | ✅ |
