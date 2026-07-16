@@ -34,21 +34,22 @@
 #### Via CLI
 ```bash
 # Start server (if not running)
-node apps/server/src/index.js &
+pnpm --filter @mafia/server dev &
 
-# Create game
-node cli.js games create --players 5
+# Configure benchmark
+pnpm --filter @mafia/cli exec tsx src/index.ts -- benchmark --help
 
-# Add players
-node cli.js games add-player <game-id> --name Alice --role MAFIA
-node cli.js games add-player <game-id> --name Bob --role DOCTOR
-node cli.js games add-player <game-id> --name Charlie --Role SHERIFF
+# Run a game with AI agents
+pnpm --filter @mafia/cli exec tsx src/index.ts -- run-game --players 5
 
-# Start game (runs in demo mode with simulated phases)
-node cli.js games start <game-id>
+# Watch a game in real-time
+pnpm --filter @mafia/cli exec tsx src/index.ts -- watch-game <game-id>
 
-# Watch server logs for game events
-# The server will broadcast SSE events with phase changes
+# List recent and active games
+pnpm --filter @mafia/cli exec tsx src/index.ts -- list-games
+
+# Display game and model statistics
+pnpm --filter @mafia/cli exec tsx src/index.ts -- stats
 ```
 
 #### Via HTTP
@@ -76,18 +77,18 @@ curl -N http://localhost:3000/api/v1/games/<id>/events
 ### 🏗️ Architecture
 
 ```
-Project Root: /config/workspace/mafia (git repo root)
+Project Root: mafia-ai-benchmark (pnpm monorepo)
 
-CLI (cli.js) ⇄ REST API ⇄ Server (apps/server/src/index.js)
+CLI (mafiactl) ⇄ REST API ⇄ Server (apps/server)
                     ⇄ SSE Streaming
                     ↓
-            Demo Mode ✓
-            (Simulated game phases until AI engine connected)
+            Express API with SQLite storage
+            (Benchmark runner, game engine, legacy adapter)
 
-Portable Paths:
-├── Import Maps: #game-engine → ./game-engine.js
-├── Fallback: Auto-detect .git directory
-└── Result: Works from any directory depth/location ✅
+Build System:
+├── pnpm workspace: packages/shared, apps/server, apps/cli, apps/web
+├── Turbo: 4 build tasks, parallel + cached
+└── TypeScript: path aliases (@mafia/shared/*)
 ```
 
 ---
