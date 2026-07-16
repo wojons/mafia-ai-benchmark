@@ -6,6 +6,8 @@ overrides:
   path-to-regexp: ">=0.1.12 <0.2.0"
   socket.io-parser: ">=4.2.6"
   ws: ">=8.21.0"
+  qs: ">=6.15.2"
+  uuid: ">=11.1.1"
 
 allowBuilds:
   better-sqlite3: true
