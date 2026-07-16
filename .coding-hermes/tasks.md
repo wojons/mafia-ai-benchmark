@@ -77,5 +77,5 @@
 - **Resolution:** Parallel tick added `listRuns()` to BenchmarkRunner (line 276). Foreman discovery sweep found build failure: duplicate method at line 537. Removed duplicate. Build: 4/4 successful. Tests: 39/39 pass. Guard: PASS.
 
 ## [x] DOC-SWEEP-002: Update QUICK_START.md for monorepo structure (completed 2026-07-16)
-- **Commit:** (pending)
+- **Commit:** d354915
 - **Resolution:** Rewrote QUICK_START.md for monorepo. Replaced `cd /config/workspace/mafia` with repo clone path, `node game-engine.js` with `pnpm --filter @mafia/server dev` / `pnpm --filter @mafia/cli game:run`, `./mafia.sh` with pnpm commands. Added pnpm install step, server commands table, CLI commands table, root commands table, project structure section. Updated from "PERSONA EDITION v3" to "Monorepo Edition". Verified: `pnpm build` (4/4), `pnpm --filter @mafia/server test:run` (39/39), `pnpm --filter @mafia/shared build` (pass). gitreins guard PASS.
