@@ -1,82 +1,87 @@
-# 🚀 Mafia AI Benchmark — Quick Start Guide
+# 🚀 Mafia AI Benchmark - Quick Start Guide
 
 Get up and running in 5 minutes!
 
 ## Prerequisites
 
-- **Node.js** v18 or higher
-- **pnpm** (install via `npm install -g pnpm`)
+- **Node.js** v20 or higher
+- **pnpm** (install with `npm install -g pnpm`)
 - **OpenRouter API Key** (free at https://openrouter.ai/keys)
 
-## Step 1: Clone & Install
-
-```bash
-git clone https://github.com/wojons/mafia-ai-benchmark.git
-cd mafia-ai-benchmark
-pnpm install
-```
-
-## Step 2: Get an API Key
+## Step 1: Get an API Key
 
 1. Go to https://openrouter.ai/keys
 2. Create a free account
 3. Copy your API key (starts with `sk-or-v1-`)
 
-## Step 3: Configure the API Key
+## Step 2: Install and Configure
 
 ```bash
-# Create a .env file in the repo root
+# Clone the repo
+git clone https://github.com/wojons/mafia-ai-benchmark.git
+cd mafia-ai-benchmark
+
+# Install dependencies (all workspaces)
+pnpm install
+
+# Set your API key
 echo 'OPENAI_API_KEY=sk-or-v1-YOUR-ACTUAL-KEY-HERE' > .env
 ```
 
-## Step 4: Build & Start the Server
+## Step 3: Run Your First Game
+
+The project is a **pnpm monorepo** with three apps:
+- `apps/server` — REST API + WebSocket game server
+- `apps/cli` — `mafiactl` command-line interface
+- `apps/web` — React visualization dashboard
+
+### Option A: Quick Demo via API (fastest)
 
 ```bash
-# Build all packages (shared, server, cli, web)
-pnpm build
+# Start the server (in one terminal)
+pnpm run server
 
-# Start the server (port 3000)
-pnpm --filter @mafia/server dev
+# Create and run a game (in another terminal)
+pnpm --filter @mafia/cli dev -- run-game --players 5
 ```
 
-The server starts on `http://localhost:3000`. Health check: `curl http://localhost:3000/health`
-
-## Step 5: Run Your First Game
-
-### Option A: Quick Demo (5 players, fastest)
+### Option B: Interactive CLI
 
 ```bash
-pnpm --filter @mafia/cli game:run
+# Explore all commands
+pnpm --filter @mafia/cli dev -- help
+
+# Run a 10-player game
+pnpm --filter @mafia/cli dev -- run-game --players 10
 ```
 
-### Option B: Run a Benchmark
+### Option C: Web Dashboard
 
 ```bash
-# POST a benchmark run via the API
-curl -X POST http://localhost:3000/api/v1/benchmark \
-  -H 'Content-Type: application/json' \
-  -d '{"gameCount": 1, "playerCount": 5, "modelName": "openai/gpt-4o-mini"}'
+# Start the server
+pnpm run server
 
-# Check results
-curl http://localhost:3000/api/v1/benchmark
+# Start the web UI (on port 5174)
+pnpm run web
 ```
 
-### Option C: Use the CLI
+Open http://localhost:5174 to watch games in real time.
+
+### Option D: Run Benchmark Suite
 
 ```bash
-# Interactive CLI
-pnpm --filter @mafia/cli dev
+# Start the server
+pnpm run server
 
-# Or via the built binary
-pnpm --filter @mafia/cli build
-node apps/cli/dist/index.js
+# Run automated benchmarks
+pnpm --filter @mafia/cli dev -- benchmark --games 10 --players 5
 ```
 
 ## What You'll See
 
 The game will:
 
-1. **Generate Personas** — Each player gets a unique name and personality:
+1. **Generate Personas** - Each player gets a unique name and personality:
 
    ```
    🔒 Generating personas from seeds...
@@ -91,7 +96,7 @@ The game will:
          Flaw: Vincent struggles with trusting others...
    ```
 
-2. **Play Night Phase** — Mafia discuss and reach consensus:
+2. **Play Night Phase** - Mafia discuss and reach consensus:
 
    ```
    😈 STEP 1: MAFIA TEAM CHAT
@@ -100,7 +105,7 @@ The game will:
       to target someone who's a real threat to our plans..."
    ```
 
-3. **Play Day Phase** — All players discuss and vote:
+3. **Play Day Phase** - All players discuss and vote:
 
    ```
    ☀️ DAY 1 - Discussion & Voting
@@ -109,64 +114,83 @@ The game will:
      "I noticed something interesting during the discussion..."
    ```
 
-4. **Determine Winner** — Mafia or Town wins!
+4. **Determine Winner** - Mafia or Town wins!
 
 ## Available Commands
 
-### Server
+### Workspace Commands (from project root)
 
-| Command | Description |
-| ------- | ----------- |
-| `pnpm --filter @mafia/server dev` | Start dev server (hot reload) |
-| `pnpm --filter @mafia/server start` | Start built server |
-| `pnpm --filter @mafia/server build` | Compile TypeScript |
-| `pnpm --filter @mafia/server test:run` | Run server tests |
-| `pnpm --filter @mafia/server db:migrate` | Run DB migrations |
+| Command                                    | Description                    |
+| ------------------------------------------ | ------------------------------ |
+| `pnpm install`                             | Install all dependencies       |
+| `pnpm run server`                          | Start the game server          |
+| `pnpm run web`                             | Start the web dashboard        |
+| `pnpm test`                                | Run all tests                  |
+| `pnpm run build`                           | Build all workspaces           |
 
-### CLI
+### CLI Commands (mafiactl)
 
-| Command | Description |
-| ------- | ----------- |
-| `pnpm --filter @mafia/cli dev` | Start interactive CLI (dev mode) |
-| `pnpm --filter @mafia/cli game:run` | Run a game |
-| `pnpm --filter @mafia/cli game:watch` | Watch a running game |
+| Command                                                       | Description                    |
+| ------------------------------------------------------------- | ------------------------------ |
+| `pnpm --filter @mafia/cli dev -- run-game --players 5`        | Run a game with 5 players      |
+| `pnpm --filter @mafia/cli dev -- run-game --players 10`       | Run a game with 10 players     |
+| `pnpm --filter @mafia/cli dev -- benchmark --games 10`        | Run 10 benchmark games         |
+| `pnpm --filter @mafia/cli dev -- list-games`                  | List recent and active games   |
+| `pnpm --filter @mafia/cli dev -- stats`                       | View game and model statistics |
+| `pnpm --filter @mafia/cli dev -- watch-game <game-id>`        | Watch a game in real time      |
+| `pnpm --filter @mafia/cli dev -- help`                        | Show all commands              |
 
-### Root (all packages)
+### Server API Endpoints
 
-| Command | Description |
-| ------- | ----------- |
-| `pnpm build` | Build all packages |
-| `pnpm test` | Run all tests |
-| `pnpm lint` | Lint all packages |
-| `pnpm format` | Format all code |
+| Endpoint                 | Method | Description        |
+| ------------------------ | ------ | ------------------ |
+| `/api/v1/games`          | GET    | List games         |
+| `/api/v1/games`          | POST   | Create a new game  |
+| `/api/v1/games/:id`      | GET    | Get game details   |
+| `/api/v1/games/:id/run`  | POST   | Start a game       |
+| `/api/v1/benchmark`      | POST   | Run benchmarks     |
+| `/api/v1/stats`          | GET    | View statistics    |
 
 ## Configuration Options
 
-### Environment Variables (`.env`)
+### Environment Variables
 
-```env
-OPENAI_API_KEY=sk-or-v1-your-key-here  # Required: OpenRouter API key
-PORT=3000                               # Optional: server port (default 3000)
-```
-
-### CLI Configuration
+Create a `.env` file in the project root:
 
 ```bash
-# View current settings
-pnpm --filter @mafia/cli dev -- config show
+# Required
+OPENAI_API_KEY=sk-or-v1-your-key-here
 
-# Configure player count
-pnpm --filter @mafia/cli dev -- config --players 8 --mafia 2
+# Optional
+PORT=3000                # Server port (default: 3000)
+DATABASE_PATH=./data/games.db  # SQLite path
+LOG_LEVEL=info           # debug, info, warn, error
+```
+
+### Game Settings
+
+Configure games via the CLI:
+
+```bash
+# Set player count
+pnpm --filter @mafia/cli dev -- config set players 8
+
+# Set mafia count
+pnpm --filter @mafia/cli dev -- config set mafia 2
+
+# View current config
+pnpm --filter @mafia/cli dev -- config show
 ```
 
 ### Models
 
-Set via the `modelName` field in benchmark POST:
+Set the model in your `.env` file:
 
-```json
-"openai/gpt-4o-mini"          // Fast & cheap (default)
-"openai/gpt-4o"               // More capable
-"anthropic/claude-3-haiku"   // Anthropic
+```bash
+# Default model for all players
+OPENAI_MODEL=openai/gpt-4o-mini       # Fast & cheap (default)
+# OPENAI_MODEL=openai/gpt-4o          # More capable
+# OPENAI_MODEL=anthropic/claude-3-haiku  # Anthropic
 ```
 
 ## How the Game Works
@@ -203,7 +227,7 @@ Set via the `modelName` field in benchmark POST:
 ## Example Output
 
 ```
-🎮 Mafia AI Benchmark — Monorepo Edition
+🎮 Mafia AI Benchmark - Monorepo Edition
 ======================================================================
 🌙 NIGHT 1
 😈 Mafia: Vincent Marino, Francesco 'Frankie' Moretti, Vincent 'Vince' Moretti
@@ -232,55 +256,52 @@ Set via the `modelName` field in benchmark POST:
 ```bash
 # Check your key is set
 cat .env | grep OPENAI_API_KEY
+
+# Ensure the .env file is in the project root (where package.json lives)
+ls -la .env
 ```
 
 ### "Cannot find module" errors
 
 ```bash
-# Reinstall dependencies
+# Install all workspace dependencies
 pnpm install
 ```
 
-### Build fails
+### Server won't start
 
 ```bash
-# Clean and rebuild
-pnpm build
+# Make sure nothing is using port 3000
+lsof -i :3000
+
+# Build the server first if you've made changes
+pnpm run server:build
+pnpm run server
 ```
 
-### Server not starting (port 3000 in use)
+### CLI commands not working
 
 ```bash
-# Check what's using port 3000
-lsof -i :3000
-# Or set a different port
-PORT=3001 pnpm --filter @mafia/server dev
+# Make sure dependencies are installed
+pnpm install
+
+# Build the CLI first
+pnpm --filter @mafia/cli build
+
+# Then run commands
+pnpm --filter @mafia/cli dev -- help
 ```
 
 ### Game runs but no real LLM calls
 
-Make sure your API key is valid and has credits on OpenRouter.
-
-## Project Structure
-
-```
-mafia-ai-benchmark/
-├── apps/
-│   ├── server/     # Express REST API + WebSocket game engine (port 3000)
-│   ├── cli/        # mafiactl CLI for running games & benchmarks
-│   └── web/        # React/Vite frontend dashboard
-├── packages/
-│   └── shared/     # Shared types, constants, validation (Zod schemas)
-├── pnpm-workspace.yaml
-├── turbo.json
-└── package.json    # Root workspace config with pnpm scripts
-```
+Make sure your API key is valid and has credits on https://openrouter.ai.
 
 ## Next Steps
 
 - Read [CONFIG_GUIDE.md](CONFIG_GUIDE.md) for full configuration options
 - Read [specs/persona-system.md](specs/persona-system.md) for persona details
 - Check [QUICK_REFERENCE.md](QUICK_REFERENCE.md) for command cheat sheet
+- Explore the [README.md](README.md) for project architecture overview
 
 ## Need Help?
 
