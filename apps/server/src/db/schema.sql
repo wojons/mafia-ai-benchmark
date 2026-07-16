@@ -163,6 +163,40 @@ CREATE TABLE IF NOT EXISTS model_matchups (
   UNIQUE(model_a_provider, model_a, model_b_provider, model_b)
 );
 
+-- Benchmark runs (for tracking benchmark execution)
+CREATE TABLE IF NOT EXISTS benchmark_runs (
+  id TEXT PRIMARY KEY,
+  config TEXT NOT NULL,
+  status TEXT NOT NULL DEFAULT 'QUEUED',
+  created_at INTEGER NOT NULL DEFAULT (unixepoch()),
+  completed_at INTEGER,
+  updated_at INTEGER NOT NULL DEFAULT (unixepoch()),
+  summary TEXT,
+  error TEXT
+);
+
+-- Benchmark games (per-game tracking within a benchmark run)
+CREATE TABLE IF NOT EXISTS benchmark_games (
+  game_id TEXT PRIMARY KEY,
+  run_id TEXT NOT NULL,
+  pairing_id TEXT NOT NULL,
+  model_a TEXT NOT NULL,
+  model_b TEXT NOT NULL,
+  seed INTEGER NOT NULL,
+  model_a_role TEXT NOT NULL,
+  model_b_role TEXT NOT NULL,
+  winner TEXT,
+  team_winner TEXT,
+  completed_at INTEGER,
+  error TEXT,
+  valid INTEGER NOT NULL DEFAULT 1,
+  FOREIGN KEY (game_id) REFERENCES games(id) ON DELETE CASCADE,
+  FOREIGN KEY (run_id) REFERENCES benchmark_runs(id) ON DELETE CASCADE
+);
+
+CREATE INDEX IF NOT EXISTS idx_benchmark_games_run ON benchmark_games(run_id);
+CREATE INDEX IF NOT EXISTS idx_benchmark_runs_status ON benchmark_runs(status);
+
 -- Benchmark reports
 CREATE TABLE IF NOT EXISTS benchmark_reports (
   id TEXT PRIMARY KEY,
@@ -255,6 +289,34 @@ CREATE TABLE IF NOT EXISTS game_snapshots (
   FOREIGN KEY (game_id) REFERENCES games(id) ON DELETE CASCADE
 );
 
+-- Benchmark runs — persisted by BenchmarkRunner service.
+CREATE TABLE IF NOT EXISTS benchmark_runs (
+  id TEXT PRIMARY KEY,
+  config TEXT NOT NULL,
+  status TEXT NOT NULL DEFAULT 'QUEUED',
+  created_at INTEGER NOT NULL,
+  completed_at INTEGER,
+  updated_at INTEGER NOT NULL,
+  summary TEXT,
+  error TEXT
+);
+
+CREATE TABLE IF NOT EXISTS benchmark_games (
+  game_id TEXT PRIMARY KEY,
+  run_id TEXT NOT NULL REFERENCES benchmark_runs(id),
+  pairing_id TEXT NOT NULL,
+  model_a TEXT NOT NULL,
+  model_b TEXT NOT NULL,
+  seed INTEGER NOT NULL DEFAULT 0,
+  model_a_role TEXT NOT NULL DEFAULT 'VILLAGER',
+  model_b_role TEXT NOT NULL DEFAULT 'VILLAGER',
+  winner TEXT,
+  team_winner TEXT,
+  completed_at INTEGER,
+  error TEXT,
+  valid INTEGER NOT NULL DEFAULT 1
+);
+
 -- Create indexes for performance
 CREATE INDEX IF NOT EXISTS idx_games_status ON games(status);
 CREATE INDEX IF NOT EXISTS idx_games_created ON games(created_at);
@@ -266,6 +328,8 @@ CREATE INDEX IF NOT EXISTS idx_token_usage_game ON token_usage(game_id);
 CREATE INDEX IF NOT EXISTS idx_api_calls_game ON api_calls(game_id);
 CREATE INDEX IF NOT EXISTS idx_model_stats ON model_aggregate_stats(provider, model);
 CREATE INDEX IF NOT EXISTS idx_agent_sessions_player ON agent_sessions(player_id);
+CREATE INDEX IF NOT EXISTS idx_benchmark_games_run ON benchmark_games(run_id);
+CREATE INDEX IF NOT EXISTS idx_benchmark_runs_status ON benchmark_runs(status);
 
 -- Triggers for updating timestamps
 CREATE TRIGGER IF NOT EXISTS update_agent_configs_timestamp 
