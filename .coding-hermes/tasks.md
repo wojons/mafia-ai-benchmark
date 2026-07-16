@@ -84,11 +84,9 @@
 - **Commit:** 3680a2f
 - **Resolution:** Replaced all `node game-engine.js` references with `pnpm --filter @mafia/cli game:run`. Replaced `./mafia.sh` with pnpm CLI commands. Updated Scripts Guide → Commands Guide with CLI, Server, and Root command tables. Updated Project Structure tree for monorepo (apps/server, apps/cli, apps/web, packages/shared). Removed stale "Coming Soon" entries (HTTP API, Web UI — both exist). Fixed test counts (209+→191) and notes.
 
-## [ ] SEC — 3 HIGH vulns: ws (GHSA-96hv-2xvq-fx4p), path-to-regexp (GHSA-37ch-88jc-xwx2), socket.io-parser (GHSA-677m-j7p3-52f9)
-- **Priority:** HIGH
-- **Files:** pnpm-lock.yaml, apps/server/package.json, apps/web/package.json, apps/cli/package.json
-- **Root cause:** pnpm audit reports 8 vulnerabilities (3 HIGH, 4 moderate, 1 low). HIGH: ws 8.18.3 < 8.21.0 (Memory exhaustion DoS, affects server+cli+web), path-to-regexp 0.1.12 < 0.1.13 (ReDoS, transitive via express in server), socket.io-parser 4.2.5 < 4.2.6 (unbounded binary attachments DoS, transitive via socket.io-client in web). MODERATE: qs (3), uuid (1) are lower priority.
-- **AC:** `pnpm audit --production` returns 0 HIGH vulns. ws >=8.21.0, path-to-regexp >=0.1.13, socket.io-parser >=4.2.6. `pnpm build` still passes (4/4). All 191 tests pass.
+## [x] SEC — 3 HIGH vulns: ws (GHSA-96hv-2xvq-fx4p), path-to-regexp (GHSA-37ch-88jc-xwx2), socket.io-parser (GHSA-677m-j7p3-52f9)
+- **Commit:** 993ca22
+- **Resolution:** ws bumped from ^8.16.0 to ^8.21.0 in cli/server package.json. path-to-regexp >=0.1.13 and socket.io-parser >=4.2.6 enforced via pnpm-workspace.yaml overrides. pnpm audit --production: 0 HIGH (was 3), 3 moderate + 1 low remain. Build 4/4, tests 191/191.
 
 ## [x] DOC — Fix stale test counts: README.md (209→191), SYSTEM_STATUS.md (31→191) (completed 2026-07-16)
 - **Commit:** 3680a2f (combined with DOC-SWEEP-003)
