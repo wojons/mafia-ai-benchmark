@@ -48,12 +48,11 @@ jobs:
           cd ${{ matrix.package }}
           echo "CWD after cd: $(pwd)"
 
-          # For apps/server: start server in background (from pre-built dist/), wait, run tests, cleanup
+          # For apps/server: start server in background (via tsx from source), wait, run tests, cleanup
           if [ "${{ matrix.package }}" = "apps/server" ]; then
             mkdir -p data
-            echo "Starting compiled server..."
-            ls -la dist/apps/server/src/index.js 2>&1 || echo "dist not found!"
-            node dist/apps/server/src/index.js > server-ci.log 2>&1 &
+            echo "Starting server via pnpm exec tsx..."
+            pnpm exec tsx src/index.ts > server-ci.log 2>&1 &
             SERVER_PID=$!
             echo "Server PID: $SERVER_PID"
 
