@@ -38,28 +38,47 @@ jobs:
       - name: Build workspace
         run: pnpm run build
 
-      - name: Start server (apps/server only)
-        if: matrix.package == 'apps/server'
-        run: |
-          cd apps/server
-          mkdir -p data
-          npx tsx src/index.ts &
-          echo "SERVER_PID=$!" >> $GITHUB_ENV
-          # Wait for server to be ready (up to 30s)
-          for i in $(seq 1 30); do
-            if curl -s http://localhost:3000/health > /dev/null 2>&1; then
-              echo "Server ready after ${i}s"
-              break
-            fi
-            sleep 1
-          done
-
       - name: Run tests (${{ matrix.package }})
-        run: cd ${{ matrix.package }} && npx vitest run
+        run: |
+          cd ${{ matrix.package }}
 
-      - name: Stop server (apps/server only)
-        if: matrix.package == 'apps/server' && env.SERVER_PID != ''
-        run: kill $SERVER_PID 2>/dev/null || true
+          # For apps/server: start server in background, wait for health, run tests, cleanup
+          if [ "${{ matrix.package }}" = "apps/server" ]; then
+            mkdir -p data
+            nohup npx tsx src/index.ts > server-ci.log 2>&1 &
+            SERVER_PID=$!
+            echo "Server PID: $SERVER_PID"
+
+            # Wait for server to be ready (up to 60s)
+            SERVER_READY=false
+            for i in $(seq 1 60); do
+              if curl -s http://localhost:3000/health > /dev/null 2>&1; then
+                echo "Server ready after ${i}s"
+                SERVER_READY=true
+                break
+              fi
+              sleep 1
+            done
+
+            if [ "$SERVER_READY" != "true" ]; then
+              echo "ERROR: Server failed to start within 60s"
+              kill $SERVER_PID 2>/dev/null || true
+              cat server-ci.log 2>/dev/null
+              exit 1
+            fi
+          fi
+
+          # Run tests
+          npx vitest run
+          TEST_EXIT=$?
+
+          # Cleanup: kill server if we started one
+          if [ "${{ matrix.package }}" = "apps/server" ]; then
+            kill $SERVER_PID 2>/dev/null || true
+            wait $SERVER_PID 2>/dev/null || true
+          fi
+
+          exit $TEST_EXIT
 
   lint:
     runs-on: ubuntu-latest
