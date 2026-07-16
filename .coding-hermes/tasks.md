@@ -88,6 +88,12 @@
 - **Commit:** 993ca22
 - **Resolution:** ws bumped from ^8.16.0 to ^8.21.0 in cli/server package.json. path-to-regexp >=0.1.13 and socket.io-parser >=4.2.6 enforced via pnpm-workspace.yaml overrides. pnpm audit --production: 0 HIGH (was 3), 3 moderate + 1 low remain. Build 4/4, tests 191/191.
 
+## [ ] CI-SERVER-002: Fix apps/server API tests ECONNREFUSED on CI runner — fix from CI-SWEEP-001 is incomplete
+>- **Priority:** HIGH
+>- **Root cause:** CI run #29525334881 (commit 993ca22) still fails with 9/39 tests ECONNREFUSED on localhost:3000. The server start step from 67bf1c8 exists in the workflow but doesn't fully resolve the issue — 2 test files (api.test.ts, routes.test.ts) fail while health.test.ts passes. Server health endpoint responds, but API tests can't connect. Likely a timing issue: server needs >30s to fully initialize, or npx tsx starts the server asynchronously and the health check passes before all routes are registered.
+>- **Files:** .github/workflows/ci.yml
+>- **AC:** CI server job passes (39/39 tests). Apps/server build-and-test CI job is green.
+
 ## [x] DOC — Fix stale test counts: README.md (209→191), SYSTEM_STATUS.md (31→191) (completed 2026-07-16)
 - **Commit:** 3680a2f (combined with DOC-SWEEP-003)
 - **Resolution:** Combined with DOC-SWEEP-003. README.md: 4 instances of 209+→191 (features line, project structure, test coverage, status). SYSTEM_STATUS.md: 31/31→191/191 with per-package breakdown (server 39, shared 150, web 2).
