@@ -40,11 +40,19 @@ jobs:
 
       - name: Run tests (${{ matrix.package }})
         run: |
+          echo "=== Matrix package: ${{ matrix.package }} ==="
+          echo "PWD: $(pwd)"
+          echo "Node: $(node --version)"
+          echo "pnpm: $(pnpm --version)"
+
           cd ${{ matrix.package }}
+          echo "CWD after cd: $(pwd)"
 
           # For apps/server: start server in background (from pre-built dist/), wait, run tests, cleanup
           if [ "${{ matrix.package }}" = "apps/server" ]; then
             mkdir -p data
+            echo "Starting compiled server..."
+            ls -la dist/apps/server/src/index.js 2>&1 || echo "dist not found!"
             node dist/apps/server/src/index.js > server-ci.log 2>&1 &
             SERVER_PID=$!
             echo "Server PID: $SERVER_PID"
@@ -63,19 +71,25 @@ jobs:
             if [ "$SERVER_READY" != "true" ]; then
               echo "ERROR: Server failed to start within 60s"
               kill $SERVER_PID 2>/dev/null || true
-              cat server-ci.log 2>/dev/null
+              echo "=== Server log ==="
+              cat server-ci.log 2>/dev/null || echo "(no log)"
+              echo "=== Process list ==="
+              ps aux | grep node | head -5 || true
               exit 1
             fi
           fi
 
           # Run tests
+          echo "Running vitest..."
           npx vitest run
           TEST_EXIT=$?
+          echo "vitest exit code: $TEST_EXIT"
 
           # Cleanup: kill server if we started one
           if [ "${{ matrix.package }}" = "apps/server" ]; then
             kill $SERVER_PID 2>/dev/null || true
             wait $SERVER_PID 2>/dev/null || true
+            echo "Server cleaned up"
           fi
 
           exit $TEST_EXIT
