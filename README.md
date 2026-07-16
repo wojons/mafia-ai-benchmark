@@ -13,7 +13,7 @@ An advanced AI-powered Mafia game simulation that benchmarks different AI models
 - **☀️ Day Phase**: Discussion, voting, lynching
 - **📊 Event Sourcing**: Complete game audit trail with visibility levels
 - **💰 Cost Tracking**: Track API costs per game and player
-- **🧪 209+ Tests**: Comprehensive test coverage
+- **🧪 191 Tests**: Comprehensive test coverage
 
 ## 🚀 Quick Start
 
@@ -24,15 +24,21 @@ An advanced AI-powered Mafia game simulation that benchmarks different AI models
 ```bash
 cd mafia-ai-benchmark
 
-# 1. Add your API key to .env (required!)
+# 1. Install dependencies
+pnpm install
+
+# 2. Add your API key to .env (required!)
 nano .env
 # OPENAI_API_KEY=sk-or-v1-YOUR-KEY-HERE
 
-# 2. Run a demo game
-node game-engine.js
+# 3. Build all packages
+pnpm build
 
-# OR use the bash wrapper
-./mafia.sh demo
+# 4. Start the server
+pnpm --filter @mafia/server dev
+
+# 5. In another terminal, run a benchmark
+pnpm --filter @mafia/cli benchmark
 ```
 
 ### What You'll See
@@ -135,8 +141,8 @@ Full control over every aspect of the game:
 **Example:**
 
 ```bash
-./mafia.sh config --players 10 --mafia 3 --mafia-msg-per 4 --town-msg-per 3 --day-rounds 2
-./mafia.sh new
+pnpm --filter @mafia/cli config --players 10 --mafia 3 --mafia-msg-per 4 --town-msg-per 3 --day-rounds 2
+pnpm --filter @mafia/cli game:run
 ```
 
 See **[CONFIG_GUIDE.md](CONFIG_GUIDE.md)** for complete documentation.
@@ -159,62 +165,34 @@ See **[CONFIG_GUIDE.md](CONFIG_GUIDE.md)** for complete documentation.
 
 See **[specs/correct-night-flow.md](specs/correct-night-flow.md)** for complete specification.
 
-## 📁 Scripts Guide
+## 📁 Commands Guide
 
-### Main Scripts (Use These)
+### CLI Commands (via `mafiactl`)
 
-| Script                          | Purpose              | When to Use            |
-| ------------------------------- | -------------------- | ---------------------- |
-| `node game-engine.js`           | **Main game engine** | Running complete games |
-| `./mafia.sh`                    | **CLI wrapper**      | Configuration, demos   |
-| `./mafia.sh demo`               | Run one-off demo     | Quick test             |
-| `./mafia.sh config --show`      | View settings        | Check current config   |
-| `./mafia.sh config --players 8` | Configure            | Customize game         |
+| Command | Purpose | When to Use |
+| --- | --- | --- |
+| `pnpm --filter @mafia/cli game:run` | **Run a game** | Playing Mafia with AI agents |
+| `pnpm --filter @mafia/cli benchmark` | **Run benchmark** | Automated model evaluation |
+| `pnpm --filter @mafia/cli stats` | **View stats** | Game and model statistics |
+| `pnpm --filter @mafia/cli list-games` | **List games** | Browse recent games |
+| `pnpm --filter @mafia/cli config show` | **View config** | Check current settings |
+| `pnpm --filter @mafia/cli config set` | **Configure** | Customize game params |
 
-### Quick Commands
+### Server Commands
 
-```bash
-# Run game directly
-node game-engine.js
+| Command | Purpose | When to Use |
+| --- | --- | --- |
+| `pnpm --filter @mafia/server dev` | **Start server** | Run REST API + WebSocket |
+| `pnpm --filter @mafia/server test:run` | **Run tests** | Verify server tests (39) |
 
-# Run with options
-node game-engine.js --players 8
-
-# Run demo
-./mafia.sh demo
-
-# Configure and create
-./mafia.sh config --players 8 --mafia 2
-./mafia.sh new
-```
-
-### Configuration Commands
+### Root Commands
 
 ```bash
-# View current settings
-./mafia.sh config --show
-
-# Interactive menu
-./mafia.sh config --menu
-
-# Set specific options
-./mafia.sh config --mafia 3
-./mafia.sh config --mafia-msg-per 4 --town-msg-per 3
-
-# Reset to defaults
-./mafia.sh config --reset
-```
-
-### Direct Node Scripts
-
-```bash
-# Run complete game
-node demo-game-correct-flow-v2.js
-
-# Game management
-node game-manager.js new 10
-node game-manager.js list
-node game-manager.js delete [gameId]
+pnpm install              # Install all dependencies
+pnpm build                # Build all packages (4/4)
+pnpm --filter @mafia/server test:run    # Server tests (39)
+pnpm --filter @mafia/shared test:run    # Shared tests (150)
+pnpm --filter @mafia/web test:run       # Web tests (2)
 ```
 
 ## 🎭 Roles
@@ -233,37 +211,34 @@ node game-manager.js delete [gameId]
 
 ```
 mafia-ai-benchmark/
-├── game-engine.js              ✅ Main game engine (runs games)
-├── mafia.sh                    ✅ CLI wrapper script
-├── cli.js                      ✅ CLI utilities
-├── .env                        ✅ API keys (create from .env.sample)
-├── .mafia-config               ✅ Persistent configuration
-├── packages/shared/src/
-│   ├── persona/
-│   │   └── persona-generator.js    ✅ Persona generation
-│   ├── fsm/                         ✅ Game state machine
-│   ├── roles/                       ✅ Role definitions
-│   ├── events/                      ✅ Event definitions
-│   ├── providers/                   ✅ AI provider configs
-│   └── __tests__/                   ✅ 209+ tests
-├── specs/                           ✅ Technical specs
-│   ├── correct-night-flow.md
-│   ├── persona-system.md
-│   └── [other specs]
 ├── apps/
-│   ├── server/                      ✅ HTTP/WebSocket server
-│   └── cli/                         ✅ TypeScript CLI (dev)
-└── saved-games/                     ✅ Game saves
+│   ├── server/                  ✅ HTTP/WebSocket server + game engine
+│   ├── cli/                     ✅ TypeScript CLI (mafiactl)
+│   └── web/                     ✅ React frontend
+├── packages/shared/             ✅ Shared types, FSM, roles, personas
+│   ├── src/
+│   │   ├── fsm/                 ✅ Game state machine
+│   │   ├── roles/               ✅ Role definitions
+│   │   ├── events/              ✅ Event definitions
+│   │   ├── providers/           ✅ AI provider configs
+│   │   └── persona/             ✅ Persona generation
+│   └── __tests__/               ✅ 191 tests
+├── specs/                       ✅ Technical specifications
+├── pnpm-workspace.yaml          ✅ Monorepo workspace config
+├── turbo.json                   ✅ Build pipeline config
+└── .env                         ✅ API keys (create from .env.sample)
 ```
 
 ### Running Tests
 
 ```bash
-cd packages/shared
-npm test
+# All tests from root
+pnpm --filter @mafia/server test:run   # Server (39 tests)
+pnpm --filter @mafia/shared test:run   # Shared (150 tests)
+pnpm --filter @mafia/web test:run      # Web (2 tests)
 ```
 
-**Test Coverage**: 209+ passing tests (FSM, Roles, Providers, Personas, Events, Types, Integration)
+**Test Coverage**: 191 passing tests (FSM, Roles, Providers, Personas, Events, Types, Integration)
 
 ### Game Events
 
@@ -319,16 +294,14 @@ Each game action is stored as an event with visibility levels:
 
 ## 🚀 Coming Soon
 
-- **HTTP API Server** - REST + WebSocket for web interface
-- **Web UI** - React-based game interface
 - **Pre-made Scenarios** - Test specific game states
 - **Persona Memory** - Characters remember past events
 - **Multiple AI Providers** - Claude, Gemini, Groq, etc.
 
 ## 📝 Notes
 
-- **Use `node game-engine.js`** to run games
-- Games saved with `./mafia.sh new` persist between sessions
+- **Use `pnpm --filter @mafia/cli game:run`** to run games
+- Games persist between sessions in the server database
 - AI models use GPT-4o-mini via OpenRouter (configurable via `--model`)
 - Role assignments are random each game
 - Personas are unique each game, generated by the LLM from personality descriptions
@@ -347,7 +320,7 @@ MIT License - see LICENSE file
 
 ---
 
-**Status**: ✅ Production Ready | ✅ Fully Documented | ✅ 209+ Tests Passing
+**Status**: ✅ Production Ready | ✅ Fully Documented | ✅ 191 Tests Passing
 
 **Quick Start**: See [QUICK_START.md](QUICK_START.md) for 5-minute setup guide!
 

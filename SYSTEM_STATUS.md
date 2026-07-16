@@ -19,10 +19,12 @@
 ### 🧪 Test Results
 
 ```
-✅ Integration Tests: 31/31 PASSING
-✅ CLI Commands: All 15 commands working
-✅ Server Stats: 9 games, 17 players tracked
-✅ Demo Mode: Game phases simulate correctly
+✅ Server Tests: 39/39 PASSING (apps/server)
+✅ Shared Tests: 150/150 PASSING (packages/shared)
+✅ Web Tests: 2/2 PASSING (apps/web)
+✅ Total: 191/191 tests
+✅ CLI Commands: All commands working
+✅ Server: Live at http://localhost:3000, 150+ games tracked
 ```
 
 ---
