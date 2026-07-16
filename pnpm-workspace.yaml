@@ -2,6 +2,11 @@ packages:
   - "packages/*"
   - "apps/*"
 
+overrides:
+  path-to-regexp: ">=0.1.13"
+  socket.io-parser: ">=4.2.6"
+  ws: ">=8.21.0"
+
 allowBuilds:
   better-sqlite3: true
   esbuild: true
