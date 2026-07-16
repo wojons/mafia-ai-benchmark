@@ -71,3 +71,7 @@
 - **Commit:** 44571a3
 - **Resolution:** Replaced the canned benchmark response with a real implementation. POST /api/v1/benchmark now creates 1-N games using the legacy adapter (primary) or game engine (fallback) with player model assignments. Each game is started immediately. Benchmark runs are tracked in-memory (benchmarkRuns Map) and games are persisted to the database via GameRepository. Reports and exports already read from the database via StatsCollector so they return real data. +87/-8 lines in routes/index.ts.
 - **Verification:** tsc --noEmit clean, all 191 tests pass (server 39, shared 150, web 2), gitreins guard PASS.
+
+## [x] FIX-BUILD-001: Fix duplicate listRuns method — build break (completed 2026-07-16)
+- **Commit:** 8f6eca1
+- **Resolution:** Parallel tick added `listRuns()` to BenchmarkRunner (line 276). Foreman discovery sweep found build failure: duplicate method at line 537. Removed duplicate. Build: 4/4 successful. Tests: 39/39 pass. Guard: PASS.
