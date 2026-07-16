@@ -881,22 +881,101 @@ export function setupRoutes(app: Express, context: ServerContext): void {
   });
   
   // ==================== BENCHMARK ====================
-  
+
+  /** Track active benchmark runs. */
+  interface BenchmarkRun {
+    id: string;
+    startedAt: number;
+    gameIds: string[];
+    config: Record<string, unknown>;
+    status: 'running' | 'completed' | 'failed';
+  }
+  const benchmarkRuns: Map<string, BenchmarkRun> = new Map();
+
   // Run benchmark
   app.post('/api/v1/benchmark', (req: Request, res: Response) => {
     try {
-      const { config } = req.body;
-      
-      // TODO: Implement benchmark runner
-      res.json({
+      const { config = {} } = req.body;
+      const gameCount: number = config.gameCount || config.games || 1;
+      const players: Array<{ name: string; provider?: string; model?: string }> =
+        config.players || [];
+      const numPlayers: number = config.numPlayers || players.length || 5;
+      const roleModels: Record<string, string> | undefined = config.roleModels;
+      const personaSeeds: string[] | undefined = config.personaSeeds;
+      const gameConfig = config.gameConfig;
+
+      const runId = `bench_${Date.now()}`;
+      const launchedGameIds: string[] = [];
+
+      for (let i = 0; i < gameCount; i++) {
+        let gameId: string | undefined;
+
+        if (legacyAdapter) {
+          // Primary path: use legacy adapter (spawns real LLM-powered games)
+          const state = legacyAdapter.startGame({
+            numPlayers,
+            personaSeeds,
+            gameConfig: gameConfig || config,
+            roleModels,
+          });
+          gameId = state.gameId;
+        } else {
+          // Fallback: use standard game engine
+          const game = gameEngine.createGame({
+            config: gameConfig || config,
+            hostName: config.hostName,
+          });
+          gameId = game.id;
+
+          // Add players with model assignments
+          if (players.length > 0) {
+            for (const p of players) {
+              gameEngine.joinGame(game.id, p.name, {
+                provider: p.provider,
+                model: p.model,
+              });
+            }
+          }
+
+          // Start the game
+          gameEngine.startGame(game.id);
+        }
+
+        if (gameId) {
+          launchedGameIds.push(gameId);
+        }
+      }
+
+      // Track the benchmark run
+      const run: BenchmarkRun = {
+        id: runId,
+        startedAt: Date.now(),
+        gameIds: launchedGameIds,
+        config: config as Record<string, unknown>,
+        status: 'running',
+      };
+      benchmarkRuns.set(runId, run);
+
+      res.status(201).json({
         success: true,
         data: {
-          message: 'Benchmark started',
-          config,
+          runId,
+          gameIds: launchedGameIds,
+          gameCount: launchedGameIds.length,
+          status: 'running',
+          message: `Benchmark started with ${launchedGameIds.length} game(s)`,
+          config: {
+            engineType: legacyAdapter ? 'legacy' : 'standard',
+            numPlayers,
+            roleModels,
+          },
         },
       });
     } catch (error) {
-      res.status(500).json({ success: false, error: 'Failed to start benchmark' });
+      res.status(500).json({
+        success: false,
+        error: 'Failed to start benchmark: ' + (error as Error).message,
+      });
     }
   });
   
