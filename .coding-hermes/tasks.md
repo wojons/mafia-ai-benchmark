@@ -79,3 +79,9 @@
 ## [x] DOC-SWEEP-002: Update QUICK_START.md for monorepo structure (completed 2026-07-16)
 - **Commit:** d354915
 - **Resolution:** Rewrote QUICK_START.md for monorepo. Replaced `cd /config/workspace/mafia` with repo clone path, `node game-engine.js` with `pnpm --filter @mafia/server dev` / `pnpm --filter @mafia/cli game:run`, `./mafia.sh` with pnpm commands. Added pnpm install step, server commands table, CLI commands table, root commands table, project structure section. Updated from "PERSONA EDITION v3" to "Monorepo Edition". Verified: `pnpm build` (4/4), `pnpm --filter @mafia/server test:run` (39/39), `pnpm --filter @mafia/shared build` (pass). gitreins guard PASS.
+
+## [ ] DOC-SWEEP-003: Fix stale legacy command references in README.md
+- **Priority:** low
+- **Files:** README.md
+- **Root cause:** README.md still references `node game-engine.js` (lines 32, 178), `./mafia.sh` (lines 35, 138-139, 168-172). These are pre-monorepo entry points. QUICK_START.md was updated in DOC-SWEEP-002 but README.md still has legacy commands.
+- **AC:** Replace all `node game-engine.js` and `./mafia.sh` references with monorepo commands (`pnpm --filter @mafia/server dev`, `pnpm --filter @mafia/cli game:run`). Command table updated to reflect current monorepo structure. `pnpm build` still passes. `gitreins guard` still passes.
