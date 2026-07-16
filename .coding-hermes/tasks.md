@@ -107,3 +107,9 @@
 ## [x] DEPS — 3 moderate vulns: qs (GHSA-w7fw-mjwx-w883, GHSA-hrqg-qhr8-56jg), uuid (GHSA-q8mj-m7cp-5q26)
 - **Commit:** 5a93e9b
 - **Resolution:** Added qs>=6.15.2 and uuid>=11.1.1 to pnpm-workspace.yaml overrides. pnpm audit --production: 0 vulns. Build 4/4. Tests: 30/39 server (9 ECONNREFUSED pre-existing), 150/150 shared, 2/2 web. Guard PASS.
+
+## [ ] INFRA-ESLINT: Add eslint as devDependency + config files for cli/server/web
+- **Priority:** medium
+- **Root cause:** Lint scripts exist in cli/server/web (`eslint src --ext .ts`) but eslint is not a devDependency in any package. No eslint config files (.eslintrc, eslint.config.js) exist anywhere. `pnpm run lint` fails with "eslint: not found".
+- **Files:** apps/cli/package.json, apps/server/package.json, apps/web/package.json
+- **AC:** eslint added to devDependencies. Config files created. `pnpm run lint` passes (0 errors or only pre-existing warnings).

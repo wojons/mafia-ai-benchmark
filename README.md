@@ -13,7 +13,7 @@ An advanced AI-powered Mafia game simulation that benchmarks different AI models
 - **☀️ Day Phase**: Discussion, voting, lynching
 - **📊 Event Sourcing**: Complete game audit trail with visibility levels
 - **💰 Cost Tracking**: Track API costs per game and player
-- **🧪 191 Tests**: Comprehensive test coverage
+- **🧪 211 Tests**: Comprehensive test coverage
 
 ## 🚀 Quick Start
 
@@ -222,7 +222,7 @@ mafia-ai-benchmark/
 │   │   ├── events/              ✅ Event definitions
 │   │   ├── providers/           ✅ AI provider configs
 │   │   └── persona/             ✅ Persona generation
-│   └── __tests__/               ✅ 191 tests
+│   └── __tests__/               ✅ 211 tests
 ├── specs/                       ✅ Technical specifications
 ├── pnpm-workspace.yaml          ✅ Monorepo workspace config
 ├── turbo.json                   ✅ Build pipeline config
@@ -238,7 +238,7 @@ pnpm --filter @mafia/shared test:run   # Shared (150 tests)
 pnpm --filter @mafia/web test:run      # Web (2 tests)
 ```
 
-**Test Coverage**: 191 passing tests (FSM, Roles, Providers, Personas, Events, Types, Integration)
+**Test Coverage**: 211 passing tests (FSM, Roles, Providers, Personas, Events, Types, Integration, CLI)
 
 ### Game Events
 
@@ -320,7 +320,7 @@ MIT License - see LICENSE file
 
 ---
 
-**Status**: ✅ Production Ready | ✅ Fully Documented | ✅ 191 Tests Passing
+**Status**: ✅ Production Ready | ✅ Fully Documented | ✅ 211 Tests Passing
 
 **Quick Start**: See [QUICK_START.md](QUICK_START.md) for 5-minute setup guide!
 
