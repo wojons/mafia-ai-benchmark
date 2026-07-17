@@ -8,42 +8,52 @@
   "exports": {
     ".": {
       "import": "./dist/index.js",
+      "require": "./dist/index.js",
       "types": "./dist/index.d.ts"
     },
     "./types": {
       "import": "./dist/types/index.js",
+      "require": "./dist/types/index.js",
       "types": "./dist/types/index.d.ts"
     },
     "./events": {
       "import": "./dist/events/index.js",
+      "require": "./dist/events/index.js",
       "types": "./dist/events/index.d.ts"
     },
     "./fsm": {
       "import": "./dist/fsm/index.js",
+      "require": "./dist/fsm/index.js",
       "types": "./dist/fsm/index.d.ts"
     },
     "./roles": {
       "import": "./dist/roles/index.js",
+      "require": "./dist/roles/index.js",
       "types": "./dist/roles/index.d.ts"
     },
     "./agents": {
       "import": "./dist/agents/index.js",
+      "require": "./dist/agents/index.js",
       "types": "./dist/agents/index.d.ts"
     },
     "./providers": {
       "import": "./dist/providers/index.js",
+      "require": "./dist/providers/index.js",
       "types": "./dist/providers/index.d.ts"
     },
     "./providers/*": {
       "import": "./dist/providers/*.js",
+      "require": "./dist/providers/*.js",
       "types": "./dist/providers/*.d.ts"
     },
     "./providers/factory.js": {
       "import": "./dist/providers/factory.js",
+      "require": "./dist/providers/factory.js",
       "types": "./dist/providers/factory.d.ts"
     },
     "./providers/model-metadata.js": {
       "import": "./dist/providers/model-metadata.js",
+      "require": "./dist/providers/model-metadata.js",
       "types": "./dist/providers/model-metadata.d.ts"
     }
   },
