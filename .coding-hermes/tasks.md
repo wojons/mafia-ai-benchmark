@@ -108,8 +108,10 @@
 - **Commit:** 5a93e9b
 - **Resolution:** Added qs>=6.15.2 and uuid>=11.1.1 to pnpm-workspace.yaml overrides. pnpm audit --production: 0 vulns. Build 4/4. Tests: 30/39 server (9 ECONNREFUSED pre-existing), 150/150 shared, 2/2 web. Guard PASS.
 
-## [ ] INFRA-ESLINT: Add eslint as devDependency + config files for cli/server/web
+## [x] INFRA-ESLINT: Add eslint as devDependency + config files for cli/server/web (completed 2026-07-16)
+- **Commit:** 2d3546c
 - **Priority:** medium
+- **Resolution:** eslint@^8.57.1 + @typescript-eslint/parser@^7.18.0 + @typescript-eslint/eslint-plugin@^7.18.0 added as root devDependencies. Root .eslintrc.json created with TypeScript parser, recommended rules, test file exclusions (`**/__tests__/**`, `**/*.test.ts`). Fixed 3 lint errors in CLI (2 no-var-requires → top-level import, 1 no-case-declarations → braces). Lint now passes: cli 0e/7w, server 0e/41w, web 0e/23w (all warnings pre-existing).
 - **Root cause:** Lint scripts exist in cli/server/web (`eslint src --ext .ts`) but eslint is not a devDependency in any package. No eslint config files (.eslintrc, eslint.config.js) exist anywhere. `pnpm run lint` fails with "eslint: not found".
 - **Files:** apps/cli/package.json, apps/server/package.json, apps/web/package.json
 - **AC:** eslint added to devDependencies. Config files created. `pnpm run lint` passes (0 errors or only pre-existing warnings).
