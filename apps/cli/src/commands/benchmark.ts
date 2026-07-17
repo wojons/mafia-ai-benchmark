@@ -7,6 +7,7 @@
 import { Command } from 'commander';
 import chalk from 'chalk';
 import inquirer from 'inquirer';
+import fs from 'fs';
 import { ExportCommand } from './export.js';
 
 export class BenchmarkCommand extends Command {
@@ -212,7 +213,6 @@ export class BenchmarkCommand extends Command {
   }
   
   private exportResults(results: Record<string, unknown>, exportPath: string): void {
-    const fs = require('fs');
     fs.writeFileSync(exportPath, JSON.stringify(results, null, 2));
     console.log(chalk.green(`\n📁 Results exported to: ${exportPath}\n`));
   }

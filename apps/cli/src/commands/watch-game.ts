@@ -153,11 +153,12 @@ export class WatchGameCommand extends Command {
         console.log(chalk.gray(`\n🤫 Mafia team: ${(data.teammates as string[]).join(', ')}`));
         break;
         
-      case 'WINNER_DETERMINED':
+      case 'WINNER_DETERMINED': {
         const winner = data.winner as string;
         console.log(chalk.green(`\n🏆 ${winner === 'MAFIA' ? 'Mafia' : 'Town'} WINS!`));
         console.log(chalk.gray(`  Mafia alive: ${data.mafiaCount}, Town alive: ${data.townCount}`));
         break;
+      }
     }
   }
 }

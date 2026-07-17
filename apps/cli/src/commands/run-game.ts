@@ -7,6 +7,7 @@
 import { Command } from 'commander';
 import inquirer from 'inquirer';
 import chalk from 'chalk';
+import fs from 'fs';
 
 interface GameConfig {
   numPlayers: number;
@@ -104,7 +105,6 @@ export class RunGameCommand extends Command {
   
   private loadConfig(configPath: string): GameConfig | null {
     try {
-      const fs = require('fs');
       if (fs.existsSync(configPath)) {
         const config = fs.readFileSync(configPath, 'utf-8');
         return JSON.parse(config) as GameConfig;
