@@ -123,3 +123,12 @@
 - **Root cause:** Lint scripts exist in cli/server/web (`eslint src --ext .ts`) but eslint is not a devDependency in any package. No eslint config files (.eslintrc, eslint.config.js) exist anywhere. `pnpm run lint` fails with "eslint: not found".
 - **Files:** apps/cli/package.json, apps/server/package.json, apps/web/package.json
 - **AC:** eslint added to devDependencies. Config files created. `pnpm run lint` passes (0 errors or only pre-existing warnings).
+
+## [ ] FIX-BUILD-DIST: tsconfig rootDir — dist output goes to wrong path (dist/apps/server/src/)
+- **Priority:** medium
+- **Root cause:** With `include: ["src/**/*"]` and no `rootDir`, tsc computes common root from ALL files in program including `@mafia/shared/*` imports (resolved to `../../packages/shared/src/*`). This pushes rootDir up to project root, causing `src/db/migrate.ts` to emit to `dist/apps/server/src/db/migrate.js` instead of `dist/db/migrate.js`. The old `dist/db/` files are stale cached output.
+- **Found during:** 2026-07-16 E2E verification sweep — server crashed because stale `dist/db/migrate.js` used old `process.cwd()` path.
+- **Workaround applied:** Manually copied correct dist files from `dist/apps/server/src/db/` to `dist/db/` + synced repository.js.
+- **Files:** apps/server/tsconfig.json
+- **AC:** `pnpm turbo run build --filter=@mafia/server --force` emits all files to `dist/` (not `dist/apps/server/src/`). `node apps/server/dist/index.js` starts server cleanly without manual file copies. All 39 tests pass. `gitreins guard` PASS.
+- **Approach options:** (a) Set up TypeScript project references with composite builds for @mafia/shared, (b) use `rootDir: "."` with adjusted outDir, (c) restructure server to load from nested dist path.
