@@ -7,6 +7,10 @@
 import Database from 'better-sqlite3';
 import fs from 'fs';
 import path from 'path';
+import { fileURLToPath } from 'url';
+
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
 
 export interface MigrationResult {
   success: boolean;
@@ -21,7 +25,7 @@ export class DatabaseMigrator {
   constructor(dbPath: string = ':memory:') {
     this.db = new Database(dbPath);
     this.db.pragma('journal_mode = WAL');
-    this.schemaPath = path.join(process.cwd(), 'src', 'db', 'schema.sql');
+    this.schemaPath = path.join(__dirname, 'schema.sql');
   }
   
   /**
