@@ -17,12 +17,8 @@
     "sourceMap": true,
     "noFallthroughCasesInSwitch": true,
     "allowSyntheticDefaultImports": true,
-    "types": ["node"],
-    "composite": true
+    "types": ["node"]
   },
-  "references": [
-    { "path": "../../packages/shared" }
-  ],
   "include": ["src/**/*"],
   "exclude": ["node_modules", "dist", "**/*.test.ts", "**/__tests__/**"]
 }
