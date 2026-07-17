@@ -63,3 +63,6 @@ Thumbs.db
 
 # Stale artifacts
 *.bak
+
+# Runtime config
+mafia.config.json

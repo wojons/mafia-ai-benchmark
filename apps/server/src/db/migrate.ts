@@ -25,7 +25,7 @@ export class DatabaseMigrator {
   constructor(dbPath: string = ':memory:') {
     this.db = new Database(dbPath);
     this.db.pragma('journal_mode = WAL');
-    this.schemaPath = path.join(__dirname, 'schema.sql');
+    this.schemaPath = path.join(__dirname, '..', '..', 'src', 'db', 'schema.sql');
   }
   
   /**
