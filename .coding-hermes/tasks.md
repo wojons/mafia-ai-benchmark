@@ -76,6 +76,14 @@
 - **Commit:** 8f6eca1
 - **Resolution:** Parallel tick added `listRuns()` to BenchmarkRunner (line 276). Foreman discovery sweep found build failure: duplicate method at line 537. Removed duplicate. Build: 4/4 successful. Tests: 39/39 pass. Guard: PASS.
 
+## [x] FIX-SCHEMA-PATH: Fix schema.sql path resolution — server won't start from repo root (completed 2026-07-16)
+- **Commit:** ac5f536
+- **Priority:** HIGH
+- **Root cause:** `migrate.ts:24` uses `process.cwd()` to resolve `schema.sql` path. When the server is launched from repo root (`tsx apps/server/src/index.ts`), CWD is the repo root but schema.sql is at `apps/server/src/db/schema.sql`. CI doesn't hit this because it `cd`s to `apps/server` first.
+- **Files:** apps/server/src/db/migrate.ts
+- **Fix:** Use `__dirname` (directory of migrate.ts itself) instead of `process.cwd()`. Added `fileURLToPath` import + `__filename`/`__dirname` declarations for ESM compatibility.
+- **Verification:** `pnpm build` (4/4), server starts + health endpoint responds, all 39 server tests pass (including 9 API integration tests), gitreins guard PASS.
+
 ## [x] DOC-SWEEP-002: Update QUICK_START.md for monorepo structure (completed 2026-07-16)
 - **Commit:** d354915
 - **Resolution:** Rewrote QUICK_START.md for monorepo. Replaced `cd /config/workspace/mafia` with repo clone path, `node game-engine.js` with `pnpm --filter @mafia/server dev` / `pnpm --filter @mafia/cli game:run`, `./mafia.sh` with pnpm commands. Added pnpm install step, server commands table, CLI commands table, root commands table, project structure section. Updated from "PERSONA EDITION v3" to "Monorepo Edition". Verified: `pnpm build` (4/4), `pnpm --filter @mafia/server test:run` (39/39), `pnpm --filter @mafia/shared build` (pass). gitreins guard PASS.
