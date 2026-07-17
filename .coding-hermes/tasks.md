@@ -124,12 +124,9 @@
 - **Files:** apps/cli/package.json, apps/server/package.json, apps/web/package.json
 - **AC:** eslint added to devDependencies. Config files created. `pnpm run lint` passes (0 errors or only pre-existing warnings).
 
-## [ ] BUILD-MODEL-METADATA: Create model-metadata.ts implementation — missing source blocks clean rebuild
-- **Priority:** HIGH (BLOCKS FIX-BUILD-DIST)
-- **Root cause:** `packages/shared/src/providers/model-metadata.d.ts` exists (declaration only, no implementation). `pnpm build` passes with cache but `pnpm turbo run build --filter=@mafia/server --force` fails: TS2307 Cannot find module '@mafia/shared/providers/model-metadata.js'. Server routes/index.ts uses dynamic `import()` for getModelPricing, fetchModelMetadata, calculateCost, etc.
-- **Files:** packages/shared/src/providers/model-metadata.ts (CREATE — implementation from .d.ts declarations)
-- **AC:** `pnpm turbo run build --filter=@mafia/server --force` passes. `pnpm build` passes. All 191 tests pass. `gitreins guard` PASS.
-- **Implementation guidance:** The .d.ts file has exact function signatures. Implement: fetchModelMetadata (caches API results in a Map), getModelPricing (returns NO_PRICING_MARKER=-6.66 if not found), calculateCost, getCachedCostEstimate, getModelCapabilities, getPopularModels, searchModelsByProvider, clearModelCache, getCacheStats, getAllCachedModels, getModelsByProvider. Use fetch() to call models.dev API. Keep it simple — in-memory cache, no external deps needed.
+## [x] BUILD-MODEL-METADATA: Create model-metadata.ts implementation — missing source blocks clean rebuild (completed 2026-07-16)
+- **Commit:** a26ffb8 (resolved by FIX-BUILD-DIST)
+- **Resolution:** The `.ts` implementation file already existed (packages/shared/src/providers/model-metadata.ts, 15KB). The build failure was caused by missing exports entries in shared's package.json — same root cause as FIX-BUILD-DIST. Adding `./providers/*`, `./providers/model-metadata.js` exports resolved both issues. Build passes 4/4. All tests pass.
 
 ## [x] FIX-BUILD-DIST: tsconfig rootDir — dist output goes to wrong path (dist/apps/server/src/) (completed 2026-07-16)
 - **Priority:** medium
