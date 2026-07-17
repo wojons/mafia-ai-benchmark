@@ -8,38 +8,43 @@
   "exports": {
     ".": {
       "import": "./dist/index.js",
-      "types": "./dist/index.d.ts",
-      "default": "./src/index.ts"
+      "types": "./dist/index.d.ts"
     },
     "./types": {
       "import": "./dist/types/index.js",
-      "types": "./dist/types/index.d.ts",
-      "default": "./src/types/index.ts"
+      "types": "./dist/types/index.d.ts"
     },
     "./events": {
       "import": "./dist/events/index.js",
-      "types": "./dist/events/index.d.ts",
-      "default": "./src/events/index.ts"
+      "types": "./dist/events/index.d.ts"
     },
     "./fsm": {
       "import": "./dist/fsm/index.js",
-      "types": "./dist/fsm/index.d.ts",
-      "default": "./src/fsm/index.ts"
+      "types": "./dist/fsm/index.d.ts"
     },
     "./roles": {
       "import": "./dist/roles/index.js",
-      "types": "./dist/roles/index.d.ts",
-      "default": "./src/roles/index.ts"
+      "types": "./dist/roles/index.d.ts"
     },
     "./agents": {
       "import": "./dist/agents/index.js",
-      "types": "./dist/agents/index.d.ts",
-      "default": "./src/agents/index.ts"
+      "types": "./dist/agents/index.d.ts"
     },
     "./providers": {
       "import": "./dist/providers/index.js",
-      "types": "./dist/providers/index.d.ts",
-      "default": "./src/providers/index.ts"
+      "types": "./dist/providers/index.d.ts"
+    },
+    "./providers/*": {
+      "import": "./dist/providers/*.js",
+      "types": "./dist/providers/*.d.ts"
+    },
+    "./providers/factory.js": {
+      "import": "./dist/providers/factory.js",
+      "types": "./dist/providers/factory.d.ts"
+    },
+    "./providers/model-metadata.js": {
+      "import": "./dist/providers/model-metadata.js",
+      "types": "./dist/providers/model-metadata.d.ts"
     }
   },
   "scripts": {

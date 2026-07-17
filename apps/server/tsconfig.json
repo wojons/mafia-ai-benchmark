@@ -6,6 +6,7 @@
     "moduleResolution": "bundler",
     "lib": ["ES2022"],
     "outDir": "./dist",
+    "rootDir": "./src",
     "strict": true,
     "esModuleInterop": true,
     "skipLibCheck": true,
@@ -17,14 +18,11 @@
     "noFallthroughCasesInSwitch": true,
     "allowSyntheticDefaultImports": true,
     "types": ["node"],
-    "baseUrl": ".",
-    "paths": {
-      "@mafia/shared/types": ["../../packages/shared/src/types/index.ts"],
-      "@mafia/shared/fsm": ["../../packages/shared/src/fsm/index.ts"],
-      "@mafia/shared/providers/*": ["../../packages/shared/src/providers/*"],
-      "@mafia/shared/*": ["../../packages/shared/src/*"]
-    }
+    "composite": true
   },
+  "references": [
+    { "path": "../../packages/shared" }
+  ],
   "include": ["src/**/*"],
   "exclude": ["node_modules", "dist", "**/*.test.ts", "**/__tests__/**"]
 }

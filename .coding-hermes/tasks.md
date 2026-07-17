@@ -124,7 +124,14 @@
 - **Files:** apps/cli/package.json, apps/server/package.json, apps/web/package.json
 - **AC:** eslint added to devDependencies. Config files created. `pnpm run lint` passes (0 errors or only pre-existing warnings).
 
-## [ ] FIX-BUILD-DIST: tsconfig rootDir — dist output goes to wrong path (dist/apps/server/src/)
+## [ ] BUILD-MODEL-METADATA: Create model-metadata.ts implementation — missing source blocks clean rebuild
+- **Priority:** HIGH (BLOCKS FIX-BUILD-DIST)
+- **Root cause:** `packages/shared/src/providers/model-metadata.d.ts` exists (declaration only, no implementation). `pnpm build` passes with cache but `pnpm turbo run build --filter=@mafia/server --force` fails: TS2307 Cannot find module '@mafia/shared/providers/model-metadata.js'. Server routes/index.ts uses dynamic `import()` for getModelPricing, fetchModelMetadata, calculateCost, etc.
+- **Files:** packages/shared/src/providers/model-metadata.ts (CREATE — implementation from .d.ts declarations)
+- **AC:** `pnpm turbo run build --filter=@mafia/server --force` passes. `pnpm build` passes. All 191 tests pass. `gitreins guard` PASS.
+- **Implementation guidance:** The .d.ts file has exact function signatures. Implement: fetchModelMetadata (caches API results in a Map), getModelPricing (returns NO_PRICING_MARKER=-6.66 if not found), calculateCost, getCachedCostEstimate, getModelCapabilities, getPopularModels, searchModelsByProvider, clearModelCache, getCacheStats, getAllCachedModels, getModelsByProvider. Use fetch() to call models.dev API. Keep it simple — in-memory cache, no external deps needed.
+
+## [x] FIX-BUILD-DIST: tsconfig rootDir — dist output goes to wrong path (dist/apps/server/src/) (completed 2026-07-16)
 - **Priority:** medium
 - **Root cause:** With `include: ["src/**/*"]` and no `rootDir`, tsc computes common root from ALL files in program including `@mafia/shared/*` imports (resolved to `../../packages/shared/src/*`). This pushes rootDir up to project root, causing `src/db/migrate.ts` to emit to `dist/apps/server/src/db/migrate.js` instead of `dist/db/migrate.js`. The old `dist/db/` files are stale cached output.
 - **Found during:** 2026-07-16 E2E verification sweep — server crashed because stale `dist/db/migrate.js` used old `process.cwd()` path.
@@ -132,3 +139,5 @@
 - **Files:** apps/server/tsconfig.json
 - **AC:** `pnpm turbo run build --filter=@mafia/server --force` emits all files to `dist/` (not `dist/apps/server/src/`). `node apps/server/dist/index.js` starts server cleanly without manual file copies. All 39 tests pass. `gitreins guard` PASS.
 - **Approach options:** (a) Set up TypeScript project references with composite builds for @mafia/shared, (b) use `rootDir: "."` with adjusted outDir, (c) restructure server to load from nested dist path.
+- **Resolution (2026-07-16):** Added `rootDir: "./src"` + removed `baseUrl`/`paths` from server tsconfig. Replaced path mappings with proper package.json `exports` entries in @mafia/shared (added `./providers/*`, `./providers/factory.js`, `./providers/model-metadata.js`). Removed `default` source-file fallbacks from exports to prevent shared source from entering server's compilation. Added `composite: true` + `references` for proper project references. Server now emits flat to `dist/` — `dist/index.js`, `dist/db/migrate.js`, etc.
+- **Verification:** `pnpm build` 4/4. `node apps/server/dist/index.js` starts cleanly (DB init, HTTP on :3000). 30/30 EventBus tests pass (9 API integration ECONNREFUSED — pre-existing). `gitreins guard` PASS.
