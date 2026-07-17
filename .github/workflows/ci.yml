@@ -114,6 +114,9 @@ jobs:
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
 
+      - name: Build workspace (needed for dist/ type declarations)
+        run: pnpm run build
+
       - name: Type check all packages
         run: |
           cd packages/shared && npx tsc --noEmit

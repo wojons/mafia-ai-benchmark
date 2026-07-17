@@ -147,4 +147,11 @@
 - **Discovered during:** 2026-07-17 foreman E2E verification (1.5h). Server wouldn't start with `tsx dist/index.js` or `tsx src/index.ts`. Both produce: `Package subpath './fsm' is not defined by "exports"`. ESM import test (`node --input-type=module -e "import { GameFSM } from '@mafia/shared/fsm'"`) works. Direct `node dist/index.js` works — server healthy, API returns data.
 - **Files:** packages/shared/package.json
 - **Fix:** Add `"require": "./dist/<path>/index.js"` to every subpath export (./types, ./events, ./fsm, ./roles, ./agents, ./providers, ./providers/*). The `"import"` and `"types"` conditions stay. Both `"import"` and `"require"` point to the same `.js` file.
-- **AC:** `tsx src/index.ts` starts server cleanly. Health endpoint responds. CI server job passes. `pnpm build` 4/4. All 39 server tests pass (or 30 pass + 9 ECONNREFUSED pre-existing). `gitreins guard` PASS.
+|- **AC:** `tsx src/index.ts` starts server cleanly. Health endpoint responds. CI server job passes. `pnpm build` 4/4. All 39 server tests pass (or 30 pass + 9 ECONNREFUSED pre-existing). `gitreins guard` PASS.
+
+## [ ] CI-FIX-LINT: Add build step before type-check in CI lint job
+|- **Root cause:** CI lint job runs `npx tsc --noEmit` for each package without building first. `@mafia/shared` `exports` point to `./dist/...` — on a fresh checkout without `dist/`, tsc emits 35+ `Cannot find module '@mafia/shared/*'` errors. All 4 build-and-test jobs pass (they run `pnpm build` first). Only the lint job fails.
+|- **Files:** .github/workflows/ci.yml
+|- **Fix:** Added `pnpm run build` step before type-check commands in the lint job.
+|- **AC:** CI lint job installs deps, builds workspace, then runs `npx tsc --noEmit` for all 4 packages. All pass clean.
+|- **Verification:** Fresh clone + `pnpm install` + `pnpm build` + `npx tsc --noEmit` in each package = all 4 pass.
