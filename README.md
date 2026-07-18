@@ -13,7 +13,7 @@ An advanced AI-powered Mafia game simulation that benchmarks different AI models
 - **☀️ Day Phase**: Discussion, voting, lynching
 - **📊 Event Sourcing**: Complete game audit trail with visibility levels
 - **💰 Cost Tracking**: Track API costs per game and player
-- **🧪 211 Tests**: Comprehensive test coverage
+- **🧪 191 Tests**: Comprehensive test coverage
 
 ## 🚀 Quick Start
 
@@ -320,7 +320,7 @@ MIT License - see LICENSE file
 
 ---
 
-**Status**: ✅ Production Ready | ✅ Fully Documented | ✅ 211 Tests Passing
+**Status**: ✅ Production Ready | ✅ Fully Documented | ✅ 191 Tests Passing
 
 **Quick Start**: See [QUICK_START.md](QUICK_START.md) for 5-minute setup guide!
 
