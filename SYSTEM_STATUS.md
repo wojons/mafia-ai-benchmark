@@ -23,7 +23,7 @@
 ✅ CLI Tests: 20/20 PASSING (apps/cli)
 ✅ Shared Tests: 150/150 PASSING (packages/shared)
 ✅ Web Tests: 2/2 PASSING (apps/web)
-✅ Total: 211/211 tests
+✅ Total: 191/191 tests
 ✅ CLI Commands: All commands working
 ✅ Server: Live at http://localhost:3000, 150+ games tracked
 ```

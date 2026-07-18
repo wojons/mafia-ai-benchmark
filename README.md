@@ -222,7 +222,7 @@ mafia-ai-benchmark/
 │   │   ├── events/              ✅ Event definitions
 │   │   ├── providers/           ✅ AI provider configs
 │   │   └── persona/             ✅ Persona generation
-│   └── __tests__/               ✅ 211 tests
+│   └── __tests__/               ✅ 191 tests
 ├── specs/                       ✅ Technical specifications
 ├── pnpm-workspace.yaml          ✅ Monorepo workspace config
 ├── turbo.json                   ✅ Build pipeline config
@@ -238,7 +238,7 @@ pnpm --filter @mafia/shared test:run   # Shared (150 tests)
 pnpm --filter @mafia/web test:run      # Web (2 tests)
 ```
 
-**Test Coverage**: 211 passing tests (FSM, Roles, Providers, Personas, Events, Types, Integration, CLI)
+**Test Coverage**: 191 passing tests (Server 39, Shared 150, Web 2)
 
 ### Game Events
 
