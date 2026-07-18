@@ -140,7 +140,7 @@ mafia/
 │   │   ├── services/
 │   │   │   ├── event-bus.ts           # Event publish/subscribe
 │   │   │   ├── event-bus.test.ts      # EventBus unit tests ✅
-│   │   │   ├── game-engine.ts         # Game engine (TODO: integrate)
+│   │   │   ├── game-engine.ts         # Game engine (integrated via benchmark runner)
 │   │   │   ├── stats-collector.ts     # Cost & stats tracking
 │   │   │   └── agent-coordinator.ts   # AI agent coordination
 │   │   │
