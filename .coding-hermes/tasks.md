@@ -155,3 +155,49 @@
 |- **Fix:** Added `pnpm run build` step before type-check commands in the lint job.
 |- **AC:** CI lint job installs deps, builds workspace, then runs `npx tsc --noEmit` for all 4 packages. All pass clean.
 |- **Verification:** Fresh clone + `pnpm install` + `pnpm build` + `npx tsc --noEmit` in each package = all 4 pass.
+
+## [ ] DOC-STALE-TESTS: Fix stale test counts — docs say 191, actual is 211
+- **Priority:** low
+- **Root cause:** Test count grew from 191→211 (server 39, shared 150, cli 20, web 2) but docs never updated. README.md has 5 instances of "191", SYSTEM_STATUS.md has 2.
+- **Files:** README.md, SYSTEM_STATUS.md
+- **AC:** All test count references updated from 191→211.
+
+## [ ] TEST-SERVER-SERVICES: Add tests for 5 core server services (0 unit tests, 3,709 LOC)
+- **Priority:** high
+- **Root cause:** 5 server services have zero dedicated tests: game-engine.ts (762 lines), stats-collector.ts (1408 lines), benchmark-runner.ts (552 lines), agent-coordinator.ts (540 lines), legacy-game-adapter.ts (489 lines). Some integration coverage via api.test.ts but no unit-level coverage. Error paths, edge cases, and game logic are untested.
+- **Files:** apps/server/src/services/game-engine.ts, stats-collector.ts, benchmark-runner.ts, agent-coordinator.ts, legacy-game-adapter.ts
+- **AC:** Each service has >= 5 unit tests covering happy path + error paths. `pnpm --filter @mafia/server test:run` passes.
+
+## [ ] TEST-CLI-COMMANDS: Add tests for 6 untested CLI commands
+- **Priority:** medium
+- **Root cause:** Only 3 CLI commands have tests (base-command, index, init). 6 commands are untested: run-game, config, list-games, watch-game, benchmark, export, stats.
+- **Files:** apps/cli/src/commands/run-game.ts, config.ts, list-games.ts, watch-game.ts, benchmark.ts, export.ts, stats.ts
+- **AC:** Each command has >= 2 tests. `pnpm --filter @mafia/cli test:run` passes.
+
+## [ ] TEST-WEB: Add tests for web services/stores (only 2 smoke tests)
+- **Priority:** medium
+- **Root cause:** apps/web has only smoke.test.ts (2 tests). api.ts, websocket.ts, useGameEvents.ts, uiStore.ts, gameStore.ts are all untested.
+- **Files:** apps/web/src/services/api.ts, websocket.ts, hooks/useGameEvents.ts, stores/uiStore.ts, gameStore.ts
+- **AC:** >= 10 new tests across web services/stores. `pnpm --filter @mafia/web test:run` passes.
+
+## [ ] DEPS-SQLJS: Upgrade sql.js from 1.13.0 to 1.14.1
+- **Priority:** low
+- **Root cause:** sql.js is the only runtime dependency with an available update. No breaking changes expected in patch bump. Dev deps (eslint 8→10, typescript-eslint 7→8, turbo 1→2, typescript 5→7) are major bumps — defer to separate assessment.
+- **Files:** pnpm-workspace.yaml or root package.json
+- **AC:** sql.js upgraded. Build passes. All 211 tests pass. No regressions.
+
+## [ ] PITFALL-SILENT-ERRORS: stats-collector.ts silently swallows errors with `return []`
+- **Priority:** low
+- **Root cause:** Two catch blocks in stats-collector.ts (lines 480, 563) catch all errors and silently return `[]`. This masks DB query failures, corrupt data, and schema mismatches. Callers see empty arrays instead of actionable errors.
+- **Files:** apps/server/src/services/stats-collector.ts
+- **AC:** Catch blocks log errors with context before returning fallback. Or propagate errors to callers. At minimum, `console.error()` with identifying context.
+
+## [ ] PERF-LARGE-FILES: Split stats-collector.ts (1408 lines) and routes/index.ts (1097 lines)
+- **Priority:** low
+- **Root cause:** Two files exceed 1000 lines. stats-collector.ts at 1408 lines mixes win aggregation, model performance, matchups, and player stats. routes/index.ts at 1097 lines mixes 30 route handlers with inline logic. Large files are hard to test, review, and maintain.
+- **Files:** apps/server/src/services/stats-collector.ts, apps/server/src/routes/index.ts
+- **AC:** stats-collector.ts split by concern (wins, models, matchups, players). routes/index.ts handlers extracted to separate route modules by domain (games, models, stats, benchmark, agents). Build + all 211 tests pass.
+
+## [ ] NEVER-DONE — Run 11-point audit next tick
+- **Priority:** high
+- **Trigger:** Board needs self-improvement scan. Foreman must load `coding-hermes-never-done` skill and run full 11-point audit on next tick (spec alignment, doc coverage, test gaps, deps, pitfalls, perf, endpoint verification, CI/CD health, DuckBrain sync, code quality, middle-out wiring).
