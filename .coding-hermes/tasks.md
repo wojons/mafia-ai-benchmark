@@ -197,6 +197,6 @@
 - **Files:** apps/server/src/services/stats-collector.ts, apps/server/src/routes/index.ts
 - **AC:** stats-collector.ts split by concern (wins, models, matchups, players). routes/index.ts handlers extracted to separate route modules by domain (games, models, stats, benchmark, agents). Build + all 211 tests pass.
 
-## [x] NEVER-DONE — 11-point audit completed (2026-07-19)
-- **Commit:** 5907977
-- **Resolution:** Audit ran. Created 7 new tasks: DOC-STALE-TESTS, TEST-SERVER-SERVICES, TEST-CLI-COMMANDS, TEST-WEB, DEPS-SQLJS, PITFALL-SILENT-ERRORS, PERF-LARGE-FILES. TEST-SERVER-SERVICES now resolved (73e5afb).
+## [ ] NEVER-DONE — Run coding-hermes-never-done 11-point audit
+- **Last audit:** 5907977 (2026-07-19) — created 7 new tasks
+- **Resolution:** Load coding-hermes-never-done skill. Run ALL 11 checks: spec alignment, doc coverage, test gaps, package upgrades, pitfall hunt, performance audit, endpoint verification, CI/CD health, DuckBrain sync, code quality, middle-out wiring. Create a task for EVERY gap found. This task is never complete — the audit always finds something.
