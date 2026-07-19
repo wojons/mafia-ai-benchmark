@@ -341,11 +341,14 @@ export class StatsCollector {
     const tokenUsage = this.getPlayerTokenUsage(gameId, playerId);
     const apiCalls = this.getGameAPICalls(gameId).filter(c => c.playerId === playerId);
     
+    const winner = this.getGameWinnerFromEvents(gameId);
+    const won = winner === 'MAFIA' ? player.isMafia : !player.isMafia;
+
     return {
       playerId,
       role: player.role,
       survived: player.isAlive,
-      won: false,
+      won,
       tokensUsed: tokenUsage.reduce((sum, t) => sum + t.totalTokens, 0),
       apiCalls: apiCalls.length,
       actionsTaken: 0,
@@ -954,7 +957,7 @@ export class StatsCollector {
               role: p.role,
               survived: p.isAlive,
             })),
-            winner: winner || (game?.status === 'ENDED' ? 'UNKNOWN' : 'IN_PROGRESS'),
+            winner: winner || (game as any)?.winner || (game?.status === 'ENDED' ? 'UNKNOWN' : 'IN_PROGRESS'),
           };
         } catch {
           report.game = {
