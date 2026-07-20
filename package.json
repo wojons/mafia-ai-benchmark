@@ -3,6 +3,7 @@
   "version": "1.0.0",
   "description": "Multi-agent AI Mafia game benchmark system with THINK vs SAYS split-pane consciousness",
   "private": true,
+  "packageManager": "pnpm@11.13.1",
   "workspaces": [
     "packages/*",
     "apps/*"
@@ -36,7 +37,7 @@
     "eslint": "^10.7.0",
     "globals": "^17.7.0",
     "prettier": "^3.9.5",
-    "turbo": "^1.13.0",
+    "turbo": "^2.10.5",
     "typescript": "^5.4.0"
   },
   "engines": {
