@@ -1,14 +1,22 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 
-// Provide localStorage mock so zustand persist middleware works cleanly
-const localStore: Record<string, string> = {};
-vi.stubGlobal('localStorage', {
-  getItem: (key: string) => localStore[key] ?? null,
-  setItem: (key: string, value: string) => { localStore[key] = value; },
-  removeItem: (key: string) => { delete localStore[key]; },
-  clear: () => { Object.keys(localStore).forEach(k => { delete localStore[k]; }); },
-  get length() { return Object.keys(localStore).length; },
-  key: (i: number) => Object.keys(localStore)[i] ?? null,
+// Provide localStorage on globalThis before any module imports so
+// zustand's persist middleware can read/write during initialization.
+const { localStore } = vi.hoisted(() => {
+  const store: Record<string, string> = {};
+  Object.defineProperty(globalThis, 'localStorage', {
+    value: {
+      getItem: (key: string) => store[key] ?? null,
+      setItem: (key: string, value: string) => { store[key] = value; },
+      removeItem: (key: string) => { delete store[key]; },
+      clear: () => { Object.keys(store).forEach(k => { delete store[k]; }); },
+      get length() { return Object.keys(store).length; },
+      key: (i: number) => Object.keys(store)[i] ?? null,
+    },
+    configurable: true,
+    writable: true,
+  });
+  return { localStore: store };
 });
 
 import { useUIStore } from '../stores/uiStore';
