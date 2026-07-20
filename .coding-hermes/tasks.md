@@ -226,19 +226,20 @@
 - **Resolution:** @typescript-eslint/eslint-plugin + parser bumped from 8.64.0 to 8.65.0. Build 4/4. Lint 0 errors, 26 pre-existing warnings. All tests pass.
 
 ## [ ] NEVER-DONE — Run coding-hermes-never-done 11-point audit
-- **Last audit:** (2026-07-20 15:40) — all 11 checks pass, zero findings.
-- **Idle tick #3 — 11/11 clean.** Scheduler: CooldownS=14400 (graduated from 900s), Enabled=True.
+- **Last audit:** (2026-07-20 16:53) — all 11 checks pass, zero findings.
+- **Idle tick #4 — 11/11 clean.** ⚠️ Cooldown reverted 14400s→1800s (daemon restart). Re-fixed to 14400s. 1st reversion.
+- **Counter: 4/7** (no action ≤2, cooldown at 14400s since tick #3, escalate at ≥7).
 
 | # | Check | Status | Detail |
 |---|-------|--------|--------|
-| 1 | SPEC ALIGNMENT | PASS | 20+ specs in specs/. Core specs already implemented. No drift detected. |
-| 2 | DOC COVERAGE | PASS | README (327L), ARCHITECTURE (533L), SYSTEM_STATUS (183L), QUICK_START (313L). All current. |
-| 3 | TEST GAPS | PASS | 607 tests (shared 390, CLI 83, web 29, server 105+9 ECONNREFUSED). 3 benchmark files (11 benchmarks). |
-| 4 | PACKAGE UPGRADES | PASS | Only typescript 5.9.3→7.0.2 outdated (KNOWN BLOCKED). pnpm audit: 0 vulns. |
-| 5 | PITFALL HUNT | PASS | 0 TODOs/FIXMEs/HACKs. Silent error logging already added (PITFALL-SILENT-ERRORS). |
+| 1 | SPEC ALIGNMENT | PASS | 20+ specs in specs/. All core specs implemented. No drift. |
+| 2 | DOC COVERAGE | PASS | README, ARCHITECTURE, SYSTEM_STATUS, QUICK_START — all current. |
+| 3 | TEST GAPS | PASS | 608 tests (shared 390, CLI 83, web 29, server 105+9 ECONNREFUSED). 3 bench files (11 benchmarks). |
+| 4 | PACKAGE UPGRADES | PASS | Only typescript 5.9.3→7.0.2 outdated (KNOWN BLOCKED — TS 7 incompatible with typescript-eslint v8). pnpm audit: 0 vulns. |
+| 5 | PITFALL HUNT | PASS | 0 TODOs/FIXMEs/HACKs. All return-null hits are legitimate guard clauses (game-engine, benchmark-runner, stats-collector, repository). |
 | 6 | PERFORMANCE | PASS | 3 benchmark files: game-engine, event-bus, stats-collector. 11 benchmarks total. |
-| 7 | ENDPOINT VERIFICATION | PASS | Server not running (no live E2E). Source audit: 36 route handlers, 0 stubs. CI green validates API. |
-| 8 | CI/CD | PASS | 5/5 latest runs success. All green (push to main). |
-| 9 | DUCKBRAIN SYNC | PASS | 17 entries: architecture, pitfalls, patterns, procedures, specs, events. Idle counter updated to 3. |
-| 10 | CODE QUALITY | PASS | Clean git status. 0 untracked. 0 lint errors. Web chunk size warning pre-existing. |
+| 7 | ENDPOINT VERIFICATION | PASS | Server not running (source audit). 36 route handlers, 0 stubs. All routes wired. |
+| 8 | CI/CD | PASS | 5/5 latest runs success. All green (wojons/mafia-ai-benchmark). |
+| 9 | DUCKBRAIN SYNC | PASS | 17 entries across architecture, pitfalls, patterns, procedures. |
+| 10 | CODE QUALITY | PASS | Clean git. 0 lint errors. Build 4/4 cached. |
 | 11 | MIDDLE-OUT WIRING | PASS | Hilo: 865 edges, 353 files. Server Express+WS+DB. CLI 9 commands. Web React+Vite. All wired. |
