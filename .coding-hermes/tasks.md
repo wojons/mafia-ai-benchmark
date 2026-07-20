@@ -193,10 +193,28 @@
 - **Resolution:** Added console.error with method-name context to both catch blocks. getPlayersFromEvents and getModelComparison now log errors before returning fallback `[]`. Build 4/4. All unit tests pass (105/114 server, 9 pre-existing ECONNREFUSED). Guard PASS.
 
 ## [x] PERF-LARGE-FILES: Split stats-collector.ts (1408 lines) and routes/index.ts (1097 lines) (completed 2026-07-20)
-## [x] PERF-LARGE-FILES: Split stats-collector.ts (1408 lines) and routes/index.ts (1097 lines) (completed 2026-07-20)
 - **Commit:** 8688a35
 - **Resolution:** stats-collector.ts split into wins.ts (72L), models.ts (480L), matchups.ts (37L), players.ts (119L), index.ts (846L). routes/index.ts split into games.ts (639L), models.ts (341L), stats.ts (162L), benchmark.ts (175L), agents.ts (85L). Barrel re-exports preserve all imports. Build 4/4. Tests: 105/114 server (9 pre-existing ECONNREFUSED), 83/83 cli, 150/150 shared.
 
+## [ ] DEPS-OUTDATED: Upgrade 8 outdated dev dependencies
+- **Priority:** low
+- **Found:** 2026-07-20 never-done audit (check 4)
+- **Packages:** dotenv 17.2.3→17.4.2 (patch), prettier 3.7.4→3.9.5 (minor), @types/node 25.0.3→26.1.1 (major), @typescript-eslint/* 7.18.0→8.64.0 (major), eslint 8.57.1→10.7.0 (major), turbo 1.13.4→2.10.5 (major), typescript 5.9.3→7.0.2 (major)
+- **Approach:** Upgrade one at a time per npm-dep-upgrade-bisect pattern. Verify build + tests between each. Major versions (typescript, eslint, turbo) are highest risk — do them last, one per commit. Revert any that break the build and mark blocked.
+- **AC:** All safe upgrades applied. Build 4/4. All tests pass.
+
+## [ ] PERF-BENCHMARKS: Add vitest benchmarks for core services
+- **Priority:** low
+- **Found:** 2026-07-20 never-done audit (check 6)
+- **Root cause:** Zero benchmark functions exist across all 4 packages. `vitest bench` not configured. Core services (GameEngine, StatsCollector, EventBus) have no performance baselines.
+- **AC:** >= 3 benchmark files (GameEngine, StatsCollector, EventBus). `pnpm vitest bench` runs successfully. Benchmarks cover createGame, startGame, getGameStats, publish events.
+
+## [ ] DUCKBRAIN-SYNC: Populate DuckBrain namespace with project knowledge
+- **Priority:** low
+- **Found:** 2026-07-20 never-done audit (check 9)
+- **Root cause:** mafia-ai-benchmark namespace has only 5 entries (3 events, 1 spec, 1 status). Missing: architecture decisions, common pitfalls, model capability observations, performance baselines, debugging guides.
+- **AC:** >= 10 new entries covering: architecture patterns (monorepo, event sourcing, barrel re-exports), pitfalls (ECONNREFUSED API tests, CI server test flakiness, path-to-regexp version pinning), model observations (which providers work for what), and debugging procedures.
+
 ## [ ] NEVER-DONE — Run coding-hermes-never-done 11-point audit
-- **Last audit:** 5907977 (2026-07-19) — created 7 new tasks
+- **Last audit:** 8688a35 (2026-07-20) — created 3 new tasks (DEPS-OUTDATED, PERF-BENCHMARKS, DUCKBRAIN-SYNC)
 - **Resolution:** Load coding-hermes-never-done skill. Run ALL 11 checks: spec alignment, doc coverage, test gaps, package upgrades, pitfall hunt, performance audit, endpoint verification, CI/CD health, DuckBrain sync, code quality, middle-out wiring. Create a task for EVERY gap found. This task is never complete — the audit always finds something.
