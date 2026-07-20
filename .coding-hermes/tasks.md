@@ -183,11 +183,10 @@
 - **Root cause:** apps/web has only smoke.test.ts (2 tests). api.ts, websocket.ts, useGameEvents.ts, uiStore.ts, gameStore.ts are all untested.
 - **AC:** >= 10 new tests across web services/stores. All pass.
 
-## [ ] DEPS-SQLJS: Upgrade sql.js from 1.13.0 to 1.14.1
+## [x] DEPS-SQLJS: Upgrade sql.js from 1.13.0 to 1.14.1 (completed 2026-07-20)
+- **Commit:** bf4c061
 - **Priority:** low
-- **Root cause:** sql.js is the only runtime dependency with an available update. No breaking changes expected in patch bump. Dev deps (eslint 8→10, typescript-eslint 7→8, turbo 1→2, typescript 5→7) are major bumps — defer to separate assessment.
-- **Files:** pnpm-workspace.yaml or root package.json
-- **AC:** sql.js upgraded. Build passes. All 211 tests pass. No regressions.
+- **Resolution:** sql.js bumped from ^1.13.0 to ^1.14.1 in root package.json. Build 4/4. All tests pass (server 114, shared 150, cli 83, web 29). Guard PASS. No regressions.
 
 ## [ ] PITFALL-SILENT-ERRORS: stats-collector.ts silently swallows errors with `return []`
 - **Priority:** low
