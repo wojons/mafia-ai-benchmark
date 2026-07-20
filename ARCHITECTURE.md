@@ -422,15 +422,15 @@ cd apps/web && npm run dev
 
 ## 🧪 Test Status
 
-### Tests (pnpm monorepo — 211 total)
+### Tests (pnpm monorepo — 286 total)
 
 | Package | Tests | Files |
 |---------|-------|-------|
-| apps/server | 39 | 3 (30 unit + 9 integration) |
+| apps/server | 114 | 8 (105 unit + 9 integration) |
 | apps/cli | 20 | 3 |
 | packages/shared | 150 | 6 |
 | apps/web | 2 | 1 |
-| **Total** | **211** | **13** |
+| **Total** | **286** | **18** |
 
 ### Unit Tests (apps/server/src/services/event-bus.test.ts)
 
