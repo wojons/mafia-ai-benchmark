@@ -168,7 +168,9 @@
 - **Resolution:** 76 unit tests across all 5 services: stats-collector 20, game-engine 28, benchmark-runner 10, legacy-game-adapter 10, agent-coordinator 8. Shared SQLite-backed mock repository (mocks.ts, 1003 lines). Also fixed 2 StatsCollector bugs: won=false hardcoded → derived from winner; winner fallback uses game row when events absent. 94/96 server tests pass (2 pre-existing benchmark-runner assertion mismatches).
 - **Priority:** high ✓
 
-## [ ] TEST-CLI-COMMANDS: Add tests for 6 untested CLI commands
+## [x] TEST-CLI-COMMANDS: Add tests for 6 untested CLI commands (completed 2026-07-20)
+- **Commit:** c9af867
+- **Resolution:** 7 test files added — run-game (3 tests), config (6), list-games (7), watch-game (6), benchmark (8), export (7), stats (8). 83/83 tests pass. Covers name, description, options, flags, fetch, error handling, and JSON output for all commands.
 - **Priority:** medium
 - **Root cause:** Only 3 CLI commands have tests (base-command, index, init). 6 commands are untested: run-game, config, list-games, watch-game, benchmark, export, stats.
 - **Files:** apps/cli/src/commands/run-game.ts, config.ts, list-games.ts, watch-game.ts, benchmark.ts, export.ts, stats.ts
