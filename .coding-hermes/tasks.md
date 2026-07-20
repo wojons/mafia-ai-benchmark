@@ -211,12 +211,10 @@
 - **Priority:** low
 - **Resolution:** 10 new entries added (18 total). Categories: architecture (monorepo structure, event sourcing), patterns (barrel re-exports, vitest benchmarks), pitfalls (ECONNREFUSED API tests, CI server flakiness, path-to-regexp pinning, shared exports require condition, TypeScript 7 incompatibility), observations (model providers), procedures (server debugging).
 
-## [ ] CI-FIX-PNPM: Fix pnpm version mismatch — CI all-red
+## [x] CI-FIX-PNPM: Fix pnpm version mismatch — CI all-red (completed 2026-07-20)
+- **Commit:** 1c268b8
 - **Priority:** CRITICAL
-- **Found:** 2026-07-20 never-done audit (check 8)
-- **Root cause:** CI config (.github/workflows/ci.yml) specifies `version: 10` in both build-and-test and lint jobs. package.json specifies `"packageManager": "pnpm@11.13.1"` (added during turbo 2.10.5 upgrade). This mismatch causes pnpm/action-setup to fail with "Multiple versions of pnpm specified" — all CI jobs fail before reaching tests.
-- **Files:** .github/workflows/ci.yml
-- **AC:** Both `version: 10` instances changed to `version: 11.13.1`. CI passes on next push.
+- **Resolution:** Both `version:` entries in .github/workflows/ci.yml changed from `10` to `11.13.1` to match package.json `packageManager` field. CI pnpm version now consistent.
 
 ## [ ] TEST-SHARED: Add tests for untested shared provider files
 - **Priority:** medium
