@@ -56,6 +56,9 @@ Thumbs.db
 .axiom/
 .hermes/plans/
 
+# Turborepo cache
+.turbo/
+
 # OpenCode
 .opencode/
 .graph-harness/

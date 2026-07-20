@@ -216,11 +216,10 @@
 - **Priority:** CRITICAL
 - **Resolution:** Both `version:` entries in .github/workflows/ci.yml changed from `10` to `11.13.1` to match package.json `packageManager` field. CI pnpm version now consistent.
 
-## [ ] TEST-SHARED: Add tests for untested shared provider files
+## [x] TEST-SHARED: Add tests for untested shared provider files (completed 2026-07-20)
 - **Priority:** medium
-- **Found:** 2026-07-20 never-done audit (check 3)
-- **Root cause:** packages/shared has 23 source files but only 7 test files. 16 provider files are untested (anthropic.ts, custom.ts, deepseek.ts, factory.ts, google.ts, groq.ts, lmstudio.ts, meta.ts, model-metadata.ts, ollama.ts, openai.ts, qwen.ts, xai.ts, cost-tracking.ts + agents, events, fsm, roles index files).
-- **AC:** >= 8 new test files across shared providers. Tests cover factory.ts provider selection, model-metadata.ts capability queries, and at least 4 provider configs.
+- **Resolution:** 11 new test files with 240 new tests. All 17 test files pass (390 total). Coverage: factory.ts (68), model-metadata.ts (21), cost-tracking.ts (35), anthropic.ts (18), openai.ts (20), ollama.ts (14), custom.ts (15), deepseek.ts (12), google.ts (12), groq.ts (12), xai.ts (13). Exceeds AC minimum of 8 test files.
+- **Verification:** `pnpm --filter @mafia/shared test:run` 390/390 pass. `pnpm build` 4/4. gitreins guard PASS.
 
 ## [ ] NEVER-DONE — Run coding-hermes-never-done 11-point audit
 - **Last audit:** 9060e94 (2026-07-20) — created 2 new tasks (CI-FIX-PNPM, TEST-SHARED). 9/11 checks pass, 1 critical CI failure, 1 test gap.
