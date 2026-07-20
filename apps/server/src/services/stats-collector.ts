@@ -479,13 +479,13 @@ export class StatsCollector {
           isMafia: dbPlayer ? dbPlayer.isMafia : mafiaPlayers.has(pid),
         };
       });
-    } catch {
+    } catch (e) {
+      console.error('StatsCollector.getPlayersFromEvents: failed to derive players from game events for game', gameId, e);
       return [];
     }
   }
 
   /**
-   * Aggregate mafia/town wins across all completed games by inspecting game events.
    * Falls back to the games table when event-derived data is unavailable.
    */
   private getAggregatedWins(): { mafiaWins: number; townWins: number } {
@@ -562,11 +562,12 @@ export class StatsCollector {
         avgCost: 0,
         avgLatency: 0,
       }];
-    } catch {
+    } catch (e) {
+      console.error('StatsCollector.getModelComparison: failed to compute model comparison data', e);
       return [];
     }
   }
-  
+
   /**
    * Get head-to-head matchups
    */
