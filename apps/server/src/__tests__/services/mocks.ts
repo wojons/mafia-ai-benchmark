@@ -15,7 +15,6 @@ import type {
   AgentResponse,
   RoleType,
 } from '@mafia/shared/types';
-import type { GameRepository } from '../../db/repository.js';
 import type { EventBus } from '../../services/event-bus.js';
 import type { StatsCollector } from '../../services/stats-collector.js';
 import type { AgentCoordinator, AgentConfig, AgentExecutionResult } from '../../services/agent-coordinator.js';
