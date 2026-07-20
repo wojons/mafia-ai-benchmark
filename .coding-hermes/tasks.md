@@ -159,8 +159,8 @@
 ## [x] DOC-STALE-TESTS: Fix stale test counts — docs say 191, actual is 286 (completed 2026-07-19)
 - **Commit:** ec3ffc2
 - **Priority:** low
-- **Root cause:** Test count grew from 191→211 (server 39, shared 150, cli 20, web 2) but docs never updated. README.md has 5 instances of "191", SYSTEM_STATUS.md has 2.
-- **Files:** README.md, SYSTEM_STATUS.md
+- **Root cause:** Test count grew from 191→286 (server 39→114, shared 150, cli 20, web 2) after TEST-SERVER-SERVICES added 75 tests, but docs never updated. README.md had 5 instances, SYSTEM_STATUS.md had 2, ARCHITECTURE.md had 1.
+- **Files:** README.md, SYSTEM_STATUS.md, ARCHITECTURE.md
 - **AC:** All test count references updated from 191→211.
 
 ## [x] TEST-SERVER-SERVICES: Add tests for 5 core server services (76 tests, completed 2026-07-19)
