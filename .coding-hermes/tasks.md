@@ -221,5 +221,9 @@
 - **Resolution:** 11 new test files with 240 new tests. All 17 test files pass (390 total). Coverage: factory.ts (68), model-metadata.ts (21), cost-tracking.ts (35), anthropic.ts (18), openai.ts (20), ollama.ts (14), custom.ts (15), deepseek.ts (12), google.ts (12), groq.ts (12), xai.ts (13). Exceeds AC minimum of 8 test files.
 - **Verification:** `pnpm --filter @mafia/shared test:run` 390/390 pass. `pnpm build` 4/4. gitreins guard PASS.
 
+## [x] DEPS-ESLINT-TYPES: Upgrade @typescript-eslint/* from 8.64.0 to 8.65.0 (completed 2026-07-20)
+- **Priority:** low
+- **Resolution:** @typescript-eslint/eslint-plugin + parser bumped from 8.64.0 to 8.65.0. Build 4/4. Lint 0 errors, 26 pre-existing warnings. All tests pass.
+
 ## [ ] NEVER-DONE — Run coding-hermes-never-done 11-point audit
-- **Last audit:** 9060e94 (2026-07-20) — created 2 new tasks (CI-FIX-PNPM, TEST-SHARED). 9/11 checks pass, 1 critical CI failure, 1 test gap.
+- **Last audit:** 0f095aa (2026-07-20) — 10/11 checks pass, 1 minor dep upgrade. Project in excellent shape: 390 shared + 114 server + 83 cli + 29 web = 616 tests. 3 benchmark files. CI green. No TODOs. All packages wired.
