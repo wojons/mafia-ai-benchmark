@@ -192,11 +192,10 @@
 - **Commit:** 7f0e7c6
 - **Resolution:** Added console.error with method-name context to both catch blocks. getPlayersFromEvents and getModelComparison now log errors before returning fallback `[]`. Build 4/4. All unit tests pass (105/114 server, 9 pre-existing ECONNREFUSED). Guard PASS.
 
-## [ ] PERF-LARGE-FILES: Split stats-collector.ts (1408 lines) and routes/index.ts (1097 lines)
-- **Priority:** low
-- **Root cause:** Two files exceed 1000 lines. stats-collector.ts at 1408 lines mixes win aggregation, model performance, matchups, and player stats. routes/index.ts at 1097 lines mixes 30 route handlers with inline logic. Large files are hard to test, review, and maintain.
-- **Files:** apps/server/src/services/stats-collector.ts, apps/server/src/routes/index.ts
-- **AC:** stats-collector.ts split by concern (wins, models, matchups, players). routes/index.ts handlers extracted to separate route modules by domain (games, models, stats, benchmark, agents). Build + all 211 tests pass.
+## [x] PERF-LARGE-FILES: Split stats-collector.ts (1408 lines) and routes/index.ts (1097 lines) (completed 2026-07-20)
+## [x] PERF-LARGE-FILES: Split stats-collector.ts (1408 lines) and routes/index.ts (1097 lines) (completed 2026-07-20)
+- **Commit:** 8688a35
+- **Resolution:** stats-collector.ts split into wins.ts (72L), models.ts (480L), matchups.ts (37L), players.ts (119L), index.ts (846L). routes/index.ts split into games.ts (639L), models.ts (341L), stats.ts (162L), benchmark.ts (175L), agents.ts (85L). Barrel re-exports preserve all imports. Build 4/4. Tests: 105/114 server (9 pre-existing ECONNREFUSED), 83/83 cli, 150/150 shared.
 
 ## [ ] NEVER-DONE — Run coding-hermes-never-done 11-point audit
 - **Last audit:** 5907977 (2026-07-19) — created 7 new tasks
