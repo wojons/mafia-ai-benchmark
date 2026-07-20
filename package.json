@@ -28,11 +28,13 @@
     "game:watch": "pnpm --filter @mafia/cli game:watch"
   },
   "devDependencies": {
+    "@eslint/js": "^10.0.1",
     "@types/node": "^26.1.1",
-    "@typescript-eslint/eslint-plugin": "^7.18.0",
-    "@typescript-eslint/parser": "^7.18.0",
+    "@typescript-eslint/eslint-plugin": "^8.64.0",
+    "@typescript-eslint/parser": "^8.64.0",
     "dotenv": "^17.4.2",
-    "eslint": "^8.57.1",
+    "eslint": "^10.7.0",
+    "globals": "^17.7.0",
     "prettier": "^3.9.5",
     "turbo": "^1.13.0",
     "typescript": "^5.4.0"
