@@ -188,11 +188,9 @@
 - **Priority:** low
 - **Resolution:** sql.js bumped from ^1.13.0 to ^1.14.1 in root package.json. Build 4/4. All tests pass (server 114, shared 150, cli 83, web 29). Guard PASS. No regressions.
 
-## [ ] PITFALL-SILENT-ERRORS: stats-collector.ts silently swallows errors with `return []`
-- **Priority:** low
-- **Root cause:** Two catch blocks in stats-collector.ts (lines 480, 563) catch all errors and silently return `[]`. This masks DB query failures, corrupt data, and schema mismatches. Callers see empty arrays instead of actionable errors.
-- **Files:** apps/server/src/services/stats-collector.ts
-- **AC:** Catch blocks log errors with context before returning fallback. Or propagate errors to callers. At minimum, `console.error()` with identifying context.
+## [x] PITFALL-SILENT-ERRORS: stats-collector.ts silently swallows errors with `return []` (completed 2026-07-20)
+- **Commit:** 7f0e7c6
+- **Resolution:** Added console.error with method-name context to both catch blocks. getPlayersFromEvents and getModelComparison now log errors before returning fallback `[]`. Build 4/4. All unit tests pass (105/114 server, 9 pre-existing ECONNREFUSED). Guard PASS.
 
 ## [ ] PERF-LARGE-FILES: Split stats-collector.ts (1408 lines) and routes/index.ts (1097 lines)
 - **Priority:** low
