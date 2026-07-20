@@ -54,7 +54,7 @@
   "author": "Mafia AI Benchmark Team",
   "license": "MIT",
   "dependencies": {
-    "sql.js": "^1.13.0"
+    "sql.js": "^1.14.1"
   },
   "pnpm": {}
 }
