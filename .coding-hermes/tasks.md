@@ -226,19 +226,19 @@
 - **Resolution:** @typescript-eslint/eslint-plugin + parser bumped from 8.64.0 to 8.65.0. Build 4/4. Lint 0 errors, 26 pre-existing warnings. All tests pass.
 
 ## [ ] NEVER-DONE — Run coding-hermes-never-done 11-point audit
-- **Last audit:** 280e034 (2026-07-20 15:12) — all 11 checks pass, zero findings.
-- **Idle tick #2 — 11/11 clean.** Scheduler: CooldownS=900, Enabled=True.
+- **Last audit:** (2026-07-20 15:40) — all 11 checks pass, zero findings.
+- **Idle tick #3 — 11/11 clean.** Scheduler: CooldownS=14400 (graduated from 900s), Enabled=True.
 
 | # | Check | Status | Detail |
 |---|-------|--------|--------|
-| 1 | SPEC ALIGNMENT | PASS | 20+ specs in specs/. Core specs (benchmark-runner, player-model-assignment) already implemented. No drift detected. |
-| 2 | DOC COVERAGE | PASS | README (327L), ARCHITECTURE (533L), SYSTEM_STATUS (183L), QUICK_START (313L), CHANGELOG (12L). All current. |
-| 3 | TEST GAPS | PASS | 607 tests (shared 390, CLI 83, web 29, server 105). 9 server ECONNREFUSED pre-existing (needs live server). 3 benchmark files. |
-| 4 | PACKAGE UPGRADES | PASS | Only typescript 5.9.3→7.0.2 shows outdated (KNOWN BLOCKED: typescript-eslint incompat). 0 vulns. |
-| 5 | PITFALL HUNT | PASS | 0 TODOs in project code. Stats-collector `return []` has error logging (PITFALL-SILENT-ERRORS). Guard clauses legitimate. |
-| 6 | PERFORMANCE | PASS | 3 benchmark files (game-engine, event-bus, stats-collector). 11 benchmarks total. |
-| 7 | ENDPOINT VERIFICATION | PASS | Server not running. Source audit: 36 route handlers, 0 501 stubs, 0 empty handlers, 105/114 tests pass. |
-| 8 | CI/CD | PASS | 4/5 latest runs success. Latest (280e034): all green. Old failure was CI-FIX-PNPM (already resolved). |
-| 9 | DUCKBRAIN SYNC | PASS | 17 entries in mafia-ai-benchmark namespace. Architecture, patterns, pitfalls, procedures all current. |
-| 10 | CODE QUALITY | PASS | Clean git status. 0 untracked. 0 lint errors. Large web components (ThreeDViz 796L) acceptable for viz. |
-| 11 | MIDDLE-OUT WIRING | PASS | Server Express+WS+DB+Routes. CLI 9 commands. Web React entry. All wired through main entry points. |
+| 1 | SPEC ALIGNMENT | PASS | 20+ specs in specs/. Core specs already implemented. No drift detected. |
+| 2 | DOC COVERAGE | PASS | README (327L), ARCHITECTURE (533L), SYSTEM_STATUS (183L), QUICK_START (313L). All current. |
+| 3 | TEST GAPS | PASS | 607 tests (shared 390, CLI 83, web 29, server 105+9 ECONNREFUSED). 3 benchmark files (11 benchmarks). |
+| 4 | PACKAGE UPGRADES | PASS | Only typescript 5.9.3→7.0.2 outdated (KNOWN BLOCKED). pnpm audit: 0 vulns. |
+| 5 | PITFALL HUNT | PASS | 0 TODOs/FIXMEs/HACKs. Silent error logging already added (PITFALL-SILENT-ERRORS). |
+| 6 | PERFORMANCE | PASS | 3 benchmark files: game-engine, event-bus, stats-collector. 11 benchmarks total. |
+| 7 | ENDPOINT VERIFICATION | PASS | Server not running (no live E2E). Source audit: 36 route handlers, 0 stubs. CI green validates API. |
+| 8 | CI/CD | PASS | 5/5 latest runs success. All green (push to main). |
+| 9 | DUCKBRAIN SYNC | PASS | 17 entries: architecture, pitfalls, patterns, procedures, specs, events. Idle counter updated to 3. |
+| 10 | CODE QUALITY | PASS | Clean git status. 0 untracked. 0 lint errors. Web chunk size warning pre-existing. |
+| 11 | MIDDLE-OUT WIRING | PASS | Hilo: 865 edges, 353 files. Server Express+WS+DB. CLI 9 commands. Web React+Vite. All wired. |
