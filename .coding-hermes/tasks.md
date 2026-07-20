@@ -196,12 +196,11 @@
 - **Commit:** 8688a35
 - **Resolution:** stats-collector.ts split into wins.ts (72L), models.ts (480L), matchups.ts (37L), players.ts (119L), index.ts (846L). routes/index.ts split into games.ts (639L), models.ts (341L), stats.ts (162L), benchmark.ts (175L), agents.ts (85L). Barrel re-exports preserve all imports. Build 4/4. Tests: 105/114 server (9 pre-existing ECONNREFUSED), 83/83 cli, 150/150 shared.
 
-## [ ] DEPS-OUTDATED: Upgrade 8 outdated dev dependencies
+## [x] DEPS-OUTDATED: Upgrade 8 outdated dev dependencies (completed 2026-07-20)
 - **Priority:** low
 - **Found:** 2026-07-20 never-done audit (check 4)
-- **Packages:** dotenv 17.2.3→17.4.2 (patch), prettier 3.7.4→3.9.5 (minor), @types/node 25.0.3→26.1.1 (major), @typescript-eslint/* 7.18.0→8.64.0 (major), eslint 8.57.1→10.7.0 (major), turbo 1.13.4→2.10.5 (major), typescript 5.9.3→7.0.2 (major)
-- **Approach:** Upgrade one at a time per npm-dep-upgrade-bisect pattern. Verify build + tests between each. Major versions (typescript, eslint, turbo) are highest risk — do them last, one per commit. Revert any that break the build and mark blocked.
-- **AC:** All safe upgrades applied. Build 4/4. All tests pass.
+- **Resolution:** 7/8 packages upgraded across 5 commits. dotenv 17.2.3→17.4.2, prettier 3.7.4→3.9.5, @types/node 25.0.3→26.1.1, @typescript-eslint/* 7.18.0→8.64.0, eslint 8.57.1→10.7.0 (+ flat config migration: .eslintrc.json→eslint.config.mjs + globals), turbo 1.13.4→2.10.5 (pipeline→tasks + packageManager field). typescript 7.0.2 BLOCKED: incompatible with typescript-eslint v8.64.0 (Cannot read properties of undefined reading 'Cjs'). Kept at 5.9.3. Build 4/4. Lint: 0 errors, warnings only. Guard PASS.
+- **Commits:** 3551e74, 06e25be, 4e7edb0, 9f21dd1, 91a8fc2
 
 ## [ ] PERF-BENCHMARKS: Add vitest benchmarks for core services
 - **Priority:** low
