@@ -156,7 +156,8 @@
 |- **AC:** CI lint job installs deps, builds workspace, then runs `npx tsc --noEmit` for all 4 packages. All pass clean.
 |- **Verification:** Fresh clone + `pnpm install` + `pnpm build` + `npx tsc --noEmit` in each package = all 4 pass.
 
-## [ ] DOC-STALE-TESTS: Fix stale test counts — docs say 191, actual is 211
+## [x] DOC-STALE-TESTS: Fix stale test counts — docs say 191, actual is 286 (completed 2026-07-19)
+- **Commit:** ec3ffc2
 - **Priority:** low
 - **Root cause:** Test count grew from 191→211 (server 39, shared 150, cli 20, web 2) but docs never updated. README.md has 5 instances of "191", SYSTEM_STATUS.md has 2.
 - **Files:** README.md, SYSTEM_STATUS.md
