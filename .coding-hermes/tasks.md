@@ -202,17 +202,14 @@
 - **Resolution:** 7/8 packages upgraded across 5 commits. dotenv 17.2.3→17.4.2, prettier 3.7.4→3.9.5, @types/node 25.0.3→26.1.1, @typescript-eslint/* 7.18.0→8.64.0, eslint 8.57.1→10.7.0 (+ flat config migration: .eslintrc.json→eslint.config.mjs + globals), turbo 1.13.4→2.10.5 (pipeline→tasks + packageManager field). typescript 7.0.2 BLOCKED: incompatible with typescript-eslint v8.64.0 (Cannot read properties of undefined reading 'Cjs'). Kept at 5.9.3. Build 4/4. Lint: 0 errors, warnings only. Guard PASS.
 - **Commits:** 3551e74, 06e25be, 4e7edb0, 9f21dd1, 91a8fc2
 
-## [ ] PERF-BENCHMARKS: Add vitest benchmarks for core services
+## [x] PERF-BENCHMARKS: Add vitest benchmarks for core services (completed 2026-07-20)
+- **Commit:** d3012d7
 - **Priority:** low
-- **Found:** 2026-07-20 never-done audit (check 6)
-- **Root cause:** Zero benchmark functions exist across all 4 packages. `vitest bench` not configured. Core services (GameEngine, StatsCollector, EventBus) have no performance baselines.
-- **AC:** >= 3 benchmark files (GameEngine, StatsCollector, EventBus). `pnpm vitest bench` runs successfully. Benchmarks cover createGame, startGame, getGameStats, publish events.
+- **Resolution:** 11 benchmarks across 3 files: game-engine (createGame 5/10/20 players, startGame), event-bus (publish 0/10/100 subscribers, subscribe/unsubscribe), stats-collector (getGameStats 10/100/1000 events). All pass: `npx vitest bench --run` produces real results. Uses existing mocks.ts infrastructure.
 
-## [ ] DUCKBRAIN-SYNC: Populate DuckBrain namespace with project knowledge
+## [x] DUCKBRAIN-SYNC: Populate DuckBrain namespace with project knowledge (completed 2026-07-20)
 - **Priority:** low
-- **Found:** 2026-07-20 never-done audit (check 9)
-- **Root cause:** mafia-ai-benchmark namespace has only 5 entries (3 events, 1 spec, 1 status). Missing: architecture decisions, common pitfalls, model capability observations, performance baselines, debugging guides.
-- **AC:** >= 10 new entries covering: architecture patterns (monorepo, event sourcing, barrel re-exports), pitfalls (ECONNREFUSED API tests, CI server test flakiness, path-to-regexp version pinning), model observations (which providers work for what), and debugging procedures.
+- **Resolution:** 10 new entries added (17 total). Categories: architecture (monorepo structure, event sourcing), patterns (barrel re-exports, vitest benchmarks), pitfalls (ECONNREFUSED API tests, CI server flakiness, path-to-regexp pinning, shared exports require condition, TypeScript 7 incompatibility), observations (model providers), procedures (server debugging).
 
 ## [ ] NEVER-DONE — Run coding-hermes-never-done 11-point audit
 - **Last audit:** 8688a35 (2026-07-20) — created 3 new tasks (DEPS-OUTDATED, PERF-BENCHMARKS, DUCKBRAIN-SYNC)
