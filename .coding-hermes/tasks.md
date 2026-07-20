@@ -203,14 +203,26 @@
 - **Commits:** 3551e74, 06e25be, 4e7edb0, 9f21dd1, 91a8fc2
 
 ## [x] PERF-BENCHMARKS: Add vitest benchmarks for core services (completed 2026-07-20)
-- **Commit:** d3012d7
+- **Commits:** d3012d7 (+ fix 9060e94 for mocks.ts duplicate import type)
 - **Priority:** low
-- **Resolution:** 11 benchmarks across 3 files: game-engine (createGame 5/10/20 players, startGame), event-bus (publish 0/10/100 subscribers, subscribe/unsubscribe), stats-collector (getGameStats 10/100/1000 events). All pass: `npx vitest bench --run` produces real results. Uses existing mocks.ts infrastructure.
+- **Resolution:** 11 benchmarks across 3 files: game-engine (createGame 5/10/20 players, startGame), event-bus (publish 0/10/100 subscribers, subscribe/unsubscribe), stats-collector (getGameStats 10/100/1000 events). All pass: `npx vitest bench --run` produces real results. Fixed duplicate import type conflict in mocks.ts (oxc transform failure in vitest bench).
 
 ## [x] DUCKBRAIN-SYNC: Populate DuckBrain namespace with project knowledge (completed 2026-07-20)
 - **Priority:** low
-- **Resolution:** 10 new entries added (17 total). Categories: architecture (monorepo structure, event sourcing), patterns (barrel re-exports, vitest benchmarks), pitfalls (ECONNREFUSED API tests, CI server flakiness, path-to-regexp pinning, shared exports require condition, TypeScript 7 incompatibility), observations (model providers), procedures (server debugging).
+- **Resolution:** 10 new entries added (18 total). Categories: architecture (monorepo structure, event sourcing), patterns (barrel re-exports, vitest benchmarks), pitfalls (ECONNREFUSED API tests, CI server flakiness, path-to-regexp pinning, shared exports require condition, TypeScript 7 incompatibility), observations (model providers), procedures (server debugging).
+
+## [ ] CI-FIX-PNPM: Fix pnpm version mismatch — CI all-red
+- **Priority:** CRITICAL
+- **Found:** 2026-07-20 never-done audit (check 8)
+- **Root cause:** CI config (.github/workflows/ci.yml) specifies `version: 10` in both build-and-test and lint jobs. package.json specifies `"packageManager": "pnpm@11.13.1"` (added during turbo 2.10.5 upgrade). This mismatch causes pnpm/action-setup to fail with "Multiple versions of pnpm specified" — all CI jobs fail before reaching tests.
+- **Files:** .github/workflows/ci.yml
+- **AC:** Both `version: 10` instances changed to `version: 11.13.1`. CI passes on next push.
+
+## [ ] TEST-SHARED: Add tests for untested shared provider files
+- **Priority:** medium
+- **Found:** 2026-07-20 never-done audit (check 3)
+- **Root cause:** packages/shared has 23 source files but only 7 test files. 16 provider files are untested (anthropic.ts, custom.ts, deepseek.ts, factory.ts, google.ts, groq.ts, lmstudio.ts, meta.ts, model-metadata.ts, ollama.ts, openai.ts, qwen.ts, xai.ts, cost-tracking.ts + agents, events, fsm, roles index files).
+- **AC:** >= 8 new test files across shared providers. Tests cover factory.ts provider selection, model-metadata.ts capability queries, and at least 4 provider configs.
 
 ## [ ] NEVER-DONE — Run coding-hermes-never-done 11-point audit
-- **Last audit:** 8688a35 (2026-07-20) — created 3 new tasks (DEPS-OUTDATED, PERF-BENCHMARKS, DUCKBRAIN-SYNC)
-- **Resolution:** Load coding-hermes-never-done skill. Run ALL 11 checks: spec alignment, doc coverage, test gaps, package upgrades, pitfall hunt, performance audit, endpoint verification, CI/CD health, DuckBrain sync, code quality, middle-out wiring. Create a task for EVERY gap found. This task is never complete — the audit always finds something.
+- **Last audit:** 9060e94 (2026-07-20) — created 2 new tasks (CI-FIX-PNPM, TEST-SHARED). 9/11 checks pass, 1 critical CI failure, 1 test gap.
