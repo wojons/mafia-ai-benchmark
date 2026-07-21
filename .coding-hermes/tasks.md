@@ -225,10 +225,14 @@
 - **Priority:** low
 - **Resolution:** @typescript-eslint/eslint-plugin + parser bumped from 8.64.0 to 8.65.0. Build 4/4. Lint 0 errors, 26 pre-existing warnings. All tests pass.
 
+## [x] DOC-LICENSE: Add MIT LICENSE file — missing despite package.json "MIT" declaration (completed 2026-07-20)
+- **Commit:** 7860f49
+- **Resolution:** Created standard MIT LICENSE file. Package.json declares MIT but no LICENSE existed — caught by never-done audit check 2.
+
 ## [ ] NEVER-DONE — Run coding-hermes-never-done 11-point audit
-- **Last audit:** (2026-07-20 16:53) — all 11 checks pass, zero findings.
-- **Idle tick #4 — 11/11 clean.** ⚠️ Cooldown reverted 14400s→1800s (daemon restart). Re-fixed to 14400s. 1st reversion.
-- **Counter: 4/7** (no action ≤2, cooldown at 14400s since tick #3, escalate at ≥7).
+- **Last audit:** (2026-07-20 21:15) — check 2 found missing LICENSE; fixed (7860f49). 10/11 clean, 1 finding resolved in-tick.
+- **Productive rediscovery tick — idle streak broken.** Counter: 0/7.
+- ⚠️ Cooldown reverted 14400s→1800s (daemon restart #2). Re-fixed to 14400s. **ESCALATION: 2nd reversion — foreman MUST NOT self-disable per Disable Authority.**
 
 | # | Check | Status | Detail |
 |---|-------|--------|--------|
