@@ -5,8 +5,8 @@
 > **Repo:** github.com/wojons/mafia-ai-benchmark
 > **Foreman:** MiniMax-M3 via minimax | **Schedule:** every 120m
 > **DuckBrain:** 18 entries in mafia-ai-benchmark namespace
-> **Status:** ALL PHASES COMPLETE. Idle tick 1/7. Cooldown: 14400s (4h). ⚠️ 3rd cooldown reversion.
-> **Last tick:** 2026-07-21 00:22 UTC
+> **Status:** ALL PHASES COMPLETE. Idle tick 2/7. Cooldown: 14400s (4h). ⚠️ 3rd cooldown reversion.
+> **Last tick:** 2026-07-21 16:25 UTC
 
 ---
 
