@@ -36,7 +36,22 @@ async function fetchAPI<T>(endpoint: string, options: FetchOptions = {}): Promis
   
   // Handle empty responses
   const text = await response.text();
-  return text ? JSON.parse(text) : null as unknown as T;
+  const parsedBody: unknown = text ? JSON.parse(text) : null;
+
+  // Auto-unwrap { success: true, data: ... } envelope from the server.
+  // Errors ({ success: false, error: ... }) are thrown above via !response.ok
+  // and never reach this point; only success envelopes are unwrapped here.
+  if (
+    parsedBody &&
+    typeof parsedBody === 'object' &&
+    'success' in parsedBody &&
+    (parsedBody as { success: unknown }).success === true &&
+    'data' in parsedBody
+  ) {
+    return (parsedBody as { data: T }).data;
+  }
+
+  return parsedBody as T;
 }
 
 // Games API

@@ -15,7 +15,7 @@ describe('API Service', () => {
     const gameData = { id: '1', status: 'SETUP', config: {} };
     mockFetch.mockResolvedValueOnce({
       ok: true,
-      text: () => Promise.resolve(JSON.stringify(gameData)),
+      text: () => Promise.resolve(JSON.stringify({ success: true, data: gameData })),
     });
 
     const result = await gamesAPI.get('1');
@@ -50,7 +50,7 @@ describe('API Service', () => {
   it('gamesAPI.getAll passes query parameters to URL', async () => {
     mockFetch.mockResolvedValueOnce({
       ok: true,
-      text: () => Promise.resolve(JSON.stringify([])),
+      text: () => Promise.resolve(JSON.stringify({ success: true, data: [] })),
     });
 
     await gamesAPI.getAll({ status: 'IN_PROGRESS', limit: 5 });
@@ -63,7 +63,7 @@ describe('API Service', () => {
   it('gamesAPI.create sends POST with Content-Type JSON', async () => {
     mockFetch.mockResolvedValueOnce({
       ok: true,
-      text: () => Promise.resolve(JSON.stringify({ id: '2', status: 'SETUP', config: {} })),
+      text: () => Promise.resolve(JSON.stringify({ success: true, data: { id: '2', status: 'SETUP', config: {} } })),
     });
 
     await gamesAPI.create({ numPlayers: 5 });
@@ -85,7 +85,7 @@ describe('API Service', () => {
     };
     mockFetch.mockResolvedValueOnce({
       ok: true,
-      text: () => Promise.resolve(JSON.stringify(stats)),
+      text: () => Promise.resolve(JSON.stringify({ success: true, data: stats })),
     });
 
     const result = await statsAPI.getGameStats();
