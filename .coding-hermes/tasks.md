@@ -4,9 +4,9 @@
 > **Stack:** pnpm monorepo (TypeScript) — 4 packages: server, web, cli, shared
 > **Repo:** github.com/wojons/mafia-ai-benchmark
 > **Foreman:** MiniMax-M3 via minimax | **Schedule:** every 120m
-> **DuckBrain:** 18 entries in mafia-ai-benchmark namespace
-> **Status:** ALL PHASES COMPLETE. Idle tick 3/7. Cooldown: 14400s (4h). ⚠️ 3rd cooldown reversion (stable this tick).
-> **Last tick:** 2026-07-21 16:36 UTC
+> **DuckBrain:** 18 entries in mafia-ai-benchmark namespace (⚠️ MCP connection error this tick)
+> **Status:** ALL PHASES COMPLETE. Idle tick 4/7. Cooldown: 14400s (4h). ⚠️ **4th cooldown reversion** (7200→14400 re-fixed). Escalated to Bane.
+> **Last tick:** 2026-07-21 20:30 UTC
 
 ---
 
