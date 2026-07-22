@@ -5,8 +5,8 @@
 > **Repo:** github.com/wojons/mafia-ai-benchmark
 > **Foreman:** deepseek-v4-flash via deepseek-foreman | **Schedule:** every 120m (scheduler-managed)
 > **DuckBrain:** 23+ entries in mafia-benchmark namespace
-> **Status:** ALL PHASES COMPLETE. Idle tick 5/7. Cooldown: 14400s (4h). ✅ **Cooldown stable** — no reversion this tick.
-> **Last tick:** 2026-07-22 00:13 UTC
+> **Status:** ALL PHASES COMPLETE. Idle tick 6/7. Cooldown: 14400s (4h). ✅ **Cooldown stable** — no reversion this tick.
+> **Last tick:** 2026-07-22 04:16 UTC
 
 ---
 
@@ -14,27 +14,29 @@
 
 | ID | Task | Priority | Complexity | Deps | Tags | Model | Reasoning | Fallback |
 |----|------|----------|------------|------|------|-------|-----------|----------|
-| U01 | Usability & coverage audit — find gaps in endpoint wiring, UX flow, error handling, edge cases, test coverage | High | 3±1 | — | +++testing, ++endpoint-verification, ++code-review, +e2e, -vision | DS-V4-Flash | Medium | GLM-5.2 |
+| WEB-01 | Fix web API response envelope unwrapping — games, agents, stats, benchmark API clients don't unwrap `{success, data}` envelope from server | Medium | 2±1 | — | +++frontend, ++typescript, +testing, -vision | MiniMax-M3 | Medium | Kimi-K3 |
 | NEVER-DONE | 11-point audit sweep | Medium | 2 ± 1 | none | +++terminal, +++file-editing, +documentation, +testing | deepseek-v4-flash | Medium | MiniMax-M3 |
 
 ## Assumptions
 
 - Board stable — 11/11 never-done checks all pass. 36 routes wired. 0 stubs. 0 TODOs.
-- 13 `pnpm audit` vulns are all transitive dev tooling (vitest→vite→rollup→esbuild) — non-actionable
+- 1 `pnpm audit` vuln (GHSA-v422-hmwv-36x6, body-parser low severity) — non-actionable
 - TypeScript 7 upgrade BLOCKED by typescript-eslint v8.65.0 incompatibility — known, unresolvable
-- Cooldown reversion 14400→7200s after daemon restart (5th occurrence) — needs TOML config fix by Bane
+- Cooldown stable at 14400s — no reversion this tick
 - 3 minor npm upgrades available: @typescript-eslint/eslint-plugin 8.64→8.65, @typescript-eslint/parser 8.64→8.65, prettier 3.9.5→3.9.6 — all optional, not breaking
 
 ## Routing Notes
 
 - NEVER-DONE audit: deepseek-v4-flash (general purpose, terminal, search, file)
-- Any TypeScript/JS work that emerges: MiniMax-M3 via minimax (flat-rate, good for bounded implementation)
+- Any TypeScript/JS work: MiniMax-M3 via minimax (flat-rate, good for bounded implementation)
+- WEB-01 (API envelope fix): MiniMax-M3 via minimax — lightweight TypeScript, well-scoped
 - Vision tasks: Grok 4.5 via xai-oauth (+++advanced-vision)
 - CI/debug tasks: Kimi K3 via kimi-for-coding (++agentic-coding, autonomous)
 
 ## Execution Order
 
-1. NEVER-DONE (perpetual — runs every tick)
+1. WEB-01 (fix web API response unwrapping)
+2. NEVER-DONE (perpetual — runs every tick)
 
 ## Escalation Conditions
 
@@ -42,7 +44,7 @@
 - Audit finds test gap → create TEST task, assign Step 3.7 Flash (++testing)
 - Audit finds new dep vuln CRITICAL → escalate to foreman (direct fix)
 - Idle counter reaches 7 → escalate to Bane
-- Cooldown reversion #5+ → escalate to Bane for TOML fix (THIS TICK: 5th reversion found and re-fixed)
+- Cooldown reversion #5+ → escalate to Bane for TOML fix (stable this tick)
 
 ---
 
@@ -67,22 +69,24 @@
 | 10 | CODE QUALITY | ✅ | 0 untracked artifacts. `.gitignore` comprehensive. Zero TODO/FIXME in project source. |
 | 11 | MIDDLE-OUT WIRING | ✅ | Full Express+WebSocket server in index.ts. All services wired. 9 CLI commands. Docker compose. 36 routes across 5 route files. Web UI with React Router. |
 
-### Summary: ALL 11 CHECKS PASS. Zero new tasks created.
+## U01 Audit: 2026-07-22 10:00 UTC — Usability & Coverage Investigation
 
-| # | Check | Result | Details |
-|---|-------|--------|---------|
-| 1 | SPEC ALIGNMENT | ✅ | 43 spec files present, all comprehensive |
-| 2 | DOC COVERAGE | ✅ | README ✅, LICENSE ✅, 43 spec files. CONTRIBUTING.md absent (template-level, no task needed) |
-| 3 | TEST GAPS | ✅ | 41 test files across 4 packages (shared:18, server:8, CLI:10, web:5). GitReins shows TEST-CLI-COMMANDS completed. |
-| 4 | PACKAGE UPGRADES | ✅ | 13 transitive dev vulns (non-actionable). 3 minor npm upgrades available (typescript-eslint 8.64→8.65, prettier 3.9.5→3.9.6) — minor bumps. TS 7 blocked. |
-| 5 | PITFALL HUNT | ✅ | 0 TODO/FIXME/HACK/XXX in project source. 0 stubs. |
-| 6 | PERFORMANCE | ✅ | 3 benchmark files (event-bus, game-engine, stats-collector) |
-| 7 | ENDPOINT VERIFICATION | ✅ | 36 routes across 5 route files (games:16, stats:5, benchmark:6, models:6, agents:3). WebSocket wired. All correctly structured. |
-| 8 | CI/CD HEALTH | ✅ | 5 consecutive green runs on main. Most recent: idle tick #4 at 01:35 UTC. |
-| 9 | DUCKBRAIN SYNC | ✅ | 23+ entries in mafia-benchmark namespace. Project status, idle ticks, CI, specs, test health all present. |
-| 10 | CODE QUALITY | ✅ | 0 TODOs. Longest source file: mocks.ts (1002 lines, test helper). .gitignore comprehensive. 0 untracked files. |
-| 11 | MIDDLE-OUT WIRING | ✅ | All 5 route files wired via routes/index.ts → server/index.ts. WebSocket handler. 9 CLI commands. Web main.tsx with BrowserRouter. All packages imported in server entrypoint. |
+### Summary: 1 BUG found → WEB-01 created. 4 minor findings documented.
 
-### Issues Found & Fixed:
+| # | Category | Finding | Severity | Action |
+|---|----------|---------|----------|--------|
+| 1 | 🐛 WEB UI BUG | API response envelope not unwrapped — `fetchAPI` returns `{success, data}` but store reads fields at top level without unwrapping `data`. Affects all web store operations: `selectGame()` (game detail empty), `fetchGames()` (list broken), agent/stats/benchmark API calls. Mock tests mock the wrong response shape and pass falsely. | Medium | **WEB-01** created |
+| 2 | 📝 TS Strict | `run-real-game.ts` has 10+ implicit `any` errors at root-level tsc check. Pre-existing, not in build pipeline. | Low | Noted |
+| 3 | 🔒 Dep Vuln | New low-severity `body-parser` DoS (GHSA-v422-hmwv-36x6) via express — transitively introduced, no prod risk | Low | Noted |
+| 4 | ✅ Clean State | 0 stubs, 0 TODOs, 0 FIXMEs. 105/114 unit tests passing (9 integration need server). CI green 5 consecutive runs. Cooldown stable at 14400s. | — | Confirmed |
 
-1. **Cooldown reversion #5**: Scheduler daemon restart reverted CooldownS from 14400→7200s. PUT back to 14400s, GET verified. Escalated to Bane (TOML config fix needed for durability — this is the 5th reversion).
+### Findings Detail:
+
+**WEB-01 — API Response Envelope Bug (Confirmed)**:
+- `fetchAPI()` in `apps/web/src/services/api.ts` returns the full JSON body, which includes the server's `{ success, data }` envelope
+- `gamesAPI.get()` returns envelope but the TypeScript type says Game (no unwrap)
+- `gamesAPI.getAll()` returns envelope but store casts as array
+- Same pattern across all 4 API clients: games, agents, stats, benchmark
+- Web unit test (`api.test.ts:15`) mocks the WRONG response shape — returns `{ id, status, config }` instead of `{ success: true, data: { ... } }`, masking the bug
+- **Impact**: Web UI game detail views show empty players/state. Game list shows no games. Stats/benchmark/agents views broken.
+- **Fix**: Unwrap `{ success, data }` in fetchAPI or at the API client level
