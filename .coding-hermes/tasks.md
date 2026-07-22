@@ -5,8 +5,8 @@
 > **Repo:** github.com/wojons/mafia-ai-benchmark
 > **Foreman:** deepseek-v4-flash via deepseek-foreman | **Schedule:** every 120m (scheduler-managed)
 > **DuckBrain:** Connection dead this tick (PID cgroup exhaustion) — was 23+ entries
-> **Status:** ALL PHASES COMPLETE. WEB-01 ✅ committed & CI green. **INFRA-PIDLIMIT CRITICAL** — PID cgroup at 504/504 ceiling. `gh` CLI crashes (pthread_create failed), `pnpm` crashes (SIGABRT). Simple shell ops still work. DuckBrain MCP dead. Idle ticks: 3 (no worker spawn possible — PID ceiling blocks all threaded operations). Cooldown: 900s (15min) — escalation needed.
-> **Last tick:** 2026-07-22 15:25 UTC
+> **Status:** ALL PHASES COMPLETE. WEB-01 ✅ committed & CI green. **INFRA-PIDLIMIT CRITICAL** — `gh` crashes with pthread_create failed, `git push` fails (getaddrinfo thread), commits land locally. 155 system PIDs (cgroup limit ~512). DuckBrain MCP dead. Idle ticks: 4 (no worker spawn possible). Cooldown: 900s (15min). **ESCALATION: Bane must run `systemctl edit hermes-gateway.service` → TasksMax=2048**.
+> **Last tick:** 2026-07-22 15:28 UTC
 
 ---
 
@@ -186,3 +186,65 @@ This cannot be done from within a foreman tick — `sudo` is blocked by Tirith s
 ### Note on DuckBrain
 
 DuckBrain MCP is unreachable. Even if it were reachable, the PID limit would kill the Node.js server process within minutes. All DuckBrain operations (Off-by-One submit, DuckBrain write) are deferred until the PID limit is resolved.
+
+---
+
+## NEVER-DONE Audit: 2026-07-22 15:28 UTC — Tick #4 (Idle #3 — PID-limited, escalation)
+
+### Summary: 6/11 checks PASS/SKIP, 3 ❌ (DuckBrain, CI, push), 2 ⚠️ SKIP (tests, build). INFRA-PIDLIMIT remains the sole blocker. **Escalation to Bane is overdue.**
+
+| # | Check | Result | Details |
+|---|-------|--------|---------|
+| 1 | SPEC ALIGNMENT | ⚠️ STALE | Cannot `git fetch` to check for new commits — DNS threads blocked by PID limit. Last confirmed: 43+ spec files, no drift. |
+| 2 | DOC COVERAGE | ✅ | README ✅, AGENTS.md ✅, QUICK_START.md ✅, LICENSE ✅ — all present from prior ticks. |
+| 3 | TEST GAPS | ⚠️ SKIP | **Cannot run tests** — `fork: retry` on any threaded operation. 65 test files on disk. Prior runs: 607/607 passing. |
+| 4 | PACKAGE UPGRADES | ⚠️ SKIP | Cannot run `pnpm audit` — `fork()` blocked. Last audited: 1 low-severity body-parser vuln (pre-existing). |
+| 5 | PITFALL HUNT | ✅ | 0 TODOs, 0 FIXMEs, 0 HACKs in 280 TypeScript source files across apps/ and packages/. |
+| 6 | PERFORMANCE | ✅ | No benchmarks defined. Not a blocker. |
+| 7 | ENDPOINT VERIFICATION | ✅ | 6 server route files confirmed on disk. 36 routes verified in prior audit. No source changes since. |
+| 8 | CI/CD HEALTH | ❌ | `gh run list` crashes with `pthread_create failed: Resource temporarily unavailable` (Go HTTP client needs threads). Last known: 6 consecutive green runs at commit f0d7140. Commit df987f3 (this tick) cannot be pushed — `git push` fails with `getaddrinfo() thread failed to start`. CI cannot run without push. |
+| 9 | DUCKBRAIN SYNC | ❌ | **Connection dead.** PID limit kills all MCP Node processes. Can't read or write. All learnings deferred. |
+| 10 | CODE QUALITY | ✅ | Clean working tree. 280 TS source files, 65 test files. 0 untracked artifacts. `.gitignore` clean. |
+| 11 | MIDDLE-OUT WIRING | ✅ SKIP | Wiring confirmed in prior audits (Express+WebSocket, Docker compose, 36 routes, CLI, React Router). No source changes. |
+
+### INFRA-PIDLIMIT — Tick #4 Status Update
+
+| Metric | Tick #3 (12:55 UTC) | Tick #4 (15:28 UTC) |
+|--------|---------------------|---------------------|
+| System PIDs | ~500 (`ps` failing) | 155 (`ps aux --no-headers \| wc -l`) |
+| cgroup limit | ~512 (unreadable) | ~512 (unreadable — `cat /sys/fs/cgroup/pids/pids.current` returns EACCES) |
+| System PID max | N/A | 4,194,304 (`/proc/sys/kernel/pid_max`) — plenty of headroom at OS level |
+| `gh` CLI | Crashes (pthread_create) | Crashes identically (Go runtime SIGABRT) |
+| `git push` | N/A (not tested) | **Fails** — `getaddrinfo() thread failed to start` (DNS resolution blocked) |
+| `git commit` | Working | **Working** — comitted df987f3 ✅ |
+| `git pull` | **Failing** (`fork: retry`) | Mildly improved — `fork: retry` on `git diff` but operations complete |
+| DuckBrain MCP | Dead | Dead — same root cause (Node processes killed by PID exhaustion) |
+| Code operations | Blocked | Blocked — any thread-spawning operation fails |
+
+### Assessment
+
+The PID situation has **mildly improved** (155 visible system PIDs vs ~500 in prior tick), likely from some auto-scavenging of zombie processes. However, the core bottleneck remains: the Hermes gateway systemd unit's `TasksMax=512` cgroup. Operations that need new threads (DNS resolution for `git push`, Go HTTP client for `gh`, Node.js for DuckBrain MCP) all fail.
+
+**The project is frozen.** No code work, no tests, no CI, no DuckBrain, no builds, no push — nothing until the systemd unit limit is increased.
+
+### Escalation — CRITICAL
+
+**Action required by Bane (sudo needed):**
+
+```bash
+sudo systemctl edit hermes-gateway.service
+# Add under [Service]:
+# TasksMax=2048
+sudo systemctl daemon-reload
+sudo systemctl restart hermes-gateway
+```
+
+This cannot be done from within a foreman tick — `sudo` is blocked by the Tirith security scanner, and `write_file` to `/etc/systemd/system/` is blocked. Only a human with shell access to the host can fix this.
+
+**After resolution, the next tick should:**
+1. Verify DuckBrain MCP is back online (`hermes mcp test duckbrain`)
+2. Verify `gh run list` returns CI status
+3. Push accumulated commits (df987f3)
+4. Run full audit sweep including live E2E tests
+5. Deprecate the INFRA-PIDLIMIT task
+6. Run the full NEVER-DONE audit against a healthy system
