@@ -13,9 +13,9 @@
 ## Task Matrix
 
 | ID | Task | Priority | Complexity | Deps | Tags | Model | Reasoning | Fallback |
-|----|------|----------|------------|------|------|-------|-----------|----------|
-| WEB-01 | Fix web API response envelope unwrapping — games, agents, stats, benchmark API clients don't unwrap `{success, data}` envelope from server | Medium | 2±1 | — | +++frontend, ++typescript, +testing, -vision | MiniMax-M3 | Medium | Kimi-K3 |
-| NEVER-DONE | 11-point audit sweep | Medium | 2 ± 1 | none | +++terminal, +++file-editing, +documentation, +testing | deepseek-v4-flash | Medium | MiniMax-M3 |
+||----|------|----------|------------|------|------|-------|-----------|----------|
+|| ~~WEB-01~~ | Fix web API response envelope unwrapping — games, agents, stats, benchmark API clients don't unwrap `{success, data}` envelope from server | Medium | 2±1 | — | +++frontend, ++typescript, +testing, -vision | MiniMax-M3 | Medium | Kimi-K3 |
+|| NEVER-DONE | 11-point audit sweep | Medium | 2 ± 1 | none | +++terminal, +++file-editing, +documentation, +testing | deepseek-v4-flash | Medium | MiniMax-M3 |
 
 ## Assumptions
 
@@ -82,11 +82,35 @@
 
 ### Findings Detail:
 
-**WEB-01 — API Response Envelope Bug (Confirmed)**:
-- `fetchAPI()` in `apps/web/src/services/api.ts` returns the full JSON body, which includes the server's `{ success, data }` envelope
-- `gamesAPI.get()` returns envelope but the TypeScript type says Game (no unwrap)
-- `gamesAPI.getAll()` returns envelope but store casts as array
-- Same pattern across all 4 API clients: games, agents, stats, benchmark
-- Web unit test (`api.test.ts:15`) mocks the WRONG response shape — returns `{ id, status, config }` instead of `{ success: true, data: { ... } }`, masking the bug
-- **Impact**: Web UI game detail views show empty players/state. Game list shows no games. Stats/benchmark/agents views broken.
-- **Fix**: Unwrap `{ success, data }` in fetchAPI or at the API client level
+**WEB-01 — API Response Envelope Bug (Confirmed)**:  
+- `fetchAPI()` in `apps/web/src/services/api.ts` returns the full JSON body, which includes the server's `{ success, data }` envelope  
+- `gamesAPI.get()` returns envelope but the TypeScript type says Game (no unwrap)  
+- `gamesAPI.getAll()` returns envelope but store casts as array  
+- Same pattern across all 4 API clients: games, agents, stats, benchmark  
+- Web unit test (`api.test.ts:15`) mocks the WRONG response shape — returns `{ id, status, config }` instead of `{ success: true, data: { ... } }`, masking the bug  
+- **Impact**: Web UI game detail views show empty players/state. Game list shows no games. Stats/benchmark/agents views broken.  
+- **Fix**: Unwrap `{ success, data }` in fetchAPI or at the API client level  
+
+---
+
+## WEB-01: 2026-07-22 06:38 UTC — Completed
+
+| Field | Value |
+|-------|-------|
+| **Commit** | `7d3971d` |
+| **Files** | `apps/web/src/services/api.ts` (+17/-1), `apps/web/src/__tests__/api.test.ts` (+4/-4) |
+| **Summary** | Added auto-unwrap in `fetchAPI()` for `{ success: true, data: ... }` envelope. All 4 API clients (games, agents, stats, benchmark) now unwrap automatically. Error responses pass through unchanged. |
+| **Tests** | 5/5 test files passing, 29/29 tests passing |
+| **Guard** | PASS (secrets clean, lint ok, tests pass, LSP ok) |
+
+#### Implementation
+
+`fetchAPI()` now:
+1. Parses the JSON response body
+2. Checks if it's a `{ success: true, data: <T> }` envelope
+3. If so, returns `body.data` (the unwrapped inner object)
+4. If not (bare response or error), returns the body as-is
+5. Test mocks updated to wrap in `{ success: true, data: ... }` to match real server shape
+
+#### Cooldown
+Reset to 900s (15min) — active work was done this tick.
