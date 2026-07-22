@@ -5,8 +5,8 @@
 > **Repo:** github.com/wojons/mafia-ai-benchmark
 > **Foreman:** deepseek-v4-flash via deepseek-foreman | **Schedule:** every 120m (scheduler-managed)
 > **DuckBrain:** Connection dead this tick (PID cgroup exhaustion) — was 23+ entries
-> **Status:** ALL PHASES COMPLETE. WEB-01 ✅ committed & CI green. **INFRA-PIDLIMIT unresolved** (488/512 PIDs). Idle ticks: 1 (no worker spawned — PID limit blocks all code work). Cooldown: 900s (15min).
-> **Last tick:** 2026-07-22 10:48 UTC
+> **Status:** ALL PHASES COMPLETE. WEB-01 ✅ committed & CI green. **INFRA-PIDLIMIT WORSENING** — PID cgroup exhaustion now at critical level, even basic shell ops (`git pull`, `gh`) fail with `fork: retry: Resource temporarily unavailable`. Idle ticks: 2 (no worker spawned — PID limit blocks all code work, even git ops). Cooldown: 900s (15min).
+> **Last tick:** 2026-07-22 12:55 UTC
 
 ---
 
@@ -20,12 +20,13 @@
 
 ## Assumptions
 
-- **INFRA-PIDLIMIT** — systemd TasksMax=512, now 488/512 → ticking tighter. Blocks tests, builds, DuckBrain. Spare capacity for only lightweight shell ops.
+- **INFRA-PIDLIMIT** — systemd TasksMax=512, now even basic shell ops (`git pull`, `gh run`) fail with `fork: retry`. PID exhaustion has crossed the critical threshold where the agent's own tools are affected.
 - 1 `pnpm audit` vuln (GHSA-v422-hmwv-36x6, body-parser low severity) — pre-existing, non-actionable
 - TypeScript 7 upgrade BLOCKED by typescript-eslint v8.65.0 incompatibility — known, unresolvable
 - 3 minor npm upgrades available — optional
 - **DuckBrain dead** — secondary to PID exhaustion. MCP Node processes killed or starved.
-- **Idle tick #1** — PID limit blocks all code work (builds, tests, DuckBrain). Only sweep/audit ops possible.
+- **Idle tick #2** — PID limit blocks ALL operations including git. Project frozen.
+- **Escalation is urgent.** The PID situation is worsening even between ticks. Previous tick: 488/512. This tick: even git and gh fail to fork.
 
 ## Routing Notes
 
@@ -70,7 +71,7 @@
 | 10 | CODE QUALITY | ✅ | 0 untracked artifacts. `.gitignore` clean. All 242 TypeScript source files accounted for. |
 | 11 | MIDDLE-OUT WIRING | ✅ | Full Express+WebSocket server. All services wired. 9 CLI commands. Docker compose. 36 routes. Web UI with React Router. |
 
-### INFRA-PIDLIMIT — System Resource Exhaustion (NEW)
+### INFRA-PIDLIMIT — System Resource Exhaustion
 
 | Field | Value |
 |-------|-------|
@@ -135,4 +136,53 @@ Set to 900s (15min) — active work was done this tick. NEXT: cooldown should in
 - INFRA-PIDLIMIT remains the single blocker: `TasksMax=512`, current load 488/512.
 - DuckBrain remains dead as a secondary effect.
 - **Escalation:** Need Bane to run `systemctl edit hermes-gateway.service` → add `TasksMax=2048` under `[Service]` → `systemctl daemon-reload && systemctl restart hermes-gateway`.
-|
+
+---
+
+## NEVER-DONE Audit: 2026-07-22 12:55 UTC — Tick #3 (Idle #2 — PID CRITICAL)
+
+### Summary: 8/11 checks UNABLE TO RUN. 1 ⚠️ (spec — stale). 1 ❌ (DuckBrain). 1 ❌ (CI — can't check). PID limit has worsened to the point that even the foreman's diagnostic tools can't fork. No new gaps found beyond INFRA-PIDLIMIT.
+
+| # | Check | Result | Details |
+|---|-------|--------|---------|
+| 1 | SPEC ALIGNMENT | ⚠️ STALE | Cannot verify — `git pull` failed with `fork: retry`. Last verified 08:00 UTC. No new commits since last confirmed green CI. |
+| 2 | DOC COVERAGE | ✅ SKIP | Confirmed present in prior ticks. No source changes since. |
+| 3 | TEST GAPS | ⚠️ SKIP | **Cannot run tests** — system is at PID capacity. Even basic `ps` fails. 86 test files on disk. Prior runs confirmed 607/607 passing. |
+| 4 | PACKAGE UPGRADES | ⚠️ SKIP | Cannot run `pnpm audit` — `fork()` blocked by PID limit. No new CVEs likely since last check 2h ago. |
+| 5 | PITFALL HUNT | ✅ | 0 TODOs, 0 FIXMEs in source (confirmed by prior ticks, no source changes possible). |
+| 6 | PERFORMANCE | ✅ | No benchmarks defined. Not a blocker. |
+| 7 | ENDPOINT VERIFICATION | ⚠️ SKIP | Cannot verify — server likely not running (Docker compose needs fork). 36 routes confirmed in prior audit. |
+| 8 | CI/CD HEALTH | ❌ CANNOT CHECK | `gh run list` and `gh issue list` both crash with `pthread_create failed: Resource temporarily unavailable`. Last known: 6 consecutive green runs. |
+| 9 | DUCKBRAIN SYNC | ❌ | **Connection dead.** PID cgroup exhaustion kills all MCP Node processes. Cannot read or write. |
+| 10 | CODE QUALITY | ✅ | Clean working tree confirmed via `git status` (last successful cmd). No untracked artifacts. |
+| 11 | MIDDLE-OUT WIRING | ⚠️ SKIP | Cannot verify live services — server not reachable. Wiring confirmed in prior audits. |
+
+### INFRA-PIDLIMIT — CRITICAL WORSENING
+
+| Field | Previous (10:48 UTC) | This Tick (12:55 UTC) |
+|-------|---------------------|----------------------|
+| **Status** | 488/512 PIDs, "ticking tighter" | **PID cgroup completely saturated.** Even the agent's own tool processes (`patch`, terminal commands spawning subshells) fail with `can't start new thread`. |
+| **Git ops** | Working (could commit board updates) | **Failing.** `git pull --rebase` → `fork: retry: Resource temporarily unavailable`. Git can't make network connections because threads fail. |
+| **CI checks** | Working | **Failing.** `gh run list` and `gh issue list` both crash with Go runtime `pthread_create failed` + SIGABRT. |
+| **Board updates** | Working (patch/terminal) | **Partially working.** `read_file` and `write_file` still function. `patch` fails (can't start new thread). `terminal` ops that need `fork()` fail. |
+| **Impact level** | Blocked code work, shell ops possible | **Blocked ALL operations.** System at critical capacity. Every bit of spare PID capacity is needed for the agent to complete this tick. |
+| **Urgency** | High | **CRITICAL.** The PID exhaustion is self-reinforcing — the fewer spare PIDs, the harder it is to free any. Only a system-level `systemctl edit hermes-gateway.service` + reload can resolve this. |
+
+### Recommendation
+
+**Escalate to Bane. Now.** The project is completely frozen. No code work, no tests, no CI checks, no DuckBrain, no builds — nothing can be done until the `hermes-gateway.service` `TasksMax` limit is increased from 512 to at least 2048.
+
+The `systemctl` command (requires sudo as kara):
+```bash
+sudo systemctl edit hermes-gateway.service
+# → Add under [Service]:
+# TasksMax=2048
+sudo systemctl daemon-reload
+sudo systemctl restart hermes-gateway
+```
+
+This cannot be done from within a foreman tick — `sudo` is blocked by Tirith security scanner, and the system has no spare PIDs for the operation anyway.
+
+### Note on DuckBrain
+
+DuckBrain MCP is unreachable. Even if it were reachable, the PID limit would kill the Node.js server process within minutes. All DuckBrain operations (Off-by-One submit, DuckBrain write) are deferred until the PID limit is resolved.
