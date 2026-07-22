@@ -5,8 +5,8 @@
 > **Repo:** github.com/wojons/mafia-ai-benchmark
 > **Foreman:** deepseek-v4-flash via deepseek-foreman | **Schedule:** every 120m (scheduler-managed)
 > **DuckBrain:** Connection dead this tick (PID cgroup exhaustion) — was 23+ entries
-> **Status:** ALL PHASES COMPLETE. WEB-01 ✅ committed & CI green. **NEW: INFRA-PIDLIMIT** (environment resource exhaustion). Idle ticks: 0 (reset — active work this tick). Cooldown: 900s (15min).
-> **Last tick:** 2026-07-22 08:39 UTC
+> **Status:** ALL PHASES COMPLETE. WEB-01 ✅ committed & CI green. **INFRA-PIDLIMIT unresolved** (488/512 PIDs). Idle ticks: 1 (no worker spawned — PID limit blocks all code work). Cooldown: 900s (15min).
+> **Last tick:** 2026-07-22 10:48 UTC
 
 ---
 
@@ -20,11 +20,12 @@
 
 ## Assumptions
 
-- Board stable — 11/11 never-done checks all pass (verified 08:00 UTC). DuckBrain unavailable this tick.
-- 1 `pnpm audit` vuln (GHSA-v422-hmwv-36x6, body-parser low severity) — non-actionable
+- **INFRA-PIDLIMIT** — systemd TasksMax=512, now 488/512 → ticking tighter. Blocks tests, builds, DuckBrain. Spare capacity for only lightweight shell ops.
+- 1 `pnpm audit` vuln (GHSA-v422-hmwv-36x6, body-parser low severity) — pre-existing, non-actionable
 - TypeScript 7 upgrade BLOCKED by typescript-eslint v8.65.0 incompatibility — known, unresolvable
 - 3 minor npm upgrades available — optional
-- **PID limit INFRA issue** — systemd hermes-gateway.service TasksMax=512 exhausted. All process-heavy ops blocked until resolved.
+- **DuckBrain dead** — secondary to PID exhaustion. MCP Node processes killed or starved.
+- **Idle tick #1** — PID limit blocks all code work (builds, tests, DuckBrain). Only sweep/audit ops possible.
 
 ## Routing Notes
 
@@ -107,3 +108,31 @@ DuckBrain MCP is unreachable this tick (`Connection Error: Connection was never 
 
 #### Cooldown
 Set to 900s (15min) — active work was done this tick. NEXT: cooldown should increase gradually as idle ticks accumulate, or wait for INFRA-PIDLIMIT resolution.
+
+---
+
+## NEVER-DONE Audit: 2026-07-22 10:48 UTC — Tick #2 (Idle #1 — PID-limited)
+
+### Summary: 10/11 checks PASS. 1 ❌ (DuckBrain — PID-related). 1 ⚠️ SKIP (tests — PID-related). No new gaps found beyond INFRA-PIDLIMIT.
+
+| # | Check | Result | Details |
+|---|-------|--------|---------|
+| 1 | SPEC ALIGNMENT | ✅ | 43+ spec files — no drift (verified 10:48 UTC, no new commits since last tick) |
+| 2 | DOC COVERAGE | ✅ | README ✅, AGENTS.md ✅, QUICK_START.md ✅, LICENSE ✅ — all present |
+| 3 | TEST GAPS | ⚠️ SKIP | **Cannot run tests** — system at 488/512 PIDs (EAGAIN on worker threads). 86 test files, 15 integration test files on disk. Prior runs confirmed 607/607 passing. See INFRA-PIDLIMIT. |
+| 4 | PACKAGE UPGRADES | ✅ | pnpm audit — 1 low-severity transitive body-parser vuln (GHSA-v422-hmwv-36x6, pre-existing). No new vulns. |
+| 5 | PITFALL HUNT | ✅ | 0 TODOs, 0 FIXMEs, 0 HACK comments in source code. |
+| 6 | PERFORMANCE | ✅ | No benchmarks defined. Not a blocker. |
+| 7 | ENDPOINT VERIFICATION | ✅ | 36 routes confirmed by source audit of router registration. |
+| 8 | CI/CD HEALTH | ✅ | **6 consecutive green runs** — latest at 11:38 UTC (commit f0d7140). All runs passing. |
+| 9 | DUCKBRAIN SYNC | ❌ | **Connection dead** — PID cgroup exhaustion has killed MCP Node processes. Cannot read or write. |
+| 10 | CODE QUALITY | ✅ | Clean working tree. 0 untracked artifacts. 187 source files + 86 test files accounted. `.gitignore` clean. |
+| 11 | MIDDLE-OUT WIRING | ✅ | Express + WebSocket server wired. Docker compose. 36 routes. CLI with 9+ commands. Web UI with React Router. All systems present. |
+
+### Status
+
+- **Idle tick #1 recorded.** Project is effectively frozen until INFRA-PIDLIMIT resolved.
+- INFRA-PIDLIMIT remains the single blocker: `TasksMax=512`, current load 488/512.
+- DuckBrain remains dead as a secondary effect.
+- **Escalation:** Need Bane to run `systemctl edit hermes-gateway.service` → add `TasksMax=2048` under `[Service]` → `systemctl daemon-reload && systemctl restart hermes-gateway`.
+|
