@@ -5,8 +5,8 @@
 > **Repo:** github.com/wojons/mafia-ai-benchmark
 > **Foreman:** deepseek-v4-flash via deepseek-foreman | **Schedule:** every 120m (scheduler-managed)
 > **DuckBrain:** Connection dead this tick (PID cgroup exhaustion) — was 23+ entries
-> **Status:** ALL PHASES COMPLETE. WEB-01 ✅ committed & CI green. **INFRA-PIDLIMIT WORSENING** — PID cgroup exhaustion now at critical level, even basic shell ops (`git pull`, `gh`) fail with `fork: retry: Resource temporarily unavailable`. Idle ticks: 2 (no worker spawned — PID limit blocks all code work, even git ops). Cooldown: 900s (15min).
-> **Last tick:** 2026-07-22 12:55 UTC
+> **Status:** ALL PHASES COMPLETE. WEB-01 ✅ committed & CI green. **INFRA-PIDLIMIT CRITICAL** — PID cgroup at 504/504 ceiling. `gh` CLI crashes (pthread_create failed), `pnpm` crashes (SIGABRT). Simple shell ops still work. DuckBrain MCP dead. Idle ticks: 3 (no worker spawn possible — PID ceiling blocks all threaded operations). Cooldown: 900s (15min) — escalation needed.
+> **Last tick:** 2026-07-22 15:25 UTC
 
 ---
 
