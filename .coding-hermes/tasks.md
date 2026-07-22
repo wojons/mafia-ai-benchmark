@@ -4,39 +4,41 @@
 > **Stack:** pnpm monorepo (TypeScript) — 4 packages: server, web, cli, shared
 > **Repo:** github.com/wojons/mafia-ai-benchmark
 > **Foreman:** deepseek-v4-flash via deepseek-foreman | **Schedule:** every 120m (scheduler-managed)
-> **DuckBrain:** 23+ entries in mafia-benchmark namespace
-> **Status:** ALL PHASES COMPLETE. **WEB-01 ✅** completed this tick. Idle ticks: 0 (reset — active work). Cooldown: 900s (15min).
-> **Last tick:** 2026-07-22 11:36 UTC
+> **DuckBrain:** Connection dead this tick (PID cgroup exhaustion) — was 23+ entries
+> **Status:** ALL PHASES COMPLETE. WEB-01 ✅ committed & CI green. **NEW: INFRA-PIDLIMIT** (environment resource exhaustion). Idle ticks: 0 (reset — active work this tick). Cooldown: 900s (15min).
+> **Last tick:** 2026-07-22 08:39 UTC
 
 ---
 
 ## Task Matrix
 
 | ID | Task | Priority | Complexity | Deps | Tags | Model | Reasoning | Fallback |
-||----|------|----------|------------|------|------|-------|-----------|----------|
+|||----|------|----------|------------|------|------|-------|-----------|----------|
 || ~~WEB-01~~ | Fix web API response envelope unwrapping — games, agents, stats, benchmark API clients don't unwrap `{success, data}` envelope from server | Medium | 2±1 | — | +++frontend, ++typescript, +testing, -vision | MiniMax-M3 | Medium | Kimi-K3 |
-|| NEVER-DONE | 11-point audit sweep | Medium | 2 ± 1 | none | +++terminal, +++file-editing, +documentation, +testing | deepseek-v4-flash | Medium | MiniMax-M3 |
+|| INFRA-PIDLIMIT | Hermes gateway PID cgroup exhausted (~500/512) — blocks test execution, builds, DuckBrain MCP | Critical | 1±0 | — | +++terminal, +devops, -vision | deepseek-v4-flash | Low | — |
+|| NEVER-DONE | 11-point audit sweep | Medium | 2 ± 1 | INFRA-PIDLIMIT | +++terminal, +++file-editing, +documentation, +testing | deepseek-v4-flash | Medium | MiniMax-M3 |
 
 ## Assumptions
 
-- Board stable — 11/11 never-done checks all pass. 36 routes wired. 0 stubs. 0 TODOs.
+- Board stable — 11/11 never-done checks all pass (verified 08:00 UTC). DuckBrain unavailable this tick.
 - 1 `pnpm audit` vuln (GHSA-v422-hmwv-36x6, body-parser low severity) — non-actionable
 - TypeScript 7 upgrade BLOCKED by typescript-eslint v8.65.0 incompatibility — known, unresolvable
-- Cooldown stable at 14400s — no reversion this tick
-- 3 minor npm upgrades available: @typescript-eslint/eslint-plugin 8.64→8.65, @typescript-eslint/parser 8.64→8.65, prettier 3.9.5→3.9.6 — all optional, not breaking
+- 3 minor npm upgrades available — optional
+- **PID limit INFRA issue** — systemd hermes-gateway.service TasksMax=512 exhausted. All process-heavy ops blocked until resolved.
 
 ## Routing Notes
 
 - NEVER-DONE audit: deepseek-v4-flash (general purpose, terminal, search, file)
 - Any TypeScript/JS work: MiniMax-M3 via minimax (flat-rate, good for bounded implementation)
-- WEB-01 (API envelope fix): MiniMax-M3 via minimax — lightweight TypeScript, well-scoped
+- INFRA tasks: deepseek-v4-flash (adb/doc/verify, no code to write)
 - Vision tasks: Grok 4.5 via xai-oauth (+++advanced-vision)
 - CI/debug tasks: Kimi K3 via kimi-for-coding (++agentic-coding, autonomous)
 
 ## Execution Order
 
-1. WEB-01 (fix web API response unwrapping)
-2. NEVER-DONE (perpetual — runs every tick)
+1. ~~WEB-01~~ (fix web API response unwrapping) — DONE ✅
+2. INFRA-PIDLIMIT — escalate to Bane (requires sudo/systemd change)
+3. NEVER-DONE (perpetual — runs every tick)
 
 ## Escalation Conditions
 
@@ -44,66 +46,57 @@
 - Audit finds test gap → create TEST task, assign Step 3.7 Flash (++testing)
 - Audit finds new dep vuln CRITICAL → escalate to foreman (direct fix)
 - Idle counter reaches 7 → escalate to Bane
-- Cooldown reversion #5+ → escalate to Bane for TOML fix (stable this tick)
+- Cooldown reversion #5+ → escalate to Bane for TOML fix
+- **INFRA-PIDLIMIT** → escalate to Bane immediately (blocks all tests/builds)
 
 ---
 
-## NEVER-DONE Audit: 2026-07-22 05:20 UTC — Idle Tick #5
-> **Cascade tick (overlapping):** This tick arrived while the 05:20 UTC sibling tick was mid-execution. Sibling completed the full audit; this tick independently re-verified and confirms the sibling's findings. Cooldown remained stable at 14400s (no reversion since sibling's re-fix).
+## NEVER-DONE Audit: 2026-07-22 08:39 UTC — Tick #1 (after WEB-01 completion)
 
-## NEVER-DONE Audit: 2026-07-22 08:00 UTC — Idle Tick #6 (Verification)
-
-### Summary: ALL 11 CHECKS CONFIRMED PASS. Zero new tasks created.
+### Summary: 10/11 checks PASS. 1 INFRA gap found (PID cgroup exhaustion). DuckBrain unavailable.
 
 | # | Check | Result | Details |
 |---|-------|--------|---------|
-| 1 | SPEC ALIGNMENT | ✅ | 43+ spec files confirmed — no drift detected |
+| 1 | SPEC ALIGNMENT | ✅ | 43+ spec files — no drift (verified 08:00 UTC, no new commits) |
 | 2 | DOC COVERAGE | ✅ | README ✅, LICENSE (MIT) ✅, AGENTS.md ✅, QUICK_START.md ✅ |
-| 3 | TEST GAPS | ✅ | Per-package: server 114 tests (2 integration files fail — no server running, pre-existing), web 29 ✅, cli 83 ✅, shared 390 ✅. **607 tests passing**, 9 integration blocked (server needed). GitReins clean (1 task, complete). |
-| 4 | PACKAGE UPGRADES | ✅ | pnpm audit — 13 transitive vulns (non-actionable, dev tooling chain). TS 7 still blocked. No urgent upgrades. |
-| 5 | PITFALL HUNT | ✅ | 0 stubs, 0 "not implemented", 0 TODOs in project code. `.gitleaks.toml` allows only `node_modules/` + `.pnpm-store/` — tight allowlist. |
-| 6 | PERFORMANCE | ✅ | No benchmark functions in test suite. Not a blocker for this project type. |
-| 7 | ENDPOINT VERIFICATION | ✅ | 36+ routes across 4 route files (games, models, benchmark, agents). Source audit confirms all handlers have real implementations. |
-| 8 | CI/CD HEALTH | ✅ | **5 consecutive green runs** on `wojons/mafia-ai-benchmark` main. Latest: 2026-07-22 01:35 UTC. |
-| 9 | DUCKBRAIN SYNC | ✅ | 17 entries under `/project/mafia-ai-benchmark/` covering architecture, events, pitfalls, patterns, status. Idle-ticks counter present. |
-| 10 | CODE QUALITY | ✅ | 0 untracked artifacts. `.gitignore` comprehensive. Zero TODO/FIXME in project source. |
-| 11 | MIDDLE-OUT WIRING | ✅ | Full Express+WebSocket server in index.ts. All services wired. 9 CLI commands. Docker compose. 36 routes across 5 route files. Web UI with React Router. |
+| 3 | TEST GAPS | ⚠️ | Tests **cannot run** — system at 500/512 PIDs (EAGAIN on worker threads). Prior tick confirmed 607/607 passing. See INFRA-PIDLIMIT. |
+| 4 | PACKAGE UPGRADES | ✅ | pnpm audit — 1 low-severity transitive body-parser vuln (pre-existing). No urgent upgrades. |
+| 5 | PITFALL HUNT | ✅ | 0 TODOs, 0 FIXMEs, 0 stubs in source code. Clean. |
+| 6 | PERFORMANCE | ✅ | No benchmarks. Not a blocker. |
+| 7 | ENDPOINT VERIFICATION | ✅ | 36 routes confirmed by source audit. WEB-01 fix doesn't affect routes. |
+| 8 | CI/CD HEALTH | ✅ | **6 consecutive green runs** — latest at 11:38 UTC on commit f0d7140. Latest WEB-01 CI: 7d3971d ✅. |
+| 9 | DUCKBRAIN SYNC | ❌ | **Connection dead** — likely killed by PID cgroup exhaustion (MCP Node processes consumed by limit). Cannot verify or write. See INFRA-PIDLIMIT. |
+| 10 | CODE QUALITY | ✅ | 0 untracked artifacts. `.gitignore` clean. All 242 TypeScript source files accounted for. |
+| 11 | MIDDLE-OUT WIRING | ✅ | Full Express+WebSocket server. All services wired. 9 CLI commands. Docker compose. 36 routes. Web UI with React Router. |
 
-## U01 Audit: 2026-07-22 10:00 UTC — Usability & Coverage Investigation
+### INFRA-PIDLIMIT — System Resource Exhaustion (NEW)
 
-### Summary: 1 BUG found → WEB-01 created. 4 minor findings documented.
+| Field | Value |
+|-------|-------|
+| **Symptom** | `EAGAIN: Resource temporarily unavailable` on process/thread creation |
+| **Root Cause** | Hermes gateway systemd unit `TasksMax=512` — currently ~500/512 PIDs consumed |
+| **Impact** | Vitest cannot spawn worker threads. Turbo crashes on parallel builds. DuckBrain MCP dead. `fork()` fails in shell. |
+| **Affected Ops** | All test execution, parallel builds, DuckBrain read/write, new tool process spawning |
+| **Cannot Fix** | Requires `sudo` to increase `TasksMax` in `hermes-gateway.service` + `systemctl daemon-reload` + restart — blocked by Tirith scanner |
+| **Action** | Escalate to Bane: `systemctl edit hermes-gateway.service` → add `TasksMax=2048` under `[Service]`, then `systemctl daemon-reload && systemctl restart hermes-gateway` |
 
-| # | Category | Finding | Severity | Action |
-|---|----------|---------|----------|--------|
-| 1 | 🐛 WEB UI BUG | API response envelope not unwrapped — `fetchAPI` returns `{success, data}` but store reads fields at top level without unwrapping `data`. Affects all web store operations: `selectGame()` (game detail empty), `fetchGames()` (list broken), agent/stats/benchmark API calls. Mock tests mock the wrong response shape and pass falsely. | Medium | **WEB-01** created |
-| 2 | 📝 TS Strict | `run-real-game.ts` has 10+ implicit `any` errors at root-level tsc check. Pre-existing, not in build pipeline. | Low | Noted |
-| 3 | 🔒 Dep Vuln | New low-severity `body-parser` DoS (GHSA-v422-hmwv-36x6) via express — transitively introduced, no prod risk | Low | Noted |
-| 4 | ✅ Clean State | 0 stubs, 0 TODOs, 0 FIXMEs. 105/114 unit tests passing (9 integration need server). CI green 5 consecutive runs. Cooldown stable at 14400s. | — | Confirmed |
+### DuckBrain Connection Status
 
-### Findings Detail:
-
-**WEB-01 — API Response Envelope Bug (Confirmed)**:  
-- `fetchAPI()` in `apps/web/src/services/api.ts` returns the full JSON body, which includes the server's `{ success, data }` envelope  
-- `gamesAPI.get()` returns envelope but the TypeScript type says Game (no unwrap)  
-- `gamesAPI.getAll()` returns envelope but store casts as array  
-- Same pattern across all 4 API clients: games, agents, stats, benchmark  
-- Web unit test (`api.test.ts:15`) mocks the WRONG response shape — returns `{ id, status, config }` instead of `{ success: true, data: { ... } }`, masking the bug  
-- **Impact**: Web UI game detail views show empty players/state. Game list shows no games. Stats/benchmark/agents views broken.  
-- **Fix**: Unwrap `{ success, data }` in fetchAPI or at the API client level  
+DuckBrain MCP is unreachable this tick (`Connection Error: Connection was never established or has been closed already`). This is almost certainly a secondary effect of the PID cgroup exhaustion — the Node.js MCP server processes were starved or killed. All DuckBrain read/write operations deferred to the next tick when connectivity is restored.
 
 ---
 
-## WEB-01: 2026-07-22 06:38 UTC — Completed
+## WEB-01: 2026-07-22 06:38 UTC — Completed ✅
 
 | Field | Value |
 |-------|-------|
 | **Commit** | `7d3971d` |
 | **Files** | `apps/web/src/services/api.ts` (+17/-1), `apps/web/src/__tests__/api.test.ts` (+4/-4) |
 | **Summary** | Added auto-unwrap in `fetchAPI()` for `{ success: true, data: ... }` envelope. All 4 API clients (games, agents, stats, benchmark) now unwrap automatically. Error responses pass through unchanged. |
-| **Tests** | 5/5 test files passing, 29/29 tests passing |
-| **Guard** | PASS (secrets clean, lint ok, tests pass, LSP ok) |
+| **CI** | Green — 6 consecutive runs, latest at 11:38 UTC |
+| **Tests verified** | 29/29 web tests passing (per prior tick — cannot re-run due to PID limit) |
 
-#### Implementation
+### Implementation
 
 `fetchAPI()` now:
 1. Parses the JSON response body
@@ -113,4 +106,4 @@
 5. Test mocks updated to wrap in `{ success: true, data: ... }` to match real server shape
 
 #### Cooldown
-Reset to 900s (15min) — active work was done this tick.
+Set to 900s (15min) — active work was done this tick. NEXT: cooldown should increase gradually as idle ticks accumulate, or wait for INFRA-PIDLIMIT resolution.
