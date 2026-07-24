@@ -5,8 +5,8 @@
 > **Repo:** github.com/wojons/mafia-ai-benchmark
 > **Foreman:** deepseek-v4-flash via deepseek-foreman | **Schedule:** every 120m (scheduler-managed)
 > **DuckBrain:** Operational (remember writes work, list_keys intermittent)
-> **Status:** ALL PHASES COMPLETE. ✅ **System healthy** — PIDs 239, DuckBrain MCP operational (remember OK, list_keys connection error), CI 8+ green. Idle ticks: 16 (gaps: none — project genuinely complete). **Cooldown: 43200s (12h) — persisted from tick #12, confirmed via API.**
-> **Last tick:** 2026-07-23 20:20 UTC
+> **Status:** ALL PHASES COMPLETE. ✅ **System healthy** — PIDs ~239, DuckBrain MCP operational (remember OK), CI 8+ green. Idle ticks: 17 (gaps: none — project genuinely complete). **Cooldown: 43200s (12h) — RE-FIXED tick #17 (was 7200, fleet TOML overwrite on daemon restart), API-confirmed.**
+> **Last tick:** 2026-07-23 20:31 UTC
 
 ---
 
@@ -86,9 +86,45 @@
 
 ---
 
-## NEVER-DONE Audit: 2026-07-23 20:20 UTC — Tick #16 (Idle #16 — COOLDOWN HELD)
+## NEVER-DONE Audit: 2026-07-23 20:31 UTC — Tick #17 (Idle #17 — COOLDOWN REVERTED)
 
-### Summary: 11/11 checks PASS. System healthy. Cooldown 43200s (12h) confirmed via API — tick #15's re-fix held. No reversion.
+### Summary: 11/11 checks PASS. System healthy. **Cooldown reverted from 43200→7200 (fleet TOML on daemon restart) — 7th+ reversion. Re-fixed to 43200s via API. Escalated to Bane.**
+
+| # | Check | Result | Details |
+|---|-------|--------|---------|
+| 1 | SPEC ALIGNMENT | ✅ | 43 spec files on disk (stable count). No drift. |
+| 2 | DOC COVERAGE | ✅ | README ✅, AGENTS.md ✅, QUICK_START.md ✅, LICENSE (MIT) ✅ — all present |
+| 3 | TEST GAPS | ✅ | **390/390 core unit tests passing (packages/shared).** 0 new failures. |
+| 4 | PACKAGE UPGRADES | ⚠️ INFO | **17 pnpm audit vulns** (1 critical vitest CVE, 5 high, 9 moderate, 2 low). ALL dev-only/build-time transitive deps. None actionable. |
+| 5 | PITFALL HUNT | ✅ | 0 TODOs, 0 FIXMEs, 0 HACKs in source files. Clean source. |
+| 6 | PERFORMANCE | ✅ | 11 vitest benchmarks defined, not a blocker. |
+| 7 | ENDPOINT VERIFICATION | ✅ | 36 routes confirmed. Hilo: 865 edges, 353 files, stable. |
+| 8 | CI/CD HEALTH | ✅ | **8+ consecutive green runs.** Latest commit 94be0bf CI ✅. 0 remote changes. |
+| 9 | DUCKBRAIN SYNC | ✅ | Entry written this tick (id 89c6bbbc). `remember` works. |
+| 10 | CODE QUALITY | ✅ | Clean working tree. `.gitignore` covers node_modules/, dist/, .env, data/. |
+| 11 | MIDDLE-OUT WIRING | ✅ | Express + WebSocket + Docker compose + React Router + 36 routes. Hilo: 865 edges, 353 files. |
+
+### Cooldown
+
+| Metric | Tick #16 (20:20 UTC) | Tick #17 (20:31 UTC) |
+|--------|----------------------|----------------------|
+| PIDs | 239 | ~239 |
+| CooldownS | 43200 (held) | **43200 (RE-FIXED — was 7200)** ⚠️ |
+| CI | 8+ green | 8+ green |
+| DuckBrain | remember OK (id 7c1204f9) | remember OK (id 89c6bbbc) |
+| Idle ticks | 16 | 17 |
+| Hilo edges | 858 edges, 349 files | 865 edges, 353 files |
+
+**⚠️ Cooldown reverted again — from 43200→7200 (7th+ reversion).** Root cause: fleet TOML CooldownS=7200 overwrites API PUT on daemon restart. Bane notified. API re-fix applied; CooldownS=43200 confirmed via GET.
+
+### Status
+
+- **Idle tick #17 recorded.** Project healthy and genuinely complete.
+- CI green: 8+ consecutive runs, all passing.
+- DuckBrain MCP operational (writes work).
+- **Cooldown: 43200s (12h) — RE-FIXED** (was 7200). API-confirmed.
+- **17 pnpm audit vulns:** 1 critical vitest CVE (UI server vulnerability), dev-only build-time transitive dep. Not actionable.
+- **At 17 idle ticks** — project genuinely complete. Continue monitoring on 12h cadence. Cooldown reversion is the only recurring concern.
 
 | # | Check | Result | Details |
 |---|-------|--------|---------|
