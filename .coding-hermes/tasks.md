@@ -42,7 +42,9 @@
 
 **Execution Order:** NEVER-DONE only.
 
-**Escalation Conditions:** 21 idle ticks + genuine completion threshold EXCEEDED. Scheduler: Enabled=true, CooldownS=43200. ESCALATE TO BANE — per foreman rules, NOT self-disabling. Bane must manually disable via scheduler API or Hermes curator. All projects at genuine completion should be disabled by Bane.
+|**Escalation Conditions:** 22 idle ticks + genuine completion threshold EXCEEDED. Scheduler: Enabled=true, CooldownS=43200 (reverted from 1800 restart, re-fixed). ESCALATE TO BANE — per foreman rules, NOT self-disabling. Bane must manually disable via scheduler API or Hermes curator. All projects at genuine completion should be disabled by Bane.
+
+**Cooldown reversion history:** Tick 21→Tick 22 — CooldownS reset from 43200→1800 on scheduler daemon restart (fleet config overwrite). Re-fixed to 43200 at Tick 22.|
 
 ## Completed
 
@@ -53,6 +55,24 @@
 | All phases | Full game simulation, 4 packages, benchmarks | — | — | multiple | Various |
 
 ## Tick Log
+
+### Tick 22 — 2026-07-26 09:28 UTC (deepseek-v4-flash)
+
+| # | Gate | Result | Detail |
+|---|------|--------|--------|
+| 1 | Git status | CLEAN | Working tree clean, 2 commits ahead of origin |
+| 2 | Build | PASS | tsc --noEmit, all 4 packages, cached |
+| 3 | GitReins guard | PASS | secrets/lint/tests/lsp — all clean (diff mode, safety trigger from config) |
+| 4 | Hilo graph | PASS | 865 edges, 353 files, Hilo=useful (consistent) |
+| 5 | CI | PASS | Last 3 runs all successful (conclusion: success) |
+| 6 | TODO/FIXME scan | PASS | Only legacy game-engine.js pricing TODO (pre-existing, not project code) |
+| 7 | Secrets | PASS | gitleaks clean |
+| 8 | Static analysis | PASS | tsc --noEmit, all clean |
+| 9 | Scheduler status | REVERTED → FIXED | Enabled=true, CooldownS=1800→43200 (restart reset, re-fixed) |
+| 10 | Board consistency | PASS | 0 active tasks, GitReins: TEST-CLI-COMMANDS complete |
+| 11 | DuckBrain | EMPTY | mafia-benchmark namespace exists but no entries |
+
+**Verdict:** IDLE — 22nd consecutive idle tick. Project genuinely complete. Cooldown was reset from 43200→1800 by scheduler daemon restart (fleet config overwrite) — PUT re-fixed to 43200. pnpm audit: 1 critical (vitest CVE, dev-only transitive via vite) + pre-existing high/medium advisories (rollup, picomatch — all dev-only). **ESCALATED TO BANE** (2nd consecutive escalation) — foreman must not self-disable. Bane: `PUT /api/v1/projects/mafia-ai-benchmark {"Enabled":false}`.
 
 ### Tick 21 — 2026-07-25 00:35 UTC (deepseek-v4-pro)
 

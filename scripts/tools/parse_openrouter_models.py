@@ -7,6 +7,7 @@ Extracts and organizes model information from models.dev API JSON
 import json
 import os
 
+
 def parse_openrouter_models(json_path: str) -> dict:
     """Parse OpenRouter models JSON and organize by provider"""
     
@@ -188,7 +189,7 @@ def main():
     with open('/config/workspace/mafia/openrouter_models_report.json', 'w', encoding='utf-8') as f:
         json.dump(report, f, indent=2, ensure_ascii=False)
     
-    print(f"\nDetailed report saved to: /config/workspace/mafia/openrouter_models_report.json")
+    print("\nDetailed report saved to: /config/workspace/mafia/openrouter_models_report.json")
 
 if __name__ == '__main__':
     main()
