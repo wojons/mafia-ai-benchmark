@@ -44,9 +44,27 @@
 
 |**Escalation Conditions:** 25 idle ticks + genuine completion threshold EXCEEDED. Scheduler: Enabled=true, CooldownS=43200 (HELD — no reversion this tick). ESCALATE TO BANE (5th consecutive) — per foreman rules, NOT self-disabling. Bane must manually disable via scheduler API or Hermes curator. 25 idle ticks at 12h cooldown = 12.5 days of idle checks. All projects at genuine completion should be disabled by Bane.
 
-|**Cooldown reversion history:** Tick 21→Tick 22 — CooldownS reset from 43200→1800 on scheduler daemon restart (fleet config overwrite). Re-fixed to 43200 at Tick 22. Held through Ticks 23-25.|
+|**Cooldown reversion history:** Tick 21→Tick 22 — CooldownS reset from 43200→1800 on scheduler daemon restart (fleet config overwrite). Re-fixed to 43200 at Tick 22. Held through Ticks 23-25. Tick 26 — reverted AGAIN on daemon restart (1800), re-fixed to 43200. This is the 3rd reversion event — systemic fleet-config-overwrite issue persists.|
 
 ## Tick Log
+
+### Tick 26 — 2026-07-27 20:02 UTC (deepseek-v4-pro)
+
+| # | Gate | Result | Detail |
+|---|------|--------|--------|
+| 1 | Git status | CLEAN | Working tree clean, 0 ahead of origin (all 4 prior commits now pushed) |
+| 2 | Build | PASS | All 4 packages compile, cached (turbo) |
+| 3 | GitReins guard | PASS | secrets/lint/tests/lsp — all clean (diff mode, safety trigger from config) |
+| 4 | Hilo graph | PASS | 865 edges, 353 files, Hilo=useful (consistent across all ticks) |
+| 5 | CI | PASS | Last 5 runs all successful (conclusion: success) |
+| 6 | TODO/FIXME scan | PASS | No project-code TODOs or FIXMEs found |
+| 7 | Secrets | PASS | gitleaks clean (6.24 MB scanned in 695ms) |
+| 8 | Static analysis | PASS | tsc --noEmit via build, all clean |
+| 9 | Scheduler status | REVERTED → FIXED | CooldownS was 1800 (reverted from 43200 on daemon restart). Re-fixed to 43200 via direct DB update. |
+| 10 | Board consistency | PASS | 0 active tasks, GitReins: TEST-CLI-COMMANDS complete. Consistent across all ledgers. |
+| 11 | DuckBrain | PASS | mafia-benchmark namespace connected, 5 entries present (recovered from Tick 25 DOWN) |
+
+**Verdict:** IDLE — 26th consecutive idle tick. Project genuinely complete. Gates 1-8, 10-11 all PASS. Gate 9: CooldownS reverted from 43200→1800 on scheduler daemon restart (same pattern as Tick 22). Re-fixed to 43200. This is the 3rd cooldown reversion event (Ticks 22, 26). **ESCALATED TO BANE** (6th consecutive escalation) — per NEVER-DONE protocol, foreman must not self-disable. 26 idle ticks at 12h cooldown = 13 days of idle checks. Bane: `PUT /api/v1/projects/mafia-ai-benchmark {\"Enabled\":false}` or `hermes curator disable mafia-ai-benchmark`. Root cause recommendation: the fleet config overwrite on scheduler restart is a systemic issue — the per-project cooldown should be persisted in a way that survives daemon restarts.
 
 ### Tick 25 — 2026-07-27 09:39 UTC (deepseek-v4-flash)
 
