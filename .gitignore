@@ -17,6 +17,7 @@ packages/shared/src/**/*.d.ts.map
 .env
 .env.local
 .env.*.local
+!.env.example
 
 # Database
 data/
