@@ -38,15 +38,34 @@
 
 **Assumptions:** TypeScript 7 upgrade BLOCKED by typescript-eslint v8.65.0. 1 critical pnpm audit vuln (vitest CVE) — dev-only transitive, not actionable. ALL PHASES COMPLETE. DuckBrain: 12 keys (namespace exists, ticks 21-26 undercounted — never queried with correct namespace).
 
-**Routing Notes:** Tick 28 — IDLE (28th tick). CooldownS reverted 43200→900 again (4th reversion event) then re-fixed. DuckBrain: 12 keys (prior "0" claim was wrong — never queried with namespace). All 9 docs exist. Build/Hilo/guards all PASS. 8 outdated deps. Project genuinely complete. 0 actionable code gaps remain.
+**Routing Notes:** Tick 29 — IDLE (29th tick, 28 idle). Cooldown HELD at 43200 (no reversion). All 12 gates PASS. DuckBrain: 10 entries. 8 outdated deps (typescript 5.9.3→7.0.2 blocked by typescript-eslint v8.65.0). Project genuinely complete. 0 actionable code gaps remain.
 
 **Execution Order:** NEVER-DONE only.
 
-|**Escalation Conditions:** 28th tick — Tick 27 was PRODUCTIVE (5 docs). Tick 28 IDLE. CooldownS reversed 43200→900 (4th reversion event, fleet config overwrite), re-fixed to 43200. DuckBrain: 12 keys (board previously claimed 0 — never queried with namespace). Project genuinely complete for CODE tasks. ESCALATE TO BANE (8th) — per foreman rules, NOT self-disabling. Bane must manually disable via scheduler API: `PUT /api/v1/projects/mafia-ai-benchmark {"Enabled":false}`.|
+|**Escalation Conditions:** 29th tick — Tick 29 IDLE. Cooldown HELD at 43200 (no reversion — first clean hold). All 12 gates PASS. DuckBrain: 10 entries. Project genuinely complete for CODE tasks. ESCALATE TO BANE (9th) — per foreman rules, NOT self-disabling. Bane must manually disable via scheduler API: `PUT /api/v1/projects/mafia-ai-benchmark {"Enabled":false}`.|
 
-|**Cooldown reversion history:** Tick 21→Tick 22 — CooldownS reset from 43200→1800 on scheduler daemon restart (fleet config overwrite). Re-fixed to 43200 at Tick 22. Held through Ticks 23-25. Tick 26 — reverted AGAIN on daemon restart (1800), re-fixed to 43200. Tick 28 — reverted AGAIN (43200→900), re-fixed to 43200. This is the 4th reversion event — systemic fleet-config-overwrite issue persists.|
+|**Cooldown reversion history:** Tick 21→Tick 22 — CooldownS reset from 43200→1800 on scheduler daemon restart (fleet config overwrite). Re-fixed to 43200 at Tick 22. Held through Ticks 23-25. Tick 26 — reverted AGAIN on daemon restart (1800), re-fixed to 43200. Tick 28 — reverted AGAIN (43200→900), re-fixed to 43200. Tick 29 — COOLDOWN HELD at 43200 (clean hold, no reversion).
 
 ## Tick Log
+
+### Tick 29 — 2026-07-29 05:55 UTC (deepseek-v4-pro) — IDLE
+
+| # | Gate | Result | Detail |
+|---|------|--------|--------|
+| 1 | Git status | CLEAN | Working tree clean, 4 commits ahead of origin |
+| 2 | Build | PASS | All 4 packages compile via turbo (cached) |
+| 3 | tsc --noEmit | PASS | All packages clean (verified via pnpm build) |
+| 4 | GitReins guard | PASS | secrets/lint/tests/lsp — all clean (diff mode) |
+| 5 | Hilo graph | PASS | 865 edges, 353 files, Hilo=useful |
+| 6 | TODO/FIXME scan | PASS | No project-code TODOs or FIXMEs found |
+| 7 | Docs (ls check) | PASS | 21 markdown files including all required docs |
+| 8 | Secrets | PASS | gitleaks clean (6.25 MB in 741ms) |
+| 9 | Deps | PASS | 8 outdated (typescript 5.9.3→7.0.2 blocked by typescript-eslint v8.65.0; others minor/patch). All pre-existing. |
+| 10 | Board consistency | PASS | 0 active tasks. GitReins: TEST-CLI-COMMANDS (complete). CONSISTENT |
+| 11 | Scheduler status | PASS | enabled=1, cooldown_s=43200, weight=10, priority=8 — COOLDOWN HELD (no fleet config reversion) |
+| 12 | DuckBrain | PASS | 10 entries in mafia-benchmark namespace |
+
+**Verdict:** IDLE — 29th tick (28 idle, 1 productive). Project genuinely complete. Cooldown HELD at 43200 (first clean hold since Tick 27 — no fleet config overwrite reversion this tick). All 12 gates PASS. 8 outdated deps (typescript major blocked, others minor/patch). **ESCALATED TO BANE** (9th consecutive escalation) — per NEVER-DONE protocol, foreman must not self-disable. 29 ticks at project. Bane: `PUT /api/v1/projects/mafia-ai-benchmark {"Enabled":false}` or `hermes curator disable mafia-ai-benchmark`.
 
 ### Tick 27 — 2026-07-28 16:57 UTC (deepseek-v4-pro) — PRODUCTIVE
 
