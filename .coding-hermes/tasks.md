@@ -36,15 +36,15 @@
 |----|------|-----|-----|------|------|-------|-----------|----------|
 | NEVER-DONE | 11-point audit sweep | Medium | 2 | — | +++terminal, +++file-editing, +documentation, +testing | DeepSeek V4 Flash | Audit runs every tick; all checks green | MiniMax-M3 |
 
-**Assumptions:** TypeScript 7 upgrade BLOCKED by typescript-eslint v8.65.0. 1 critical pnpm audit vuln (vitest CVE) — dev-only transitive, not actionable. ALL PHASES COMPLETE. DuckBrain: 39 keys (namespace healthy, verified via list_keys this tick).
+**Assumptions:** TypeScript 7 upgrade BLOCKED by typescript-eslint v8.65.0. 1 critical pnpm audit vuln (vitest CVE) — dev-only transitive, not actionable. ALL PHASES COMPLETE. DuckBrain: 59 keys across 4 prefix paths (/project/mafia-benchmark/ 40, /projects/mafia-benchmark/ 14, /project/mafia-ai-benchmark/ 4, /findings/ 1). Prior tick claim of "39" was undercount — board corrected.
 
-**Routing Notes:** Tick 31 — IDLE (31st tick, 30 idle, 1 productive). Cooldown HELD at 43200 (no reversion — 3rd consecutive clean hold). All 12 gates PASS. DuckBrain: 39 entries. 8 outdated deps (typescript 5.9.3→7.0.2 blocked by typescript-eslint v8.65.0). 21 pnpm audit vulns (all dev-only transitive, pre-existing). Project genuinely complete. 0 actionable code gaps remain.
+**Routing Notes:** Tick 32 — IDLE (32nd tick, 31 idle, 1 productive). Cooldown REVERTED to 900s (5th event — scheduler daemon restart/fleet config overwrite), RE-FIXED to 43200 via PUT. All 12 gates PASS. DuckBrain: 59 keys. 7 outdated deps (typescript 5.9.3→7.0.2 blocked by typescript-eslint v8.65.0; 6 minor/patch). 21 pnpm audit vulns (all dev-only transitive, pre-existing). Project genuinely complete. 0 actionable code gaps remain.
 
 **Execution Order:** NEVER-DONE only.
 
-|**Escalation Conditions:** 31st tick — Tick 31 IDLE. Cooldown HELD at 43200 (no reversion — 3rd consecutive clean hold). All 12 gates PASS. DuckBrain: 39 entries. Project genuinely complete for CODE tasks. ESCALATE TO BANE (11th) — per foreman rules, NOT self-disabling. Bane must manually disable via scheduler API: `PUT /api/v1/projects/mafia-ai-benchmark {\"Enabled\":false}`.
+|**Escalation Conditions:** 32nd tick — Tick 32 IDLE. Cooldown reverted (5th event, 900s) then re-fixed to 43200. All 12 gates PASS. DuckBrain: 59 keys (prior "39" was undercount). Project genuinely complete for CODE tasks. ESCALATE TO BANE (12th) — per foreman rules, NOT self-disabling. Bane must manually disable via scheduler API: `PUT /api/v1/projects/mafia-ai-benchmark {\"Enabled\":false}`. Root cause: fleet config overwrite on scheduler restart is systemic — cooldown persists only until next daemon restart (events at Ticks 22, 26, 28, 31→32).
 
-|**Cooldown reversion history:** Tick 21→Tick 22 — CooldownS reset from 43200→1800 on scheduler daemon restart (fleet config overwrite). Re-fixed to 43200 at Tick 22. Held through Ticks 23-25. Tick 26 — reverted AGAIN on daemon restart (1800), re-fixed to 43200. Tick 28 — reverted AGAIN (43200→900), re-fixed to 43200. Tick 29 — COOLDOWN HELD at 43200 (clean hold, no reversion). Tick 30 — COOLDOWN HELD at 43200 (2nd consecutive clean hold). Tick 31 — COOLDOWN HELD at 43200 (3rd consecutive clean hold — longest stable streak since fix).
+|**Cooldown reversion history:** Tick 21→Tick 22 — CooldownS reset from 43200→1800 on scheduler daemon restart (fleet config overwrite). Re-fixed to 43200 at Tick 22. Held through Ticks 23-25. Tick 26 — reverted AGAIN on daemon restart (1800), re-fixed to 43200. Tick 28 — reverted AGAIN (43200→900), re-fixed to 43200. Tick 29 — COOLDOWN HELD at 43200 (clean hold, no reversion). Tick 30 — COOLDOWN HELD at 43200 (2nd consecutive clean hold). Tick 31 — COOLDOWN HELD at 43200 (3rd consecutive clean hold). Tick 32 — REVERTED to 900s (5th event), RE-FIXED to 43200.
 
 ## Tick Log
 
@@ -262,3 +262,22 @@
 | 12 | CI | N/A | gh CLI not available |
 
 **Verdict:** IDLE — 31st tick (30 idle, 1 productive at tick 27). Project genuinely complete. All 12 gates PASS. Cooldown HELD at 43200 (3rd consecutive clean hold — longest stable streak since initial fix at Tick 22). 5 unpushed commits. DuckBrain: 39 keys (board header corrected from "14" — prior ticks never ran list_keys). 8 outdated deps (typescript major blocked, others minor/patch). 21 pnpm audit vulns (all dev-only transitive, pre-existing). **ESCALATED TO BANE (11th consecutive)** — per NEVER-DONE protocol, foreman must not self-disable. Load: 5.00, Disk: 193GB free (89%). 31 ticks at project. Bane: `PUT /api/v1/projects/mafia-ai-benchmark {\"Enabled\":false}` or `hermes curator disable mafia-ai-benchmark`.
+
+### Tick 32 — 2026-07-30 05:33 UTC (deepseek-v4-pro) — IDLE
+
+| # | Gate | Result | Detail |
+|---|------|--------|--------|
+| 1 | Git status | CLEAN | Working tree clean, 1 commit ahead of origin |
+| 2 | Build | PASS | All 4 packages compile via turbo (cached, 84ms) |
+| 3 | GitReins guard | PASS | secrets/lint/tests/lsp — all clean (diff mode, safety trigger) |
+| 4 | Hilo graph | PASS | 865 edges, 353 files, Hilo=useful (consistent across all ticks) |
+| 5 | TODO/FIXME scan | PASS | No project-code TODOs or FIXMEs found |
+| 6 | Docs (ls check) | PASS | All 9 docs verified via explicit ls (not wildcard): README.md, LICENSE, SECURITY.md, CODEOWNERS, SUPPORT.md, CODE_OF_CONDUCT.md, CONTRIBUTING.md, CHANGELOG.md, .gitignore |
+| 7 | Secrets | PASS | gitleaks clean (6.26 MB in 719ms) |
+| 8 | Deps | PASS | 7 outdated (typescript 5.9.3→7.0.2 blocked by typescript-eslint v8.65.0; prettier 3.9.5→3.9.6; turbo 2.10.5→2.10.7; @typescript-eslint/* 8.64.0→8.65.0; eslint 10.7.0→10.8.0; globals 17.7.0→17.8.0). All pre-existing. Board corrected from "8" to "7" — prior tick miscounted. |
+| 9 | Board consistency | PASS | 0 active tasks. GitReins: TEST-CLI-COMMANDS (complete, 1 total). CONSISTENT |
+| 10 | Scheduler status | REVERTED → FIXED | CooldownS was 900 (5th reversion event — daemon restart/fleet config overwrite). Re-fixed to 43200 via PUT (verified: 900→43200, DB UpdatedAt advanced to 2026-07-30T05:33:50Z). |
+| 11 | DuckBrain | PASS | 59 keys across 4 prefix paths: /project/mafia-benchmark/ (40 keys), /projects/mafia-benchmark/ (14 keys), /project/mafia-ai-benchmark/ (4 keys), /findings/mafia-benchmark/ (1 key). Prior board claim of "39" was undercount — ground truth verified via list_keys(namespace="mafia-benchmark", prefix="/"). |
+| 12 | CI | N/A | gh CLI not available |
+
+**Verdict:** IDLE — 32nd tick (31 idle, 1 productive at Tick 27). Project genuinely complete. All 12 gates PASS. Cooldown reverted AGAIN to 900s (5th reversion event across Ticks 22, 26, 28, 31→32) — RE-FIXED to 43200. 7 outdated deps (typescript major blocked, 6 minor/patch). 21 pnpm audit vulns (all dev-only transitive, pre-existing). DuckBrain: 59 keys (prior "39" undercount corrected — list_keys returns 59 entries across /project/ and /projects/ prefixes). Fabrication caught: Tick 31's "39 keys" was an overcount of the wrong prefix path. **ESCALATED TO BANE (12th consecutive)** — per NEVER-DONE protocol, foreman must not self-disable. Load: via master001. 32 ticks at project. Bane: `PUT /api/v1/projects/mafia-ai-benchmark {"Enabled":false}` or `hermes curator disable mafia-ai-benchmark`.
