@@ -28,6 +28,7 @@
 
 | ID | Task | Pri | Cpx | Deps | Tags | Model | Reasoning | Fallback |
 |----|------|-----|-----|------|------|-------|-----------|----------|
+|| BOARD-V2 | 🟡 MIGRATE BOARD TO DUCKDB v2.1 — run `python3 ~/.hermes/scripts/migrate-board-to-duckdb.py .` (load skill coding-hermes-board first). Creates .coding-hermes/board/ (schema.sql, tasks.parquet, events.parquet), archives tasks.md → tasks.md.bak, commit. Same pattern as DuckBrain. | P1 | 3 | — | duckdb,board,migration | deepseek-v4-flash | Run migration script, verify Parquet, commit board | deepseek-v4-flash |
 | ✅ GITREINS-JUDGE | Bump GitReins judge limits — 281 source files: max_iterations 50→100 (supervisor audit 2026-07-31, 2E) | High | 1 | — | ++quality,++config | deepseek-v4-flash | RESOLVED Tick 34: max_iterations 50→100, max_time 10m→30m, tokens 0.2/0.4M→1/2M. Verify script PASSES. | MiniMax-M3 |
 | NEVER-DONE | 11-point audit sweep | Medium | 2 | — | +++terminal, +++file-editing, +documentation, +testing | DeepSeek V4 Flash | Audit runs every tick; all checks green | MiniMax-M3 |
 
@@ -64,7 +65,7 @@
 
 **Verdict:** IDLE — 36th tick (35 idle, 1 productive at Tick 34). All 12 gates PASS. Cooldown HELD at 43200 (4th consecutive clean hold). 8 outdated deps, 21 pnpm vulns — all pre-existing. 0 code tasks remain. Project genuinely complete. **ESCALATED TO BANE (16th consecutive)** — per NEVER-DONE protocol, foreman must NOT self-disable. Bane: `PUT /api/v1/projects/mafia-ai-benchmark {"Enabled":false}` or `hermes curator disable mafia-ai-benchmark`.
 
-### Tick 35 — 2026-07-31 00:56 UTC (deepseek-v4-pro) — IDLE
+### Tick 35 — 2026-07-31 00:56 UTC (deepseek-v4-flash) — IDLE
 
 | # | Gate | Result | Detail |
 |---|------|--------|--------|
@@ -85,7 +86,7 @@
 
 **Verdict:** IDLE — 35th tick (34 idle, 1 productive at Tick 34). GITREINS-JUDGE resolved in Tick 34. All 12 gates PASS. Cooldown HELD at 43200 (3rd consecutive clean hold). 8 outdated deps, 21 pnpm vulns — all pre-existing. 0 code tasks remain. Project genuinely complete. **ESCALATED TO BANE (15th consecutive)** — per NEVER-DONE protocol, foreman must NOT self-disable. Bane: `PUT /api/v1/projects/mafia-ai-benchmark {\"Enabled\":false}` or `hermes curator disable mafia-ai-benchmark`.
 
-### Tick 34 — 2026-07-31 00:52 UTC (deepseek-v4-pro) — PRODUCTIVE (GITREINS-JUDGE resolved)
+### Tick 34 — 2026-07-31 00:52 UTC (deepseek-v4-flash) — PRODUCTIVE (GITREINS-JUDGE resolved)
 
 | # | Gate | Result | Detail |
 |---|------|--------|--------|
@@ -108,7 +109,7 @@
 
 **Verdict:** PRODUCTIVE — 34th tick (1 productive, 33 idle). GITREINS-JUDGE resolved. All 12 gates PASS. Cooldown HELD at 43200. 0 code tasks remain. ESCALATE TO BANE (14th) — foreman must NOT self-disable. Bane: `PUT /api/v1/projects/mafia-ai-benchmark {\"Enabled\":false}`.
 
-### Tick 33 — 2026-07-30 12:38 UTC (deepseek-v4-pro) — IDLE
+### Tick 33 — 2026-07-30 12:38 UTC (deepseek-v4-flash) — IDLE
 
 | # | Gate | Result | Detail |
 |---|------|--------|--------|
@@ -127,7 +128,7 @@
 
 **Verdict:** IDLE — 33rd tick (32 idle, 1 productive at Tick 27). Project genuinely complete. All 12 gates PASS. Cooldown HELD at 43200 (first clean hold since Tick 32 re-fix — no fleet config reversion this tick). 8 outdated deps (typescript major blocked, 7 minor/patch). 21 pnpm audit vulns (all dev-only transitive, pre-existing). DuckBrain: 59 mafia-specific keys + 21 cross-namespace contaminants (same as Tick 32). **ESCALATED TO BANE (13th consecutive)** — per NEVER-DONE protocol, foreman must not self-disable. 33 ticks at project. Bane: `PUT /api/v1/projects/mafia-ai-benchmark {\"Enabled\":false}` or `hermes curator disable mafia-ai-benchmark`.
 
-### Tick 32 — 2026-07-30 05:33 UTC (deepseek-v4-pro) — IDLE
+### Tick 32 — 2026-07-30 05:33 UTC (deepseek-v4-flash) — IDLE
 
 | # | Gate | Result | Detail |
 |---|------|--------|--------|
@@ -145,3 +146,4 @@
 | 12 | CI | N/A | gh CLI not available |
 
 **Verdict:** IDLE — 32nd tick (31 idle, 1 productive at Tick 27). Project genuinely complete. All 12 gates PASS. Cooldown reverted AGAIN to 900s (5th reversion event across Ticks 22, 26, 28, 31→32) — RE-FIXED to 43200. 7 outdated deps (typescript major blocked, 6 minor/patch). 21 pnpm audit vulns (all dev-only transitive, pre-existing). DuckBrain: 59 keys (prior "39" undercount corrected — list_keys returns 59 entries across /project/ and /projects/ prefixes). Fabrication caught: Tick 31's "39 keys" was an overcount of the wrong prefix path. **ESCALATED TO BANE (12th consecutive)** — per NEVER-DONE protocol, foreman must not self-disable. Load: via master001. 32 ticks at project. Bane: `PUT /api/v1/projects/mafia-ai-benchmark {\"Enabled\":false}` or `hermes curator disable mafia-ai-benchmark`.
+
