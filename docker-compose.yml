@@ -1,14 +1,16 @@
 services:
   # ============================================================================
-  # Server — REST API (:3000) + WebSocket (:3001)
+  # Server — REST API + WebSocket (both on internal :3000, WS at /ws).
+  # Host access: API via http://localhost:5174/api/v1 (nginx proxy) or directly
+  # on :3004. Host :3000 is owned by the DuckBrain HTTP daemon (fleet service) —
+  # do NOT map server to host :3000.
   # ============================================================================
   server:
     build:
       context: .
       dockerfile: apps/server/Dockerfile
     ports:
-      - "${PORT:-3000}:3000"
-      - "3001:3001"
+      - "3004:3000"
     env_file:
       - .env
     volumes:
@@ -28,6 +30,11 @@ services:
     build:
       context: .
       dockerfile: apps/web/Dockerfile
+      args:
+        # Route API/WS through the nginx proxy — no hardcoded localhost:3000
+        # (host :3000 is owned by the DuckBrain HTTP daemon).
+        VITE_API_URL: /api/v1
+        VITE_WS_URL: /ws
     ports:
       - "5174:5173"
     depends_on:

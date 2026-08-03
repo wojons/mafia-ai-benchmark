@@ -25,6 +25,13 @@ COPY apps/web/ apps/web/
 RUN corepack enable && pnpm --filter=@mafia/shared build
 
 # Build the Vite app (use vite build directly to avoid tsc type errors in dev code)
+# API/WS base URLs come from build args — default to nginx-proxy-relative paths
+# so the bundle works behind the web container's nginx (host :3000 is owned by
+# the DuckBrain HTTP daemon, not the mafia server).
+ARG VITE_API_URL=/api/v1
+ARG VITE_WS_URL=/ws
+ENV VITE_API_URL=$VITE_API_URL
+ENV VITE_WS_URL=$VITE_WS_URL
 RUN corepack enable && cd /app/apps/web && pnpm exec vite build
 
 # --- Production stage ---

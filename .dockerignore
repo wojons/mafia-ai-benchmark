@@ -1,9 +1,14 @@
-# Dependencies
-node_modules/
-.pnpm-store/
+# Dependencies — **/ required: bare "node_modules/" only matches the context
+# ROOT, not nested workspace dirs (apps/*/node_modules leak into the context
+# and COPY clobbers the container's pnpm links — mafia tick 47).
+**/node_modules/
+**/.pnpm-store/
 
 # Build output (rebuilt in Docker)
-dist/
+**/dist/
+# TypeScript incremental build info — copied tsbuildinfo makes tsc skip emit
+# (composite projects), leaving no dist in the image (mafia tick 47)
+**/*.tsbuildinfo
 
 # Git
 .git/

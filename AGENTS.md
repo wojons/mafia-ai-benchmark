@@ -16,7 +16,7 @@ pnpm monorepo with 6 workspace packages:
 | `game-engine.js` | Legacy 5,303-line game engine (root) | N/A |
 
 Key files:
-- `docker-compose.yml` — Server (:3000) + Web (:5174 via nginx)
+- `docker-compose.yml` — Server (API :3004; internal :3000, WS /ws) + Web (:5174 via nginx, API/WS proxied)
 - `.env` — OPENAI_API_KEY, OPENAI_BASE_URL, MODEL
 - `pnpm-workspace.yaml` — workspace definition
 
