@@ -1,11 +1,13 @@
 # GitReins Configuration — Mafia AI Benchmark
-# TypeScript/pnpm monorepo. Tests run via Docker vitest inside server container.
+# TypeScript/pnpm monorepo. apps/server api.test.ts hits a LIVE server:
+# host :3000 is DuckBrain's HTTP server on fleet hosts, so point the guard's
+# test run at the compose server exposed on :3004 (docker "3004:3000").
 guards:
   test_mode: diff
   secrets: true
   lint: true
   tests: true
-  test_command: cd apps/server && npx vitest run
+  test_command: cd apps/server && TEST_BASE_URL=http://localhost:3004 npx vitest run
   lsp: true
   lsp_tools:
   - ts-lsp

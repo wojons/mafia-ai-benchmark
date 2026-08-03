@@ -1,6 +1,9 @@
 import { describe, it, expect } from 'vitest';
 
-const BASE_URL = 'http://localhost:3000';
+// Host port 3000 is owned by DuckBrain's HTTP server on fleet hosts; the
+// mafia compose stack exposes the server on :3004 (docker "3004:3000").
+// CI starts its own source server on :3000, so the default stays :3000.
+const BASE_URL = process.env.TEST_BASE_URL || 'http://localhost:3000';
 
 /**
  * Helper: create a game and return the gameId.
