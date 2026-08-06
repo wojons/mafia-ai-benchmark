@@ -162,7 +162,7 @@ Create a `.env` file in the project root:
 OPENAI_API_KEY=sk-or-v1-your-key-here
 
 # Optional
-PORT=3000                # Server port (default: 3000)
+PORT=3000                # Container server port (default: 3000; exposed on host as :3004)
 DATABASE_PATH=./data/games.db  # SQLite path
 LOG_LEVEL=info           # debug, info, warn, error
 ```
@@ -271,8 +271,8 @@ pnpm install
 ### Server won't start
 
 ```bash
-# Make sure nothing is using port 3000
-lsof -i :3000
+# Make sure nothing is using the host API port (compose exposes the server on :3004)
+lsof -i :3004
 
 # Build the server first if you've made changes
 pnpm run server:build

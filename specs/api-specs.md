@@ -7,8 +7,8 @@ The backend server exposes both REST endpoints for control operations and WebSoc
 ## Base URL
 
 ```
-http://localhost:3000/api
-ws://localhost:3000/ws
+http://localhost:3004/api
+ws://localhost:3004/ws
 ```
 
 ## REST API Endpoints
@@ -355,7 +355,7 @@ For `json` format:
 
 ### Connection
 
-**Endpoint:** `ws://localhost:3000/ws/:gameId`
+**Endpoint:** `ws://localhost:3004/ws/:gameId`
 
 **Protocol:** WebSocket with JSON message format
 
@@ -462,7 +462,7 @@ Sent every 30 seconds if no events. Client can assume connection is alive.
 let lastSequence = getLastEventSequence();
 
 function reconnect() {
-  const ws = new WebSocket(`ws://localhost:3000/ws/${gameId}`);
+  const ws = new WebSocket(`ws://localhost:3004/ws/${gameId}`);
 
   ws.onopen = () => {
     ws.send(

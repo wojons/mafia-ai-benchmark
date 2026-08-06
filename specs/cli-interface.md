@@ -21,7 +21,7 @@ Global Options:
   -v, --version       Show version
   --verbose           Enable verbose logging
   --json              Output JSON instead of formatted text
-  --api-url <url>     API server URL (default: http://localhost:3000)
+  --api-url <url>     API server URL (default: http://localhost:3004)
 ```
 
 ## Commands
@@ -83,7 +83,7 @@ GAME_ID=$(mafiactl new --json | jq -r .gameId)
   ...
 
 🔗 Links
-  Status:    http://localhost:3000/api/games/game-abc123
+  Status:    http://localhost:3004/api/games/game-abc123
   Stream:    mafiactl attach game-abc123
   UI:        http://localhost:5173/game/game-abc123
 
@@ -109,8 +109,8 @@ GAME_ID=$(mafiactl new --json | jq -r .gameId)
     {"id": "p2", "name": "Bob", "role": "mafia", "alive": true}
   ],
   "links": {
-    "status": "http://localhost:3000/api/games/game-abc123",
-    "stream": "ws://localhost:3000/ws/game-abc123",
+    "status": "http://localhost:3004/api/games/game-abc123",
+    "stream": "ws://localhost:3004/ws/game-abc123",
     "ui": "http://localhost:5173/game/game-abc123"
   }
 }
@@ -507,7 +507,7 @@ CLI reads from `~/.mafiactl/config.json`:
 
 ```json
 {
-  "apiUrl": "http://localhost:3000",
+  "apiUrl": "http://localhost:3004",
   "defaultOptions": {
     "players": 10,
     "mafia": 3,

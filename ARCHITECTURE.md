@@ -258,7 +258,7 @@ mafia/
 ┌─────────────────────────────────────────────────────────────────┐
 │ CLI makes HTTP request to server                                │
 │                                                                 │
-│ POST http://localhost:3000/api/v1/games/<game-id>/start        │
+│ POST http://localhost:3004/api/v1/games/<game-id>/start        │
 └─────────────────────────────────────────────────────────────────┘
                              │
                              ▼
@@ -306,7 +306,7 @@ mafia/
                              │
                              ▼
 ┌─────────────────────────────────────────────────────────────────┐
-│ curl -X POST http://localhost:3000/api/v1/games                 │
+│ curl -X POST http://localhost:3004/api/v1/games                 │
 │                                                                 │
 │ {                                                               │
 │   "config": {                                                   │
@@ -326,14 +326,14 @@ mafia/
                              ▼
 ┌─────────────────────────────────────────────────────────────────┐
 │ User starts game:                                               │
-│ curl -X POST http://localhost:3000/api/v1/games/<id>/start     │
+│ curl -X POST http://localhost:3004/api/v1/games/<id>/start     │
 └─────────────────────────────────────────────────────────────────┘
                              │
                              ▼
 ┌─────────────────────────────────────────────────────────────────┐
 │ Game Engine runs (same as CLI flow)                             │
 │ Real-time events via SSE:                                       │
-│ curl -N http://localhost:3000/api/v1/games/<id>/stream         │
+│ curl -N http://localhost:3004/api/v1/games/<id>/stream         │
 └─────────────────────────────────────────────────────────────────┘
 ```
 
@@ -366,18 +366,18 @@ node cli.js stats                                    # View statistics
 node apps/server/src/index.js &
 
 # 2. Create a game
-curl -X POST http://localhost:3000/api/v1/games \
+curl -X POST http://localhost:3004/api/v1/games \
   -H "Content-Type: application/json" \
   -d '{"config":{"players":5}}'
 
 # 3. Get game ID from response, then start it
-curl -X POST http://localhost:3000/api/v1/games/<game-id>/start
+curl -X POST http://localhost:3004/api/v1/games/<game-id>/start
 
 # 4. Stream real-time game events
-curl -N http://localhost:3000/api/v1/games/<game-id>/stream
+curl -N http://localhost:3004/api/v1/games/<game-id>/stream
 
 # 5. Check game status
-curl http://localhost:3000/api/v1/games/<game-id>
+curl http://localhost:3004/api/v1/games/<game-id>
 ```
 
 ### Option 3: Web UI Mode (Coming Soon)
@@ -524,7 +524,7 @@ node cli.js games start <game-id>
 # Watch server terminal for game output!
 
 # Or stream via HTTP
-curl -N http://localhost:3000/api/v1/games/<game-id>/stream
+curl -N http://localhost:3004/api/v1/games/<game-id>/stream
 ```
 
 ---

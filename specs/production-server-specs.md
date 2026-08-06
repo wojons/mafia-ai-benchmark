@@ -7,7 +7,7 @@ Production-ready HTTP/WebSocket server for the Mafia AI Benchmark system. Provid
 
 | Setting | Value | Env Var |
 |---------|-------|---------|
-| HTTP Port | 3000 | `PORT` |
+| HTTP Port | 3000 (container) / 3004 (host via compose) | `PORT` |
 | WebSocket Port | 3001 | `WS_PORT` |
 | Data Directory | `./data` | `DATA_DIR` |
 | Database | SQLite | - |

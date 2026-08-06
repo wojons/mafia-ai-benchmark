@@ -7,7 +7,7 @@ Real-time event streaming from server to clients using WebSocket protocol. Suppo
 
 ### WebSocket Connection
 ```
-Endpoint: ws://localhost:3000/ws/:gameId
+Endpoint: ws://localhost:3004/ws/:gameId
 Protocol: ws (upgrade from HTTP)
 Message Format: UTF-8 JSON
 Ping/Pong: Every 30 seconds (heartbeat)

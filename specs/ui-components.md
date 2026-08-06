@@ -542,7 +542,7 @@ export function useGameStream(gameId: string, viewMode: 'admin' | 'town' | 'post
   const [connectionStatus, setConnectionStatus] = useState<'connecting' | 'connected' | 'disconnected'>('connecting');
   
   useEffect(() => {
-    const ws = new WebSocket(`ws://localhost:3000/ws/${gameId}?viewMode=${viewMode}`);
+    const ws = new WebSocket(`ws://localhost:3004/ws/${gameId}?viewMode=${viewMode}`);
     
     ws.onopen = () => setConnectionStatus('connected');
     ws.onclose = () => setConnectionStatus('disconnected');

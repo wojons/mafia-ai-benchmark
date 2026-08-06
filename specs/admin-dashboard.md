@@ -383,7 +383,7 @@ function useAdminStream(gameId: string | null) {
 
     const token = getAdminToken();
     const ws = new WebSocket(
-      `ws://localhost:3000/ws/${gameId}?viewMode=admin&authToken=${token}`
+      `ws://localhost:3004/ws/${gameId}?viewMode=admin&authToken=${token}`
     );
 
     ws.onopen = () => {

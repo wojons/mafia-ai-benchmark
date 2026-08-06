@@ -25,7 +25,7 @@
 ✅ Web Tests: 2/2 PASSING (apps/web)
 ✅ Total: 286 tests (277 pass; 9 server integration tests require running server)
 ✅ CLI Commands: All commands working
-✅ Server: Live at http://localhost:3000, 150+ games tracked
+✅ Server: Live at http://localhost:3004, 150+ games tracked
 ```
 
 ---
@@ -57,20 +57,20 @@ pnpm --filter @mafia/cli exec tsx src/index.ts -- stats
 
 ```bash
 # Create game
-curl -X POST http://localhost:3000/api/v1/games \
+curl -X POST http://localhost:3004/api/v1/games \
   -H "Content-Type: application/json" \
   -d '{"config":{"players":5}}'
 
 # Add players
-curl -X POST http://localhost:3000/api/v1/games/<id>/players \
+curl -X POST http://localhost:3004/api/v1/games/<id>/players \
   -H "Content-Type: application/json" \
   -d '{"name":"Alice","role":"MAFIA"}'
 
 # Start game
-curl -X POST http://localhost:3000/api/v1/games/<id>/start
+curl -X POST http://localhost:3004/api/v1/games/<id>/start
 
 # Stream events in real-time
-curl -N http://localhost:3000/api/v1/games/<id>/events
+curl -N http://localhost:3004/api/v1/games/<id>/events
 ```
 
 ---

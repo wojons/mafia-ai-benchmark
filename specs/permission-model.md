@@ -29,7 +29,7 @@ Three distinct view modes control what data clients can see. This enables both e
 **Example Admin Client:**
 ```typescript
 // WebSocket connection with admin token
-const ws = new WebSocket(`ws://localhost:3000/ws/game-123?authToken=${ADMIN_TOKEN}`);
+const ws = new WebSocket(`ws://localhost:3004/ws/game-123?authToken=${ADMIN_TOKEN}`);
 
 // Connection established with admin privileges
 ws.onmessage = (event) => {
@@ -99,7 +99,7 @@ function filterEventForTownMode(event: Event): Event | null {
 
 **Example Town Client:**
 ```typescript
-const ws = new WebSocket('ws://localhost:3000/ws/game-123?viewMode=town');
+const ws = new WebSocket('ws://localhost:3004/ws/game-123?viewMode=town');
 
 ws.onmessage = (event) => {
   const message = JSON.parse(event.data);
@@ -449,14 +449,14 @@ describe('View Mode Filters', () => {
 // Test WebSocket connection with different view modes
 test('WebSocket respects view mode', async () => {
   // Admin connection
-  const adminWs = new WebSocket(`ws://localhost:3000/ws/game-123?authToken=${ADMIN_TOKEN}`);
+  const adminWs = new WebSocket(`ws://localhost:3004/ws/game-123?authToken=${ADMIN_TOKEN}`);
   await waitForOpen(adminWs);
   
   const adminSubscribed = await waitForMessage(adminWs);
   expect(adminSubscribed.viewMode).toBe('admin');
   
   // Town connection (no token)
-  const townWs = new WebSocket('ws://localhost:3000/ws/game-123');
+  const townWs = new WebSocket('ws://localhost:3004/ws/game-123');
   await waitForOpen(townWs);
   
   const townSubscribed = await waitForMessage(townWs);

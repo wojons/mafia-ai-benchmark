@@ -403,7 +403,7 @@ await game.startGame(5, seeds);
 ### API with Persona Seeds
 
 ```javascript
-const response = await fetch("http://localhost:3000/api/game/create", {
+const response = await fetch("http://localhost:3004/api/game/create", {
   method: "POST",
   body: JSON.stringify({
     players: [
