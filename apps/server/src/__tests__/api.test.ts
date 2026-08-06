@@ -6,6 +6,46 @@ import { describe, it, expect } from 'vitest';
 const BASE_URL = process.env.TEST_BASE_URL || 'http://localhost:3000';
 
 /**
+ * Pre-test probe: these integration tests require a LIVE mafia server. Fresh
+ * contributors running `pnpm test` from the root often have no server up, and
+ * on fleet hosts localhost:3000 is owned by DuckBrain's HTTP daemon (its
+ * /health returns 200 but has no `memory` field), which used to surface as 8
+ * confusing red failures. The suite is skipped with a clear message unless the
+ * resolved base URL is a reachable mafia server (GET /health with a `memory`
+ * field in the JSON body discriminates a mafia server from DuckBrain).
+ */
+async function probeMafiaServer(baseUrl: string): Promise<{ available: boolean; message: string }> {
+  try {
+    const response = await fetch(`${baseUrl}/health`, { signal: AbortSignal.timeout(3000) });
+    if (!response.ok) {
+      return {
+        available: false,
+        message: `no mafia server reachable at ${baseUrl} (GET /health -> HTTP ${response.status}); set TEST_BASE_URL to run`,
+      };
+    }
+    const data = await response.json();
+    if (typeof data.memory === 'undefined') {
+      return {
+        available: false,
+        message: `a non-mafia service responded at ${baseUrl} (/health has no \`memory\` field); set TEST_BASE_URL to a running mafia server to run`,
+      };
+    }
+    return { available: true, message: `mafia server reachable at ${baseUrl}` };
+  } catch (error) {
+    return {
+      available: false,
+      message: `no mafia server reachable at ${baseUrl} (${(error as Error).message}); set TEST_BASE_URL to run`,
+    };
+  }
+}
+
+const SERVER_PROBE = await probeMafiaServer(BASE_URL);
+
+if (!SERVER_PROBE.available) {
+  console.warn(`\n⚠️  Skipping API integration tests: ${SERVER_PROBE.message}\n`);
+}
+
+/**
  * Helper: create a game and return the gameId.
  * Since game creation spawns a real legacy engine child process (~30-60s),
  * the game is created asynchronously. This just fires the POST and returns the ID.
@@ -28,7 +68,7 @@ async function createGame(numPlayers = 5): Promise<string> {
 // Health
 // ============================================================================
 
-describe('Health endpoint', () => {
+describe.skipIf(!SERVER_PROBE.available)('Health endpoint', () => {
   it('returns healthy status', async () => {
     const response = await fetch(`${BASE_URL}/health`);
     expect(response.status).toBe(200);
@@ -45,7 +85,7 @@ describe('Health endpoint', () => {
 // Games CRUD
 // ============================================================================
 
-describe('Games API', () => {
+describe.skipIf(!SERVER_PROBE.available)('Games API', () => {
   // --------------------------------------------------------------------------
   // Create game
   // --------------------------------------------------------------------------

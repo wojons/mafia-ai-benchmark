@@ -128,6 +128,13 @@ The game will:
 | `pnpm test`                                | Run all tests                  |
 | `pnpm run build`                           | Build all workspaces           |
 
+> **Note — running `pnpm test`:** the server's API integration tests
+> (`apps/server/src/__tests__/api.test.ts`) need a **live mafia server**. When
+> none is reachable they are **skipped with a clear message** instead of
+> failing. To run them, start the server (`pnpm run server`) and point the
+> tests at it with `TEST_BASE_URL=http://localhost:3004 pnpm test` (the
+> compose host port; the default probe URL is `http://localhost:3000`).
+
 ### CLI Commands (mafiactl)
 
 | Command                                                       | Description                    |
@@ -163,6 +170,7 @@ OPENAI_API_KEY=sk-or-v1-your-key-here
 
 # Optional
 PORT=3000                # Container server port (default: 3000; exposed on host as :3004)
+TEST_BASE_URL=http://localhost:3004  # Where API integration tests look for the server (default: http://localhost:3000)
 DATABASE_PATH=./data/games.db  # SQLite path
 LOG_LEVEL=info           # debug, info, warn, error
 ```
