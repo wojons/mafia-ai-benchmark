@@ -146,6 +146,90 @@ describe('LegacyGameAdapter', () => {
   });
 
   // ==========================================================================
+  // translateAndPublishEvent — terminal STATE_CHANGE mapping (MAF-GAP-005)
+  // ==========================================================================
+
+  describe('translateAndPublishEvent() terminal STATE_CHANGE mapping', () => {
+    function legacyStateChange(overrides: Record<string, unknown> = {}) {
+      return {
+        eventType: 'STATE_CHANGE',
+        playerId: 'system',
+        playerName: 'System',
+        visibility: 'PUBLIC',
+        phase: 'SETUP',
+        content: { status: 'IN_PROGRESS' },
+        round: 1,
+        timestamp: new Date().toISOString(),
+        ...overrides,
+      };
+    }
+
+    it('maps terminal STATE_CHANGE (phase GAME_OVER) to GAME_ENDED with winner data', () => {
+      eventBus.reset();
+      (adapter as any).translateAndPublishEvent('g1', legacyStateChange({
+        phase: 'GAME_OVER',
+        content: { winner: 'MAFIA', mafiaAlive: [true], townAlive: [false, false, false] },
+      }), 61);
+
+      const terminal = eventBus.published.find(e => e.type === 'GAME_ENDED');
+      expect(terminal).toBeDefined();
+      expect((terminal!.data as any).winner).toBe('MAFIA');
+      expect((terminal!.data as any).mafiaAlive).toEqual([true]);
+      expect((terminal!.data as any).townAlive).toEqual([false, false, false]);
+      expect((terminal!.data as any).legacyType).toBe('STATE_CHANGE');
+      expect(terminal!.metadata.phase).toBe('GAME_OVER');
+
+      // The terminal transition must NOT be labeled as a game start
+      expect(eventBus.published.find(e => e.type === 'GAME_STARTED')).toBeUndefined();
+    });
+
+    it('maps terminal STATE_CHANGE with winner in content to GAME_ENDED even without GAME_OVER phase', () => {
+      eventBus.reset();
+      (adapter as any).translateAndPublishEvent('g1', legacyStateChange({
+        phase: 'DAY_VOTING',
+        content: { winner: 'TOWN', mafiaAlive: [false], townAlive: [true, true] },
+      }), 62);
+
+      const terminal = eventBus.published.find(e => e.type === 'GAME_ENDED');
+      expect(terminal).toBeDefined();
+      expect((terminal!.data as any).winner).toBe('TOWN');
+      expect(eventBus.published.find(e => e.type === 'GAME_STARTED')).toBeUndefined();
+    });
+
+    it('keeps non-terminal STATE_CHANGE events mapped to GAME_STARTED', () => {
+      eventBus.reset();
+      (adapter as any).translateAndPublishEvent('g1', legacyStateChange({
+        phase: 'SETUP',
+        content: { status: 'IN_PROGRESS' },
+      }), 0);
+
+      const started = eventBus.published.find(e => e.type === 'GAME_STARTED');
+      expect(started).toBeDefined();
+      expect((started!.data as any).status).toBe('IN_PROGRESS');
+      expect(eventBus.published.find(e => e.type === 'GAME_ENDED')).toBeUndefined();
+    });
+
+    it('does not remap non-STATE_CHANGE events that merely carry a winner field', () => {
+      eventBus.reset();
+      (adapter as any).translateAndPublishEvent('g1', {
+        eventType: 'REVEAL',
+        playerId: 'p1',
+        playerName: 'Alice',
+        visibility: 'PUBLIC',
+        phase: 'MORNING_REVEAL',
+        content: { winner: 'MAFIA' },
+        round: 2,
+        timestamp: new Date().toISOString(),
+      }, 3);
+
+      const reveal = eventBus.published.find(e => e.type === 'MORNING_REVEAL');
+      expect(reveal).toBeDefined();
+      expect((reveal!.data as any).winner).toBe('MAFIA');
+      expect(eventBus.published.find(e => e.type === 'GAME_ENDED')).toBeUndefined();
+    });
+  });
+
+  // ==========================================================================
   // extractPlayersFromEvents (static)
   // ==========================================================================
 

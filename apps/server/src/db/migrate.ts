@@ -39,6 +39,16 @@ export class DatabaseMigrator {
       // Execute schema
       this.db.exec(schema);
       
+      // MAF-GAP-005 data backfill: legacy terminal STATE_CHANGE events were
+      // stored as type GAME_STARTED. Idempotent — only rows still carrying the
+      // terminal signature (phase GAME_OVER or a winner in data) are touched;
+      // after the adapter fix no new rows match, so re-runs are no-ops.
+      this.db.prepare(`
+        UPDATE events SET type = 'GAME_ENDED'
+        WHERE type = 'GAME_STARTED'
+          AND (phase = 'GAME_OVER' OR json_extract(data, '$.winner') IS NOT NULL)
+      `).run();
+      
       console.log('✅ Database schema initialized successfully');
       
       return {

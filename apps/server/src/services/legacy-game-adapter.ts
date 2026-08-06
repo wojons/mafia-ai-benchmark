@@ -300,6 +300,8 @@ export class LegacyGameAdapter extends EventEmitter {
     // We map them to the full server event types
     const typeMapping: Record<string, EventType> = {
       // Bridge event types (from legacy-bridge.js)
+      // NOTE: terminal STATE_CHANGE events (phase GAME_OVER / winner in
+      // content) are remapped to GAME_ENDED below (MAF-GAP-005).
       'STATE_CHANGE': 'GAME_STARTED',        // State changes include game creation/start
       'PHASE_CHANGE': 'PHASE_CHANGED',       // Phase transitions (setup→night→day→voting)
       'MESSAGE': 'AGENT_SAYS_BROADCASTED',   // Agent THINK/SAYS with consciousness split
@@ -349,7 +351,21 @@ export class LegacyGameAdapter extends EventEmitter {
     };
     
     const legacyType = (legacyEvent.eventType as string) || 'UNKNOWN';
-    const serverType = typeMapping[legacyType] || ('GAME_CREATED' as EventType);
+    const legacyContent = (legacyEvent.content && typeof legacyEvent.content === 'object'
+      ? legacyEvent.content as Record<string, unknown>
+      : {});
+    // MAF-GAP-005: the legacy engine emits the terminal transition as a
+    // STATE_CHANGE with phase 'GAME_OVER' and winner info in content
+    // (createGameEvent(gameId, round, "GAME_OVER", ..., { winner, mafiaAlive,
+    // townAlive })). Map that to GAME_ENDED instead of the blanket
+    // GAME_STARTED so consumers can see when/why a game ended. Non-terminal
+    // STATE_CHANGE events (game creation/start, status STARTED) keep mapping
+    // to GAME_STARTED.
+    const isTerminalStateChange = legacyType === 'STATE_CHANGE'
+      && ((legacyEvent.phase as string) === 'GAME_OVER' || legacyContent.winner !== undefined);
+    const serverType = isTerminalStateChange
+      ? ('GAME_ENDED' as EventType)
+      : (typeMapping[legacyType] || ('GAME_CREATED' as EventType));
     const visibility = visibilityMapping[(legacyEvent.visibility as string) || 'PUBLIC'] || 'PUBLIC';
     
     // Map legacy phase to server phase
@@ -381,9 +397,9 @@ export class LegacyGameAdapter extends EventEmitter {
         : undefined),
       data: {
         legacyType,
-        ...(legacyEvent.content as Record<string, unknown> || {}),
+        ...legacyContent,
         playerName: legacyEvent.playerName,
-        ...this.normalizeStatementData(serverType, legacyEvent.content as Record<string, unknown> | undefined),
+        ...this.normalizeStatementData(serverType, legacyContent),
       },
       metadata: {
         turnNumber: sequence,
