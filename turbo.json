@@ -8,6 +8,10 @@
     "test": {
       "dependsOn": ["build"]
     },
+    "test:run": {
+      "dependsOn": ["build"],
+      "env": ["TEST_BASE_URL"]
+    },
     "dev": {
       "cache": false,
       "persistent": true
