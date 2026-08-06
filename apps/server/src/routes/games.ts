@@ -7,9 +7,33 @@
 import { Router, Request, Response } from 'express';
 import { ServerContext } from '../index.js';
 import { LegacyGameAdapter } from '../services/legacy-game-adapter.js';
+import type { Player } from '@mafia/shared/types';
 
 // Store for SSE connections per game (shared across game routes)
 const gameSSESubscriptions: Map<string, Set<Response>> = new Map();
+
+/**
+ * Normalize a player extracted from the event stream into the API player
+ * shape. The extractor only reports role/isMafia/isAlive when the events
+ * actually revealed them; neutral defaults are applied otherwise.
+ */
+function toApiPlayer(p: {
+  id: string;
+  name: string;
+  role: string;
+  isMafia: boolean;
+  isAlive: boolean;
+  joinOrder: number;
+}): Player {
+  return {
+    id: p.id,
+    name: p.name,
+    role: p.role as Player['role'],
+    isAlive: p.isAlive,
+    isMafia: p.isMafia,
+    joinOrder: p.joinOrder,
+  };
+}
 
 export function createGamesRouter(
   context: ServerContext,
@@ -323,7 +347,7 @@ export function createGamesRouter(
           if (state) {
             const events = gameRepository.getEvents(req.params.gameId);
             const players =
-              LegacyGameAdapter.extractPlayersFromEvents(events);
+              LegacyGameAdapter.extractPlayersFromEvents(events).map(toApiPlayer);
 
             return res.json({
               success: true,
@@ -346,16 +370,7 @@ export function createGamesRouter(
 
       if (game.players.length === 0 && game.events.length > 0) {
         game.players =
-          LegacyGameAdapter.extractPlayersFromEvents(game.events).map(
-            (p) => ({
-              id: p.id,
-              name: p.name,
-              role: 'UNASSIGNED' as const,
-              isAlive: true,
-              isMafia: false,
-              joinOrder: 0,
-            }),
-          );
+          LegacyGameAdapter.extractPlayersFromEvents(game.events).map(toApiPlayer);
       }
 
       res.json({

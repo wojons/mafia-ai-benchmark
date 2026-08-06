@@ -460,28 +460,158 @@ export class LegacyGameAdapter extends EventEmitter {
   }
 
   /**
-   * Extract unique players from game events.
-   * Groups by actor_id, gets playerName from AGENT_SAYS_BROADCASTED events.
+   * Extract unique players from game events, mapping role/isMafia/isAlive
+   * from role-bearing events when the information is present in the stream.
+   *
+   * Role sources (applied in event order; first known value wins per player):
+   *  - ROLES_ASSIGNED: data.assignments[] ({playerId, role}) + data.mafiaTeam[]
+   *  - MORNING_REVEAL: data.deaths[] — each death carries the full player
+   *    object ({id, role, isMafia, isAlive}), revealing the victim's role.
+   *  - Sheriff investigations: data.targetRoles[] (+ data.targetId) reveals
+   *    the target's role(s); the acting player (event.actorId) is the SHERIFF.
+   *  - Doctor protections: data.reason + data.targetId — the actor is DOCTOR.
+   *  - Vigilante shots: data.action 'SHOOT'|'PASS' — the actor is VIGILANTE.
+   *  - Mafia chat: PRIVATE AGENT_SAYS_BROADCASTED (legacy MESSAGE from the
+   *    MAFIA_CHAT phase) — the actor is MAFIA.
+   *  - Generic payloads: data.role (+ data.playerId/data.targetId), data.targetRole.
+   *
+   * Players whose role is genuinely never revealed keep 'UNASSIGNED' (and
+   * isMafia=false / isAlive=true as neutral defaults).
    */
-  static extractPlayersFromEvents(events: GameEvent[]): Array<{ id: string; name: string }> {
+  static extractPlayersFromEvents(events: GameEvent[]): Array<{
+    id: string;
+    name: string;
+    role: string;
+    isMafia: boolean;
+    isAlive: boolean;
+    joinOrder: number;
+  }> {
     const actorIds = new Set<string>();
     const nameByActor = new Map<string, string>();
+    const roleByActor = new Map<string, string>();
+    const mafiaByActor = new Map<string, boolean>();
+    const deadActors = new Set<string>();
+
+    const setRole = (id: string, role: string): void => {
+      if (!roleByActor.has(id)) roleByActor.set(id, role);
+    };
+    const setMafia = (id: string, isMafia: boolean): void => {
+      if (!mafiaByActor.has(id)) mafiaByActor.set(id, isMafia);
+    };
 
     for (const event of events) {
-      if (!event.actorId) continue;
-      actorIds.add(event.actorId);
-      if (!nameByActor.has(event.actorId) &&
+      const data =
+        event.data && typeof event.data === 'object'
+          ? (event.data as Record<string, unknown>)
+          : {};
+      const actorId = event.actorId;
+
+      // Track actor ids and names (existing behavior)
+      if (actorId) {
+        actorIds.add(actorId);
+        if (!nameByActor.has(actorId) &&
+            event.type === 'AGENT_SAYS_BROADCASTED' &&
+            typeof data.playerName === 'string') {
+          nameByActor.set(actorId, data.playerName);
+        }
+      }
+
+      // 1. ROLES_ASSIGNED — authoritative full assignment
+      if (event.type === 'ROLES_ASSIGNED') {
+        if (Array.isArray(data.assignments)) {
+          for (const assignment of data.assignments as Array<Record<string, unknown>>) {
+            if (typeof assignment.playerId !== 'string' || typeof assignment.role !== 'string') continue;
+            actorIds.add(assignment.playerId);
+            setRole(assignment.playerId, assignment.role);
+            setMafia(assignment.playerId, assignment.role === 'MAFIA');
+          }
+        }
+        if (Array.isArray(data.mafiaTeam)) {
+          for (const pid of data.mafiaTeam as unknown[]) {
+            if (typeof pid !== 'string') continue;
+            actorIds.add(pid);
+            setMafia(pid, true);
+          }
+        }
+      }
+
+      // 2. MORNING_REVEAL deaths — full player objects with role/isMafia/isAlive
+      if (event.type === 'MORNING_REVEAL' && Array.isArray(data.deaths)) {
+        for (const death of data.deaths as Array<Record<string, unknown>>) {
+          if (typeof death.id !== 'string') continue;
+          actorIds.add(death.id);
+          if (typeof death.role === 'string') setRole(death.id, death.role);
+          if (typeof death.isMafia === 'boolean') setMafia(death.id, death.isMafia);
+          deadActors.add(death.id);
+          if (typeof death.name === 'string' && !nameByActor.has(death.id)) {
+            nameByActor.set(death.id, death.name);
+          }
+        }
+      }
+
+      // 3. Sheriff investigation — target roles revealed; actor is the sheriff
+      if (Array.isArray(data.targetRoles) && typeof data.targetId === 'string') {
+        const roles = data.targetRoles as string[];
+        const primaryRole = roles.length === 1 ? roles[0] : (roles.includes('MAFIA') ? 'MAFIA' : roles[0]);
+        actorIds.add(data.targetId);
+        setRole(data.targetId, primaryRole);
+        setMafia(data.targetId, roles.includes('MAFIA'));
+        if (actorId) {
+          setRole(actorId, 'SHERIFF');
+          setMafia(actorId, false);
+        }
+      }
+
+      // 4. Doctor protection — actor is the doctor
+      if (actorId &&
+          typeof data.reason === 'string' &&
+          typeof data.targetId === 'string' &&
+          !Array.isArray(data.targetRoles)) {
+        setRole(actorId, 'DOCTOR');
+        setMafia(actorId, false);
+      }
+
+      // 5. Vigilante action — actor is the vigilante
+      if (actorId && (data.action === 'SHOOT' || data.action === 'PASS')) {
+        setRole(actorId, 'VIGILANTE');
+        setMafia(actorId, false);
+      }
+
+      // 6. Mafia chat — PRIVATE legacy MESSAGE events only come from the
+      //    MAFIA_CHAT phase, so the actor is mafia
+      if (actorId &&
           event.type === 'AGENT_SAYS_BROADCASTED' &&
-          event.data &&
-          typeof event.data === 'object' &&
-          'playerName' in event.data) {
-        nameByActor.set(event.actorId, (event.data as Record<string, unknown>).playerName as string);
+          event.visibility === 'PRIVATE' &&
+          (data.legacyType === 'MESSAGE' || data.legacyType === 'MAFIA_CHAT')) {
+        setRole(actorId, 'MAFIA');
+        setMafia(actorId, true);
+      }
+
+      // 7. Generic role-carrying payloads (PLAYER_LYNCHED, MAFIA_KILL_SUCCEEDED, ...)
+      if (typeof data.role === 'string') {
+        if (typeof data.playerId === 'string') {
+          actorIds.add(data.playerId);
+          setRole(data.playerId, data.role);
+        } else if (typeof data.targetId === 'string') {
+          actorIds.add(data.targetId);
+          setRole(data.targetId, data.role);
+        } else if (actorId) {
+          setRole(actorId, data.role);
+        }
+      }
+      if (typeof data.targetRole === 'string' && typeof data.targetId === 'string') {
+        actorIds.add(data.targetId);
+        setRole(data.targetId, data.targetRole);
       }
     }
 
-    return Array.from(actorIds).map(id => ({
+    return Array.from(actorIds).map((id, index) => ({
       id,
       name: nameByActor.get(id) || `Player ${id.substring(0, 8)}`,
+      role: roleByActor.get(id) || 'UNASSIGNED',
+      isMafia: mafiaByActor.get(id) ?? false,
+      isAlive: !deadActors.has(id),
+      joinOrder: index,
     }));
   }
 }
