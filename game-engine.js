@@ -689,6 +689,49 @@ const API_KEY = process.env.OPENAI_API_KEY;
 const API_BASE_URL = process.env.OPENAI_BASE_URL || 'https://openrouter.ai/api/v1';
 const API_ENDPOINT = `${API_BASE_URL}/chat/completions`;
 
+// Shared THINK/SAYS parser + broadcast quality gate (canonical implementation
+// in packages/shared/src/agents/response-parser.js, also used by
+// run-real-game.ts and the vitest suite).
+const {
+  parseAgentResponse,
+  createSayQualityGate,
+} = require("./packages/shared/src/agents/response-parser");
+
+/**
+ * Compose a provider/model id for the API request body.
+ *
+ * The player-model-config default model ALREADY includes the provider prefix
+ * ("openai/gpt-4o-mini"), so blindly prepending the provider produced the
+ * invalid double-prefixed id "openai/openai/gpt-4o-mini" -> HTTP 400
+ * "not a valid model ID" on OpenRouter for EVERY game-play call, which made
+ * every broadcast fall back to canned mock phrases (the repeated-says
+ * degradation observed in sampled game 04fb5d4d).
+ */
+function composeModelId(provider, model) {
+  if (!model) return provider;
+  if (model.includes("/")) return model;
+  return `${provider}/${model}`;
+}
+
+/**
+ * Salvage a usable statement from unparseable model output once retries are
+ * exhausted: the whole raw output becomes SAYS (never empty, never canned
+ * filler). Returns null only when the output is unusable (empty).
+ */
+function salvageUnparsed(text) {
+  const salvaged = parseAgentResponse(text);
+  if (salvaged.says) {
+    return {
+      valid: false,
+      think: salvaged.think || "[Parse failed]",
+      says: salvaged.says,
+      action: salvaged.action || null,
+      degraded: true,
+    };
+  }
+  return null;
+}
+
 // Player Model Configuration System (flexible, scalable model assignment)
 let playerModelConfig = null;
 function getPlayerModelConfig() {
@@ -1647,6 +1690,7 @@ class MafiaGame {
     this.vigilanteShotUsed = false;
     this.deadPlayers = [];
     this.gameEvents = [];
+    this.sayGate = createSayQualityGate(); // per-game broadcast quality gate
     this.mafiaKillTarget = null;
     this.evidenceManagers = new Map(); // Store evidence managers
 
@@ -3452,22 +3496,24 @@ class MafiaGame {
         console.log("  " + E.THINK + " THINK: " + response.think);
         console.log("  " + E.SAYS + ' SAYS:  "' + response.says + '"\n');
 
-        this.gameEvents.push(
-          createGameEvent(
-            gameId,
-            this.round,
-            "MAFIA_CHAT",
-            mafia,
-            "MESSAGE",
-            "PRIVATE_MAFIA",
-            {
-              think: response.think,
-              says: response.says,
-              messageNumber: mafiaMessageCounts[mafia.id],
-            },
-          ),
-        );
-        mafiaMessages.push({ player: mafia.name, says: response.says });
+        if (response.says) {
+          this.gameEvents.push(
+            createGameEvent(
+              gameId,
+              this.round,
+              "MAFIA_CHAT",
+              mafia,
+              "MESSAGE",
+              "PRIVATE_MAFIA",
+              {
+                think: response.think,
+                says: response.says,
+                messageNumber: mafiaMessageCounts[mafia.id],
+              },
+            ),
+          );
+          mafiaMessages.push({ player: mafia.name, says: response.says });
+        }
 
         await new Promise((r) => setTimeout(r, 50));
       }
@@ -4321,20 +4367,22 @@ class MafiaGame {
       console.log("  " + E.THINK + " THINK: " + response.think);
       console.log("  " + E.SAYS + ' SAYS:  "' + response.says + '"');
 
-      this.gameEvents.push(
-        createGameEvent(
-          gameId,
-          this.round,
-          "DAY_DISCUSSION",
-          player,
-          "MESSAGE",
-          "PUBLIC",
-          {
-            message: response.says,
-            messageNumber: playerMessageCounts[player.id],
-          },
-        ),
-      );
+      if (response.says) {
+        this.gameEvents.push(
+          createGameEvent(
+            gameId,
+            this.round,
+            "DAY_DISCUSSION",
+            player,
+            "MESSAGE",
+            "PUBLIC",
+            {
+              message: response.says,
+              messageNumber: playerMessageCounts[player.id],
+            },
+          ),
+        );
+      }
 
       await new Promise((r) => setTimeout(r, 50));
     }
@@ -4580,9 +4628,12 @@ class MafiaGame {
     await this.runNightPhase(gameId);
   }
 
-  async getAIResponse(player, gameState, retryCount = 0) {
+  async getAIResponse(player, gameState, retryCount = 0, skipResponseFormat = false) {
     if (!API_KEY) {
-      return this.getMockResponse(player, gameState);
+      return this.finalizeAgentResponse(
+        player,
+        this.getMockResponse(player, gameState),
+      );
     }
 
     // Check budget limits before making API call
@@ -4628,6 +4679,7 @@ class MafiaGame {
     let success = true;
     let statusCode = 200;
     let tokenUsage = { promptTokens: 0, completionTokens: 0, totalTokens: 0 };
+    let responseFormatUsed = false;
 
     try {
       // Get evidence summary for this player (only during discussion/voting phases)
@@ -4671,8 +4723,10 @@ class MafiaGame {
           multiRoleContext,
         ) + jsonSchemaText; // Append JSON schema to prompt
 
+      const modelId = composeModelId(modelConfig.provider, modelConfig.model);
+
       const requestBody = {
-        model: modelConfig.provider + "/" + modelConfig.model,
+        model: modelId,
         messages: [{ role: "user", content: prompt }],
         temperature: modelConfig.temperature,
         max_tokens: modelConfig.maxTokens || 800, // Increased from 200 for better JSON
@@ -4685,10 +4739,11 @@ class MafiaGame {
         modelConfig.model.includes("gpt-") ||
         modelConfig.model.includes("o1-");
 
-      if (isOpenAI && !this.config.disableStructuredOutputs) {
+      if (isOpenAI && !this.config.disableStructuredOutputs && !skipResponseFormat) {
         try {
           const responseFormat = getResponseFormat(gameState.phase);
           requestBody.response_format = responseFormat;
+          responseFormatUsed = true;
           console.log(
             `[API] Using structured outputs for ${modelConfig.model} in ${gameState.phase}`,
           );
@@ -4745,6 +4800,17 @@ class MafiaGame {
       }
 
       const parsed = this.parseJSONResponse(text);
+
+      // If the endpoint rejected response_format (e.g. a generic
+      // completions-style endpoint that errors on structured output), retry
+      // WITHOUT it instead of burning retries on the same rejected request.
+      if (!response.ok && responseFormatUsed && retryCount < this.config.maxRetries) {
+        console.warn(
+          `[WARN] API ${statusCode} for ${player.name} (${modelId}) rejected response_format — retrying WITHOUT structured output (${retryCount + 1}/${this.config.maxRetries})...`,
+        );
+        await new Promise((r) => setTimeout(r, this.config.retryDelay));
+        return this.getAIResponse(player, gameState, retryCount + 1, true);
+      }
 
       // Track API call metrics
       if (this.apiTracker) {
@@ -4846,10 +4912,22 @@ class MafiaGame {
           `[WARN] JSON parse failed for ${player.name}, retrying (${retryCount + 1}/${this.config.maxRetries})...`,
         );
         await new Promise((r) => setTimeout(r, this.config.retryDelay));
-        return this.getAIResponse(player, gameState, retryCount + 1);
+        return this.getAIResponse(player, gameState, retryCount + 1, skipResponseFormat);
       }
 
-      return parsed.valid ? parsed : this.getMockResponse(player, gameState);
+      // Retries exhausted: salvage whatever the model produced (never-empty
+      // SAYS fallback) before falling back to the canned mock. Garbled output
+      // is still a real statement; the quality gate dedupes repeats.
+      if (!parsed.valid) {
+        const salvaged = salvageUnparsed(text);
+        if (salvaged) {
+          return this.finalizeAgentResponse(player, salvaged);
+        }
+      }
+
+      return parsed.valid
+        ? this.finalizeAgentResponse(player, parsed)
+        : this.finalizeAgentResponse(player, this.getMockResponse(player, gameState));
     } catch (error) {
       const duration = Date.now() - startTime;
       success = false;
@@ -4879,11 +4957,28 @@ class MafiaGame {
           `[WARN] Network error for ${player.name}, retrying (${retryCount + 1}/${this.config.maxRetries})...`,
         );
         await new Promise((r) => setTimeout(r, this.config.retryDelay));
-        return this.getAIResponse(player, gameState, retryCount + 1);
+        return this.getAIResponse(player, gameState, retryCount + 1, skipResponseFormat);
       }
 
-      return this.getMockResponse(player, gameState);
+      return this.finalizeAgentResponse(player, this.getMockResponse(player, gameState));
     }
+  }
+
+  /**
+   * Apply the broadcast quality gate to an agent response. Empty, placeholder,
+   * consecutive-duplicate, or 3x+-repeat statements are suppressed
+   * (says -> ""), so callers skip broadcasting rather than repeating canned
+   * filler (the degradation observed in sampled game 04fb5d4d).
+   */
+  finalizeAgentResponse(player, response) {
+    if (!this.sayGate) this.sayGate = createSayQualityGate();
+    const playerId = player.id || player.name;
+    const gated = this.sayGate.check(playerId, response.says);
+    return {
+      ...response,
+      says: gated || "",
+      suppressed: !gated,
+    };
   }
 
   _getActionType(phase) {
@@ -5095,14 +5190,13 @@ class MafiaGame {
 
   parseJSONResponse(text) {
     try {
-      const jsonMatch = text.match(/\{[\s\S]*\}/);
-      if (jsonMatch) {
-        const json = JSON.parse(jsonMatch[0]);
+      const parsed = parseAgentResponse(text);
+      if (parsed.format === "json" || parsed.format === "markers") {
         return {
           valid: true,
-          think: json.think || "[No private thoughts]",
-          says: json.says || "[No public statement]",
-          action: json.action || null,
+          think: parsed.think || "[No private thoughts]",
+          says: parsed.says,
+          action: parsed.action || null,
         };
       }
     } catch (e) {
@@ -5300,5 +5394,11 @@ if (require.main === module) {
 
 // Export for module usage
 if (typeof module !== "undefined" && module.exports) {
-  module.exports = { MafiaGame };
+  module.exports = {
+    MafiaGame,
+    composeModelId,
+    salvageUnparsed,
+    parseAgentResponse,
+    createSayQualityGate,
+  };
 }

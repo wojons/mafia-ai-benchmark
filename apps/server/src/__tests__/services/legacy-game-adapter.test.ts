@@ -71,6 +71,81 @@ describe('LegacyGameAdapter', () => {
   });
 
   // ==========================================================================
+  // translateAndPublishEvent — statement normalization (MAF-GAP-004)
+  // ==========================================================================
+
+  describe('translateAndPublishEvent() statement normalization', () => {
+    function legacyMessageEvent(content: Record<string, unknown>) {
+      return {
+        eventType: 'MESSAGE',
+        playerId: 'p1',
+        playerName: 'Alice',
+        visibility: 'PUBLIC',
+        phase: 'DAY_DISCUSSION',
+        content,
+        round: 1,
+        timestamp: new Date().toISOString(),
+      };
+    }
+
+    it('maps DAY_DISCUSSION `message` content to statement/says (no more empty UI says)', () => {
+      eventBus.reset();
+      (adapter as any).translateAndPublishEvent('g1', legacyMessageEvent({ message: 'I think Alice is mafia.' }), 1);
+
+      const published = eventBus.published.find(e => e.type === 'AGENT_SAYS_BROADCASTED');
+      expect(published).toBeDefined();
+      expect((published!.data as any).statement).toBe('I think Alice is mafia.');
+      expect((published!.data as any).says).toBe('I think Alice is mafia.');
+    });
+
+    it('maps MAFIA_CHAT `says` content to statement/says', () => {
+      eventBus.reset();
+      const event = legacyMessageEvent({ think: '[Private] plan', says: 'Let us target the doctor.' });
+      event.phase = 'MAFIA_CHAT';
+      (adapter as any).translateAndPublishEvent('g1', event, 2);
+
+      const published = eventBus.published.find(e => e.type === 'AGENT_SAYS_BROADCASTED');
+      expect((published!.data as any).statement).toBe('Let us target the doctor.');
+      expect((published!.data as any).says).toBe('Let us target the doctor.');
+    });
+
+    it('keeps an existing statement key untouched', () => {
+      eventBus.reset();
+      (adapter as any).translateAndPublishEvent(
+        'g1',
+        legacyMessageEvent({ statement: 'Already normalized.', message: 'Legacy key.' }),
+        3,
+      );
+
+      const published = eventBus.published.find(e => e.type === 'AGENT_SAYS_BROADCASTED');
+      expect((published!.data as any).statement).toBe('Already normalized.');
+      expect((published!.data as any).says).toBe('Already normalized.');
+    });
+
+    it('does not inject statement keys on non-broadcast events', () => {
+      eventBus.reset();
+      (adapter as any).translateAndPublishEvent(
+        'g1',
+        {
+          eventType: 'STATE_CHANGE',
+          playerId: 'system',
+          playerName: 'System',
+          visibility: 'PUBLIC',
+          phase: 'SETUP',
+          content: { status: 'IN_PROGRESS' },
+          round: 0,
+          timestamp: new Date().toISOString(),
+        },
+        0,
+      );
+
+      const published = eventBus.published.find(e => e.type === 'GAME_STARTED');
+      expect(published).toBeDefined();
+      expect((published!.data as any).statement).toBeUndefined();
+    });
+  });
+
+  // ==========================================================================
   // extractPlayersFromEvents (static)
   // ==========================================================================
 

@@ -15,16 +15,20 @@
 
 import { 
   Game, 
-  GameFSM, 
   createGameFSM, 
   Player, 
   RoleType,
   GamePhase,
   Vote,
-  NightAction
-} from './src/index.js';
-import { createProvider, ProviderConfig } from './src/providers/index.js';
-import { getRoleConfig } from './src/roles/index.js';
+  NightAction,
+  createProvider,
+  ProviderConfig,
+  getRoleConfig
+} from './packages/shared/src/index.js';
+import {
+  parseAgentResponse,
+  createSayQualityGate,
+} from './packages/shared/src/agents/response-parser.js';
 
 // Configuration
 const OPENAI_API_KEY = process.env.OPENAI_API_KEY || process.env.OPENROUTER_API_KEY;
@@ -51,6 +55,10 @@ interface AgentResponse {
   says: string;   // Public statement
   action?: string; // Action if any
 }
+
+// Per-game broadcast quality gate (empty/placeholder statements dropped,
+// consecutive duplicates deduped, no 3x+ exact repeat per player).
+const sayGate = createSayQualityGate();
 
 /**
  * Create a test game with 10 players
@@ -189,36 +197,50 @@ async function getAgentResponse(
       messages: [{ role: 'user', content: prompt }],
       temperature: 0.7,
       maxTokens: 1000,
+      // Ask OpenAI-compatible endpoints for a JSON object; the parser
+      // fallback below still handles providers that reject or ignore
+      // response_format.
+      responseFormat: { type: 'json_object' },
     });
 
-    // Parse the response
+    // Parse the response (JSON object first, then THINK:/SAYS: markers,
+    // then whole-output-as-SAYS — never empty, never canned filler)
     const text = response.choices[0].message.content;
-    return parseAgentResponse(text, player, game);
+    const parsed = parseAgentResponse(text);
+
+    // Extract a vote/action: JSON action object or embedded "VOTE: X" text
+    let says = parsed.says;
+    let action: string | undefined;
+    const jsonTarget =
+      parsed.action && typeof parsed.action === 'object'
+        ? (parsed.action as { target?: string }).target
+        : undefined;
+    if (jsonTarget) {
+      action = `VOTE:${jsonTarget}`;
+    }
+    const voteMatch = says.match(/VOTE:\s*(\w+)/i);
+    if (voteMatch) {
+      action = `VOTE:${voteMatch[1]}`;
+      says = says.replace(voteMatch[0], '').trim();
+    }
+
+    // Apply the broadcast quality gate: empty/placeholder statements and
+    // exact repeats (consecutive or 3x+ in one game) are dropped.
+    const gatedSays = sayGate.check(player.id, says);
+
+    return {
+      think: parsed.think || getMockResponse(player, game, phase).think,
+      says: gatedSays || '',
+      action,
+    };
   } catch (error) {
     console.error(`Error getting response for ${player.name}:`, error);
-    return getMockResponse(player, game, phase);
+    const mock = getMockResponse(player, game, phase);
+    return {
+      think: mock.think,
+      says: sayGate.check(player.id, mock.says) || '',
+    };
   }
-}
-
-/**
- * Parse agent response into think/says
- */
-function parseAgentResponse(text: string, player: Player, game: Game): AgentResponse {
-  const thinkMatch = text.match(/THINK:\s*([\s\S]*?)(?=SAYS:|$)/i);
-  const saysMatch = text.match(/SAYS:\s*([\s\S]*?)$/i);
-
-  let think = thinkMatch?.[1]?.trim() || `I'm ${player.name}, thinking about the game...`;
-  let says = saysMatch?.[1]?.trim() || "I don't have much to say yet.";
-
-  // Extract vote if present
-  let action: string | undefined;
-  const voteMatch = says.match(/VOTE:\s*(\w+)/i);
-  if (voteMatch) {
-    action = `VOTE:${voteMatch[1]}`;
-    says = says.replace(voteMatch[0], '').trim();
-  }
-
-  return { think, says, action };
 }
 
 /**
@@ -291,8 +313,12 @@ async function runPhase(game: Game, phase: GamePhase): Promise<void> {
     // Print THINK (private, for admin/observers)
     console.log(`\n[THINK - Private]:\n${response.think}\n`);
     
-    // Print SAYS (public)
-    console.log(`[SAYS - Public]:\n${response.says}\n`);
+    // Print SAYS (public) — suppressed when the quality gate dropped it
+    if (response.says) {
+      console.log(`[SAYS - Public]:\n${response.says}\n`);
+    } else {
+      console.log(`[SAYS - Public]: (suppressed — empty or repeated)\n`);
+    }
 
     // Handle votes during voting phase
     if (phase === 'DAY_VOTING' && response.action?.startsWith('VOTE:')) {
@@ -432,6 +458,7 @@ async function runGame(): Promise<void> {
   // Create game
   const game = createTestGame();
   const fsm = createGameFSM(game);
+  sayGate.reset(); // fresh per-game quality-gate state
 
   // Show role assignment (for debugging)
   console.log('Role Assignment:');

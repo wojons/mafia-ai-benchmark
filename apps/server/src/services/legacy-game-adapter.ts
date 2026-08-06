@@ -383,6 +383,7 @@ export class LegacyGameAdapter extends EventEmitter {
         legacyType,
         ...(legacyEvent.content as Record<string, unknown> || {}),
         playerName: legacyEvent.playerName,
+        ...this.normalizeStatementData(serverType, legacyEvent.content as Record<string, unknown> | undefined),
       },
       metadata: {
         turnNumber: sequence,
@@ -394,7 +395,6 @@ export class LegacyGameAdapter extends EventEmitter {
     
     // Publish to EventBus
     this.eventBus.publish(gameEvent);
-    
     // Store event in repository for REST retrieval
     try {
       const { id, gameId: _, timestamp, ...eventData } = gameEvent;
@@ -411,6 +411,31 @@ export class LegacyGameAdapter extends EventEmitter {
     } catch (e) {
       // Silently ignore - events still flow through EventBus
     }
+  }
+
+  /**
+   * Normalize the public-statement keys on broadcast events.
+   *
+   * The legacy engine stores the statement under different keys depending on
+   * phase (MAFIA_CHAT uses `says`, DAY_DISCUSSION uses `message`), while the
+   * web UI and the coordinator path read `statement`/`says`. Without this,
+   * DAY_DISCUSSION broadcasts render as EMPTY statements in the split-pane
+   * view (sampled game 04fb5d4d: "4 of 5 players all-empty says").
+   */
+  private normalizeStatementData(
+    serverType: string,
+    content: Record<string, unknown> | undefined,
+  ): Record<string, unknown> {
+    if (serverType !== 'AGENT_SAYS_BROADCASTED') {
+      return {};
+    }
+    const c = content || {};
+    const statement =
+      (c.statement as string) ??
+      (c.says as string) ??
+      (c.message as string) ??
+      '';
+    return { statement, says: statement };
   }
   
   /**

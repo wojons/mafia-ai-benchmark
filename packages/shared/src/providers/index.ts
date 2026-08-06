@@ -28,6 +28,12 @@ export interface ChatRequest {
   maxTokens?: number;
   stream?: boolean;
   stop?: string[];
+  /**
+   * Optional structured-output hint forwarded to OpenAI-compatible
+   * endpoints as `response_format` (e.g. { type: 'json_object' }).
+   * Providers whose wire format does not support it ignore the field.
+   */
+  responseFormat?: { type: 'json_object' | 'json_schema' };
 }
 
 export interface ChatMessage {

@@ -137,6 +137,10 @@ export class OpenAIProvider implements LLMProviderAdapter {
       payload.stop = request.stop;
     }
     
+    if (request.responseFormat) {
+      payload.response_format = request.responseFormat;
+    }
+    
     return payload;
   }
   

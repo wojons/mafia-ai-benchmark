@@ -1,8 +1,10 @@
 // Mafia AI Benchmark - Player Model Configuration System
 // Flexible, scalable system for assigning AI models to players
+// NOTE: ESM (packages/shared is "type": "module"). Loaded by the legacy
+// engine via require() (Node >= 22.12 require(esm)).
 
-const fs = require('fs');
-const path = require('path');
+import fs from 'fs';
+import path from 'path';
 
 class PlayerModelConfig {
   constructor(config = {}) {
@@ -467,7 +469,7 @@ class PlayerConfigPresets {
   }
 }
 
-module.exports = {
+export {
   PlayerModelConfig,
   PlayerConfigPresets
 };

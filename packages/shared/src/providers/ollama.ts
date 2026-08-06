@@ -121,6 +121,7 @@ export class OllamaProvider implements LLMProviderAdapter {
       messages,
       temperature: request.temperature ?? this.config.temperature ?? 0.7,
       max_tokens: request.maxTokens ?? this.config.maxTokens ?? 4096,
+      ...(request.responseFormat ? { response_format: request.responseFormat } : {}),
       streaming,
     };
   }

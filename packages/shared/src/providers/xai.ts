@@ -115,6 +115,7 @@ export class XAIProvider implements LLMProviderAdapter {
       messages,
       temperature: request.temperature ?? this.config.temperature ?? 0.7,
       max_tokens: request.maxTokens ?? this.config.maxTokens ?? 8192,
+      ...(request.responseFormat ? { response_format: request.responseFormat } : {}),
       streaming,
     };
   }
