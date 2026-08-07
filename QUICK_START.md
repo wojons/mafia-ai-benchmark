@@ -73,8 +73,11 @@ Open http://localhost:5174 to watch games in real time.
 # Start the server
 pnpm run server
 
-# Run automated benchmarks
-pnpm --filter @mafia/cli dev -- benchmark --games 10 --players 5
+# Run automated benchmarks: POST a run and poll it to completion
+pnpm --filter @mafia/cli dev -- benchmark --games 2 --models openai/gpt-4o-mini,openai/gpt-4o
+
+# Omit --games/--models to just view the accumulated report
+pnpm --filter @mafia/cli dev -- benchmark --quick
 ```
 
 ## What You'll See
@@ -141,7 +144,7 @@ The game will:
 | ------------------------------------------------------------- | ------------------------------ |
 | `pnpm --filter @mafia/cli dev -- run-game --players 5`        | Run a game with 5 players      |
 | `pnpm --filter @mafia/cli dev -- run-game --players 10`       | Run a game with 10 players     |
-| `pnpm --filter @mafia/cli dev -- benchmark --games 10`        | Run 10 benchmark games         |
+| `pnpm --filter @mafia/cli dev -- benchmark --games 2 --models openai/gpt-4o-mini,openai/gpt-4o` | Run 2 benchmark games |
 | `pnpm --filter @mafia/cli dev -- list-games`                  | List recent and active games   |
 | `pnpm --filter @mafia/cli dev -- stats`                       | View game and model statistics |
 | `pnpm --filter @mafia/cli dev -- watch-game <game-id>`        | Watch a game in real time      |

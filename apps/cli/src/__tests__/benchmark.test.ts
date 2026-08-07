@@ -1,9 +1,10 @@
 /**
- * Tests for BenchmarkCommand (MAF-GAP-010).
+ * Tests for BenchmarkCommand (MAF-GAP-010 / MAF-GAP-015).
  *
  * The command must display the REAL accumulated benchmark report fetched from
- * the server — never fabricated Math.random numbers. These tests spawn the
- * actual CLI (`node tsx-cli src/index.ts ...`) with process.argv-like
+ * the server — never fabricated Math.random numbers. With --games/--models it
+ * now POSTs a fresh run and polls it to completion (MAF-GAP-015). These tests
+ * spawn the actual CLI (`node tsx-cli src/index.ts ...`) with process.argv-like
  * arguments, matching parse.test.ts (MAF-GAP-009).
  */
 import { describe, it, expect, afterEach } from 'vitest';
@@ -31,12 +32,12 @@ function makeTempCwd(): string {
   return dir;
 }
 
-async function runCli(cwd: string, args: string[]): Promise<{ stdout: string; stderr: string; code: number }> {
+async function runCli(cwd: string, args: string[], timeoutMs = 60000): Promise<{ stdout: string; stderr: string; code: number }> {
   try {
     const { stdout, stderr } = await execFileAsync(
       process.execPath,
       [tsxCli, cliEntry, ...args],
-      { cwd, env: process.env, timeout: 60000 }
+      { cwd, env: process.env, timeout: timeoutMs }
     );
     return { stdout, stderr, code: 0 };
   } catch (error: any) {
@@ -97,7 +98,7 @@ if (!SERVER_AVAILABLE) {
 
 describe('benchmark --help (parse level)', () => {
   it(
-    'lists --server/--json/--export/--quick and NOT the removed pretend-run options',
+    'lists --server/--json/--export/--games/--models now that runs are wired',
     async () => {
       const cwd = makeTempCwd();
       const { stdout, stderr, code } = await runCli(cwd, ['benchmark', '--help']);
@@ -108,10 +109,21 @@ describe('benchmark --help (parse level)', () => {
       expect(stdout).toContain('--json');
       expect(stdout).toContain('--export');
       expect(stdout).toContain('--quick');
-      // Pretend-run options must no longer be advertised.
-      expect(stdout).not.toContain('--games');
-      expect(stdout).not.toContain('--models');
-      expect(stdout).not.toContain('--parallel');
+      // Fresh-run options are now real and advertised (MAF-GAP-015).
+      expect(stdout).toContain('--games');
+      expect(stdout).toContain('--models');
+      // --parallel stays accepted (backward compat) and visible.
+      expect(stdout).toContain('--parallel');
+    },
+    90000
+  );
+
+  it(
+    'does NOT advertise the stale "not yet available" warning in --help',
+    async () => {
+      const cwd = makeTempCwd();
+      const { stdout } = await runCli(cwd, ['benchmark', '--help']);
+      expect(stdout).not.toContain('Fresh benchmark runs are not yet available');
     },
     90000
   );
@@ -145,24 +157,31 @@ describe.skipIf(!SERVER_AVAILABLE)('benchmark report (live server)', () => {
   );
 
   it(
-    'legacy --games/--models/--parallel are accepted with a yellow note and still show the report',
+    '--games 1 --models <pair> POSTs a run, polls progress, and prints the report',
     async () => {
       const cwd = makeTempCwd();
+      // A real LLM-driven mafia game can take 2-6 minutes end-to-end; allow 12.
       const { stdout, stderr, code } = await runCli(cwd, [
-        'benchmark', '--quick', '--games', '10', '--models', 'a,b', '--parallel',
+        'benchmark', '--games', '1',
+        '--models', 'openai/gpt-4o-mini,openai/gpt-4o',
         '--json', '--server', TEST_BASE_URL,
-      ]);
+      ], 12 * 60 * 1000);
 
       expect(stderr).toBe('');
       expect(code).toBe(0);
-      expect(stdout).toContain('Fresh benchmark runs are not yet available');
+      // The stale warning is gone.
+      expect(stdout).not.toContain('Fresh benchmark runs are not yet available');
+      // A runId was returned by the POST and printed.
+      expect(stdout).toMatch(/runId[: ]/);
+      // A terminal completion line was printed.
+      expect(stdout).toMatch(/completed/i);
 
-      // It must still print the real report (no fabricated benchmark run).
+      // It must still print the real report JSON.
       const printed = extractJson(stdout);
       expect(typeof printed.summary?.totalGames).toBe('number');
       expect(Array.isArray(printed.modelPerformance)).toBe(true);
     },
-    90000
+    12 * 60 * 1000
   );
 
   it(
@@ -195,7 +214,7 @@ describe('benchmark (unreachable server)', () => {
       expect(code).toBe(1);
       expect(stderr).toContain('❌ Cannot connect to server');
       expect(stderr).toContain('http://localhost:59999');
-      // The legacy pretend-run note is printed before the fetch attempt.
+      // No fabricated run output.
       expect(stdout).not.toContain('Testing model');
     },
     90000

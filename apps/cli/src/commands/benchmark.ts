@@ -1,14 +1,16 @@
 /**
  * Benchmark Command
- * 
- * Show the accumulated benchmark report from the server.
- * 
- * MAF-GAP-010: this command previously FABRICATED results (random wins,
- * win rates, token/cost averages after a fake 500ms sleep). It now fetches
- * and displays the real GET /api/v1/benchmark/report from the server.
- * Fresh benchmark runs (POST /api/v1/benchmark) are not yet available
- * (MAF-GAP-011), so the legacy pretend-run options are accepted for
- * backward compatibility but only produce a note.
+ *
+ * Show the accumulated benchmark report from the server, OR kick off a fresh
+ * benchmark run and poll it to completion.
+ *
+ * - With no run options: fetch and display GET /api/v1/benchmark/report.
+ * - With --games/--models: POST /api/v1/benchmark, poll the run status until
+ *   terminal, then fetch+display the accumulated report on COMPLETED.
+ *
+ * MAF-GAP-010/GAP-011 history: this command previously FABRICATED results, then
+ * read-only'd itself with a "not yet available" warning while POST was broken.
+ * POST is fixed (commit 23aba24), so the CLI now drives real runs (MAF-GAP-015).
  */
 
 import { Command, Option } from 'commander';
@@ -16,6 +18,21 @@ import chalk from 'chalk';
 import fs from 'fs';
 import { ExportCommand } from './export.js';
 import { resolveServerUrl } from '../config.js';
+
+/** Default model pair when --games is given without --models. */
+const DEFAULT_MODELS = ['openai/gpt-4o-mini', 'openai/gpt-4o'];
+
+/** Run status values (mirror server BenchmarkRunStatusValue). */
+type RunStatus = 'QUEUED' | 'RUNNING' | 'COMPLETED' | 'CANCELLED' | 'FAILED';
+const TERMINAL: ReadonlySet<RunStatus> = new Set(['COMPLETED', 'CANCELLED', 'FAILED']);
+
+/** Max wall-clock time to wait for a run, in ms (10 min). Real LLM-driven
+ * mafia games have been observed to take 2-6 minutes end-to-end. */
+const RUN_TIMEOUT_MS = 10 * 60 * 1000;
+/** Poll interval, in ms. */
+const POLL_INTERVAL_MS = 2000;
+/** HTTP timeout for individual API calls, in ms. */
+const REQUEST_TIMEOUT_MS = 30000;
 
 interface BenchmarkReport {
   generatedAt?: string;
@@ -40,53 +57,94 @@ interface BenchmarkReport {
   recommendations?: string[];
 }
 
+interface BenchmarkPairing {
+  id: string;
+  modelA: string;
+  modelB: string;
+  games: number;
+}
+
+interface StartRunResponse {
+  success: boolean;
+  data?: {
+    runId: string;
+    totalGames: number;
+    pairings: BenchmarkPairing[];
+    message?: string;
+  };
+  error?: string;
+}
+
+interface RunProgress {
+  runId: string;
+  status: RunStatus;
+  totalGames: number;
+  completedGames: number;
+  validGames: number;
+  failedGames: number;
+  pairings: Array<{ id: string; modelA: string; modelB: string; games: number; completed: number }>;
+}
+
+interface RunStatusResponse {
+  success: boolean;
+  data?: {
+    status: RunStatus;
+    progress: RunProgress;
+  };
+  error?: string;
+}
+
 export class BenchmarkCommand extends Command {
   constructor() {
     super('benchmark');
-    this.description('Show the accumulated benchmark report from the server');
-    
-    this.option('--quick', 'Show the accumulated benchmark report (accepted for backward compatibility)', false);
+    this.description('Show the accumulated benchmark report, or run a fresh benchmark');
+
+    this.option('--quick', 'Show the accumulated benchmark report (default behavior)', false);
     this.option('--export <path>', 'Export results to file');
     this.option('--json', 'Output results as JSON');
     this.option('--server <url>', 'Server base URL (default: http://localhost:3004)');
-    
-    // Legacy pretend-run options — accepted (hidden) so existing invocations
-    // do not error; they cannot start fresh runs (POST /api/v1/benchmark is
-    // broken, MAF-GAP-011), so run() prints a note and shows the report.
-    this.addOption(new Option('-g, --games <n>', 'Number of games to run').hideHelp());
-    this.addOption(new Option('--models <models>', 'Comma-separated list of models to benchmark').hideHelp());
-    this.addOption(new Option('--parallel', 'Run games in parallel').hideHelp());
-    
+
+    // Fresh-run options: POST a benchmark run and poll it to completion.
+    this.addOption(new Option('-g, --games <n>', 'Run N fresh benchmark games (requires server POST /api/v1/benchmark)'));
+    this.addOption(new Option('--models <models>', 'Comma-separated models to benchmark (default: openai/gpt-4o-mini,openai/gpt-4o)'));
+    this.addOption(new Option('--parallel', 'Accepted for backward compatibility (server runs games asynchronously); ignored'));
+
     // Add export subcommand
     this.addCommand(new ExportCommand());
 
     this.action(async () => { await this.run(); });
   }
-  
+
   async run(): Promise<void> {
     const { quick: _quick, export: exportPath, json, server, games, models, parallel } = this.opts();
-    
+
     const serverUrl = resolveServerUrl(server);
-    
+
     console.log(chalk.cyan('\n🏁 Mafia AI Benchmark Suite\n'));
-    
-    // The CLI cannot start fresh benchmark runs yet — these options implied
-    // running new games, which would have fabricated numbers. Note and proceed
-    // with the accumulated server report.
-    if (games !== undefined || models !== undefined || parallel !== undefined) {
-      console.log(chalk.yellow('⚠️  Fresh benchmark runs are not yet available — showing the accumulated server report instead.'));
+
+    // A run is requested when either --games or --models is supplied.
+    const wantsRun = games !== undefined || models !== undefined;
+
+    if (parallel !== undefined) {
+      console.log(chalk.gray('ℹ️  --parallel is accepted for backward compatibility; the server runs games asynchronously, so it is ignored.'));
       console.log('');
     }
-    
+
     try {
-      const report = await this.fetchReport(serverUrl);
-      
+      let report: BenchmarkReport;
+
+      if (wantsRun) {
+        report = await this.runBenchmark(serverUrl, { games, models, json });
+      } else {
+        report = await this.fetchReport(serverUrl);
+      }
+
       if (json) {
         console.log(JSON.stringify(report, null, 2));
       } else {
         this.displayResults(report);
       }
-      
+
       // Export results if requested
       if (exportPath) {
         this.exportResults(report, exportPath);
@@ -96,38 +154,172 @@ export class BenchmarkCommand extends Command {
         console.error(chalk.red(`\n❌ Cannot connect to server at ${serverUrl}`));
         console.error(chalk.gray('   Make sure the server is running: pnpm run dev --filter=@mafia/server'));
       } else {
-        console.error(chalk.red(`\n❌ Failed to fetch benchmark report: ${error.message}`));
+        console.error(chalk.red(`\n❌ ${error.message}`));
       }
       process.exit(1);
     }
   }
-  
+
+  /**
+   * POST a fresh benchmark run and poll it to completion. Returns the
+   * accumulated server report (the run's results are folded into it).
+   */
+  private async runBenchmark(
+    serverUrl: string,
+    opts: { games?: string; models?: string; json?: boolean },
+  ): Promise<BenchmarkReport> {
+    const modelList = opts.models
+      ? opts.models.split(',').map((m) => m.trim()).filter(Boolean)
+      : [...DEFAULT_MODELS];
+
+    if (modelList.length < 2) {
+      throw new Error(`Benchmark requires at least 2 models, got ${modelList.length}. Use --models provider/model,provider/model.`);
+    }
+
+    const gamesPerPairing = opts.games !== undefined
+      ? this.parseGames(opts.games)
+      : 2;
+
+    const config = {
+      models: modelList,
+      gamesPerPairing,
+    };
+
+    console.log(chalk.cyan(`▶️  Starting benchmark: ${gamesPerPairing} game(s) per pairing across ${modelList.length} model(s)`));
+    console.log(chalk.gray(`   models: ${modelList.join(', ')}`));
+    console.log('');
+
+    // POST the run.
+    const startUrl = `${serverUrl}/api/v1/benchmark`;
+    console.log(chalk.gray(`📡 POST ${startUrl} ...`));
+
+    const startResp = await fetch(startUrl, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'Accept': 'application/json' },
+      body: JSON.stringify({ config }),
+      signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
+    });
+
+    if (!startResp.ok) {
+      const errorText = await startResp.text().catch(() => '');
+      throw new Error(`Failed to start benchmark (HTTP ${startResp.status}): ${errorText || startResp.statusText}`);
+    }
+
+    const startBody = await startResp.json() as StartRunResponse;
+    if (!startBody.success || !startBody.data) {
+      throw new Error(`Server refused benchmark start: ${startBody.error ?? 'unknown error'}`);
+    }
+
+    const { runId, totalGames, pairings } = startBody.data;
+    console.log(chalk.green(`✅ Run started — runId: ${chalk.yellow(runId)} (${totalGames} game(s), ${pairings.length} pairing(s))`));
+    console.log('');
+
+    // Poll the run status.
+    const statusUrl = `${serverUrl}/api/v1/benchmark/runs/${runId}`;
+    const deadline = Date.now() + RUN_TIMEOUT_MS;
+    let lastCompleted = -1;
+    let progress: RunProgress | null = null;
+
+    while (Date.now() < deadline) {
+      await this.sleep(POLL_INTERVAL_MS);
+
+      const resp = await fetch(statusUrl, {
+        method: 'GET',
+        headers: { 'Accept': 'application/json' },
+        signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
+      });
+
+      if (resp.status === 404) {
+        throw new Error(`Benchmark run ${runId} disappeared (404) while polling.`);
+      }
+      if (!resp.ok) {
+        const errorText = await resp.text().catch(() => '');
+        throw new Error(`Failed to poll run status (HTTP ${resp.status}): ${errorText || resp.statusText}`);
+      }
+
+      const body = await resp.json() as RunStatusResponse;
+      if (!body.success || !body.data) {
+        throw new Error(`Malformed run status response: ${JSON.stringify(body)}`);
+      }
+
+      progress = body.data.progress;
+
+      // Print progress only when the completed count advances.
+      if (progress.completedGames !== lastCompleted) {
+        lastCompleted = progress.completedGames;
+        console.log(chalk.gray(`   progress: ${progress.completedGames}/${progress.totalGames} games completed` +
+          (progress.failedGames > 0 ? `, ${progress.failedGames} failed` : '') +
+          ` [${progress.status}]`));
+      }
+
+      if (TERMINAL.has(progress.status)) {
+        break;
+      }
+    }
+
+    if (!progress) {
+      throw new Error(`No status received for benchmark run ${runId}.`);
+    }
+
+    if (!TERMINAL.has(progress.status)) {
+      throw new Error(`Benchmark run ${runId} did not finish within ${Math.round(RUN_TIMEOUT_MS / 1000)}s (last status: ${progress.status}). The server may still be processing it; check 'mafiactl benchmark --json' later.`);
+    }
+
+    console.log('');
+
+    if (progress.status === 'COMPLETED') {
+      console.log(chalk.green(`🎉 Benchmark run ${runId} completed — ${progress.completedGames}/${progress.totalGames} games (${progress.validGames} valid, ${progress.failedGames} failed).`));
+      console.log(chalk.gray(`   Fetching accumulated report ...`));
+      console.log('');
+      return await this.fetchReport(serverUrl);
+    }
+
+    // FAILED or CANCELLED
+    if (progress.status === 'FAILED') {
+      throw new Error(`Benchmark run ${runId} FAILED (${progress.failedGames}/${progress.totalGames} games failed). See server logs for details.`);
+    }
+    // CANCELLED
+    throw new Error(`Benchmark run ${runId} was CANCELLED.`);
+  }
+
+  private parseGames(raw: string): number {
+    const n = Number(raw);
+    if (!Number.isInteger(n) || n < 1) {
+      throw new Error(`--games must be a positive integer, got "${raw}".`);
+    }
+    return n;
+  }
+
+  private sleep(ms: number): Promise<void> {
+    return new Promise((resolve) => setTimeout(resolve, ms));
+  }
+
   private async fetchReport(serverUrl: string): Promise<BenchmarkReport> {
     const url = `${serverUrl}/api/v1/benchmark/report`;
-    
+
     console.log(chalk.gray(`📡 Fetching benchmark report from ${url}...`));
-    
+
     const response = await fetch(url, {
       method: 'GET',
       headers: { 'Accept': 'application/json' },
-      signal: AbortSignal.timeout(30000),
+      signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
     });
-    
+
     if (!response.ok) {
       const errorText = await response.text();
       throw new Error(`Server returned ${response.status}: ${errorText}`);
     }
-    
+
     return await response.json() as BenchmarkReport;
   }
-  
+
   private displayResults(report: BenchmarkReport): void {
     const summary = report.summary || { totalGames: 0 };
     const results = report.modelPerformance || [];
     const recommendations = report.recommendations || [];
-    
+
     console.log(chalk.green('\n✅ Benchmark Report\n'));
-    
+
     console.log(chalk.white('Summary:'));
     console.log(`  Total Games:      ${chalk.yellow((summary.totalGames ?? 0).toString())}`);
     if (summary.completedGames !== undefined) {
@@ -142,11 +334,11 @@ export class BenchmarkCommand extends Command {
     } else {
       console.log(`  Avg Time/Game:    ${chalk.gray('n/a')}`);
     }
-    
+
     console.log(chalk.white('\n📊 Results by Model:'));
     console.log(chalk.gray('  Model                  Games  Wins  Losses  Win Rate  Avg Tokens  Avg Cost'));
     console.log(chalk.gray('  ' + '─'.repeat(75)));
-    
+
     results.forEach(r => {
       const model = `${r.provider}/${r.model}`.padEnd(20);
       const gamesPlayed = (r.gamesPlayed ?? 0);
@@ -157,16 +349,16 @@ export class BenchmarkCommand extends Command {
       const winRate = ((r.winRate ?? 0) * 100).toFixed(1).padStart(8) + '%';
       const tokens = ((r.avgTokens ?? 0) / 1000).toFixed(1).padStart(10) + 'K';
       const cost = '$' + (r.avgCost ?? 0).toFixed(2).padStart(7);
-      
+
       console.log(`  ${model} ${games}  ${winsStr}  ${losses}  ${winRate}  ${tokens}  ${cost}`);
     });
-    
+
     if (results.length > 0) {
       const winner = results.reduce((best, m) => (m.winRate ?? 0) > (best.winRate ?? 0) ? m : best, results[0]);
-      console.log(chalk.green('\n🏆 Winner: ') + chalk.yellow(`${winner.provider}/${winner.model}`) + 
+      console.log(chalk.green('\n🏆 Winner: ') + chalk.yellow(`${winner.provider}/${winner.model}`) +
                   chalk.gray(` (${((winner.winRate ?? 0) * 100).toFixed(1)}% win rate)\n`));
     }
-    
+
     // Recommendations come from the server report
     if (recommendations.length > 0) {
       console.log(chalk.white('💡 Recommendations:'));
@@ -176,12 +368,12 @@ export class BenchmarkCommand extends Command {
       console.log('');
     }
   }
-  
+
   private formatDuration(ms: number): string {
     const seconds = Math.floor(ms / 1000);
     const minutes = Math.floor(seconds / 60);
     const hours = Math.floor(minutes / 60);
-    
+
     if (hours > 0) {
       return `${hours}h ${minutes % 60}m`;
     } else if (minutes > 0) {
@@ -189,7 +381,7 @@ export class BenchmarkCommand extends Command {
     }
     return `${seconds}s`;
   }
-  
+
   private exportResults(report: BenchmarkReport, exportPath: string): void {
     fs.writeFileSync(exportPath, JSON.stringify(report, null, 2));
     console.log(chalk.green(`\n📁 Results exported to: ${exportPath}\n`));

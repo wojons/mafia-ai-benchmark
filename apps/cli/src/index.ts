@@ -63,6 +63,7 @@ program.on('--help', () => {
   console.log('  $ mafiactl config show             # Show current configuration');
   console.log('  $ mafiactl stats                   # Show statistics');
   console.log('  $ mafiactl benchmark --quick    # Show accumulated benchmark report');
+  console.log('  $ mafiactl benchmark --games 2 --models openai/gpt-4o-mini,openai/gpt-4o');
   console.log('  $ mafiactl benchmark export        # Export benchmark data');
   console.log('');
   console.log('🔗 Links:');
