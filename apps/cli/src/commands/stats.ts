@@ -6,6 +6,7 @@
 
 import { Command } from 'commander';
 import chalk from 'chalk';
+import { resolveServerUrl } from '../config.js';
 
 interface Stats {
   totalGames: number;
@@ -39,7 +40,7 @@ export class StatsCommand extends Command {
     this.option('--games', 'Show game statistics');
     this.option('--models', 'Show model comparison');
     this.option('--verbose', 'Show detailed statistics');
-    this.option('--server <url>', 'Server base URL (default: http://localhost:3000)');
+    this.option('--server <url>', 'Server base URL (default: http://localhost:3004)');
 
     this.action(async () => { await this.run(); });
   }
@@ -47,7 +48,7 @@ export class StatsCommand extends Command {
   async run(): Promise<void> {
     const { json, games: _games, models: _models, verbose, server } = this.opts();
     
-    const serverUrl = server || process.env.MAFIA_SERVER_URL || 'http://localhost:3000';
+    const serverUrl = resolveServerUrl(server);
     
     console.log(chalk.cyan('\n📊 Mafia AI Benchmark Statistics\n'));
     

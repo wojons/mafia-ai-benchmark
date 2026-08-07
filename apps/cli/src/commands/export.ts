@@ -9,6 +9,7 @@ import { Command } from 'commander';
 import chalk from 'chalk';
 import * as fs from 'fs';
 import * as path from 'path';
+import { resolveServerUrl } from '../config.js';
 
 interface ExportOptions {
   format: 'json' | 'csv';
@@ -25,7 +26,7 @@ export class ExportCommand extends Command {
     this.option('-f, --format <format>', 'Output format: json or csv', 'json');
     this.option('-g, --games <n>', 'Number of games to include (default: 50)', parseInt);
     this.option('-o, --output <file>', 'Write output to file instead of stdout');
-    this.option('--server <url>', 'Server base URL (default: http://localhost:3000)');
+    this.option('--server <url>', 'Server base URL (default: http://localhost:3004)');
   }
   
   async run(): Promise<void> {
@@ -37,7 +38,7 @@ export class ExportCommand extends Command {
       process.exit(1);
     }
     
-    const serverUrl = opts.server || process.env.MAFIA_SERVER_URL || 'http://localhost:3000';
+    const serverUrl = resolveServerUrl(opts.server);
     const gamesParam = opts.games ? `&games=${opts.games}` : '';
     const url = `${serverUrl}/api/v1/benchmark/export?format=${format}${gamesParam}`;
     

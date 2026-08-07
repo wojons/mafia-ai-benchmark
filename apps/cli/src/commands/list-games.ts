@@ -6,6 +6,7 @@
 
 import { Command } from 'commander';
 import chalk from 'chalk';
+import { resolveServerUrl } from '../config.js';
 
 export class ListGamesCommand extends Command {
   constructor() {
@@ -15,7 +16,7 @@ export class ListGamesCommand extends Command {
     this.option('--status <status>', 'Filter by status (setup, in_progress, ended)');
     this.option('--limit <n>', 'Maximum games to show', '10');
     this.option('--json', 'Output as JSON');
-    this.option('--server <url>', 'Server base URL (default: http://localhost:3000)');
+    this.option('--server <url>', 'Server base URL (default: http://localhost:3004)');
 
     this.action(async () => { await this.run(); });
   }
@@ -23,7 +24,7 @@ export class ListGamesCommand extends Command {
   async run(): Promise<void> {
     const { status, limit, json, server } = this.opts();
     
-    const serverUrl = server || process.env.MAFIA_SERVER_URL || 'http://localhost:3000';
+    const serverUrl = resolveServerUrl(server);
     
     console.log(chalk.cyan('\n📋 Recent Games\n'));
     

@@ -8,6 +8,7 @@ import { Command } from 'commander';
 import inquirer from 'inquirer';
 import chalk from 'chalk';
 import fs from 'fs';
+import { resolveServerUrl } from '../config.js';
 
 interface GameConfig {
   numPlayers: number;
@@ -30,7 +31,7 @@ export class RunGameCommand extends Command {
     this.option('--model <name>', 'LLM model', 'gpt-5.1');
     this.option('--auto', 'Run without confirmation', false);
     this.option('--watch', 'Watch game in real-time', false);
-    this.option('--server <url>', 'Server base URL (default: http://localhost:3000)');
+    this.option('--server <url>', 'Server base URL (default: http://localhost:3004)');
 
     this.action(async () => { await this.run(); });
   }
@@ -38,7 +39,7 @@ export class RunGameCommand extends Command {
   async run(): Promise<void> {
     const { config, players, provider, model, auto, watch, server } = this.opts();
     
-    const serverUrl = server || process.env.MAFIA_SERVER_URL || 'http://localhost:3000';
+    const serverUrl = resolveServerUrl(server);
     
     console.log(chalk.cyan('\n🎮 Mafia AI Benchmark - Run Game\n'));
     

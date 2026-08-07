@@ -7,6 +7,7 @@
 import { Command } from 'commander';
 import chalk from 'chalk';
 import WebSocket from 'ws';
+import { resolveWsUrl } from '../config.js';
 
 export class WatchGameCommand extends Command {
   private ws: WebSocket | null = null;
@@ -16,7 +17,7 @@ export class WatchGameCommand extends Command {
     this.description('Watch a game in real-time');
     
     this.argument('<game-id>', 'Game ID to watch');
-    this.option('-s, --server <url>', 'Server URL', 'ws://localhost:3000/ws');
+    this.option('-s, --server <url>', 'Server URL (default: ws://localhost:3004/ws)');
     this.option('--no-color', 'Disable colors');
 
     this.action(async () => { await this.run(); });
@@ -25,11 +26,14 @@ export class WatchGameCommand extends Command {
   async run(): Promise<void> {
     const [gameId] = this.args;
     const { server } = this.opts();
+    // Resolve at run time, not in the option default: the env fallback
+    // (MAFIA_SERVER_URL) can only be read once the command executes.
+    const serverUrl = resolveWsUrl(server as string | undefined);
     
     console.log(chalk.cyan(`\n👀 Watching Game: ${gameId}\n`));
     
     try {
-      await this.connectToGame(server, gameId);
+      await this.connectToGame(serverUrl, gameId);
     } catch (error) {
       console.error(chalk.red('\n❌ Failed to connect to game:'), error);
       process.exit(1);
