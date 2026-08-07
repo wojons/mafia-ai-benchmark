@@ -47,8 +47,7 @@ describe('ListGamesCommand', () => {
       text: async () => '',
     }));
 
-    cmd.parse(['node', 'test']);
-    await cmd.run();
+    await cmd.parseAsync(['node', 'test']);
 
     expect(fetch).toHaveBeenCalledTimes(1);
     const url = (fetch as any).mock.calls[0][0];
@@ -65,8 +64,7 @@ describe('ListGamesCommand', () => {
       text: async () => '',
     }));
 
-    cmd.parse(['node', 'test', '--json']);
-    await cmd.run();
+    await cmd.parseAsync(['node', 'test', '--json']);
 
     expect(fetch).toHaveBeenCalledTimes(1);
   });
@@ -78,8 +76,7 @@ describe('ListGamesCommand', () => {
       text: async () => '',
     }));
 
-    cmd.parse(['node', 'test']);
-    await cmd.run();
+    await cmd.parseAsync(['node', 'test']);
 
     expect(console.log).toHaveBeenCalled();
   });
@@ -87,8 +84,7 @@ describe('ListGamesCommand', () => {
   it('logs error on fetch failure instead of calling process.exit', async () => {
     vi.stubGlobal('fetch', vi.fn().mockRejectedValue(new Error('fetch failed')));
 
-    cmd.parse(['node', 'test']);
-    await cmd.run();
+    await cmd.parseAsync(['node', 'test']);
 
     expect(console.error).toHaveBeenCalled();
     vi.unstubAllGlobals();

@@ -18,6 +18,8 @@ export class InitCommand extends Command {
     this.option('-f, --force', 'Overwrite existing configuration', false);
     this.option('-q, --quiet', 'Skip interactive prompts', false);
     this.option('--default', 'Use default configuration', false);
+
+    this.action(async () => { await this.run(); });
   }
   
   async run(): Promise<void> {

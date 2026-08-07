@@ -40,6 +40,8 @@ export class StatsCommand extends Command {
     this.option('--models', 'Show model comparison');
     this.option('--verbose', 'Show detailed statistics');
     this.option('--server <url>', 'Server base URL (default: http://localhost:3000)');
+
+    this.action(async () => { await this.run(); });
   }
   
   async run(): Promise<void> {

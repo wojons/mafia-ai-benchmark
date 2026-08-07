@@ -47,8 +47,7 @@ describe('RunGameCommand', () => {
     };
     vi.stubGlobal('fetch', vi.fn().mockResolvedValue(mockResponse));
 
-    cmd.parse(['node', 'test', '--auto']);
-    await cmd.run();
+    await cmd.parseAsync(['node', 'test', '--auto']);
 
     expect(fetch).toHaveBeenCalledTimes(1);
     const url = (fetch as any).mock.calls[0][0];
@@ -60,8 +59,7 @@ describe('RunGameCommand', () => {
     vi.stubGlobal('fetch', vi.fn().mockRejectedValue(new Error('fetch failed')));
     const exitSpy = vi.spyOn(process, 'exit').mockImplementation((() => {}) as any);
 
-    cmd.parse(['node', 'test', '--auto']);
-    await cmd.run();
+    await cmd.parseAsync(['node', 'test', '--auto']);
 
     expect(exitSpy).toHaveBeenCalledWith(1);
     exitSpy.mockRestore();
@@ -75,8 +73,7 @@ describe('RunGameCommand', () => {
     }));
     const exitSpy = vi.spyOn(process, 'exit').mockImplementation((() => {}) as any);
 
-    cmd.parse(['node', 'test', '--auto']);
-    await cmd.run();
+    await cmd.parseAsync(['node', 'test', '--auto']);
 
     expect(exitSpy).toHaveBeenCalledWith(1);
     exitSpy.mockRestore();

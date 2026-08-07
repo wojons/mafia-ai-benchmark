@@ -31,6 +31,8 @@ export class RunGameCommand extends Command {
     this.option('--auto', 'Run without confirmation', false);
     this.option('--watch', 'Watch game in real-time', false);
     this.option('--server <url>', 'Server base URL (default: http://localhost:3000)');
+
+    this.action(async () => { await this.run(); });
   }
   
   async run(): Promise<void> {

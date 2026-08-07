@@ -16,6 +16,8 @@ export class ListGamesCommand extends Command {
     this.option('--limit <n>', 'Maximum games to show', '10');
     this.option('--json', 'Output as JSON');
     this.option('--server <url>', 'Server base URL (default: http://localhost:3000)');
+
+    this.action(async () => { await this.run(); });
   }
   
   async run(): Promise<void> {

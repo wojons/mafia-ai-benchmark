@@ -18,6 +18,8 @@ export class WatchGameCommand extends Command {
     this.argument('<game-id>', 'Game ID to watch');
     this.option('-s, --server <url>', 'Server URL', 'ws://localhost:3000/ws');
     this.option('--no-color', 'Disable colors');
+
+    this.action(async () => { await this.run(); });
   }
   
   async run(): Promise<void> {

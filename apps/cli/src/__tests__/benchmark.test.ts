@@ -44,16 +44,14 @@ describe('BenchmarkCommand', () => {
 
   it('runs with --quick flag without inquirer prompt', async () => {
     const exitSpy = vi.spyOn(process, 'exit').mockImplementation((() => {}) as any);
-    cmd.parse(['node', 'test', '--quick']);
-    await cmd.run();
+    await cmd.parseAsync(['node', 'test', '--quick']);
     expect(console.log).toHaveBeenCalled();
     exitSpy.mockRestore();
   });
 
   it('outputs JSON with --json flag', async () => {
     const exitSpy = vi.spyOn(process, 'exit').mockImplementation((() => {}) as any);
-    cmd.parse(['node', 'test', '--quick', '--json']);
-    await cmd.run();
+    await cmd.parseAsync(['node', 'test', '--quick', '--json']);
     // JSON.stringify output was called at least once
     expect(console.log).toHaveBeenCalled();
     exitSpy.mockRestore();

@@ -62,8 +62,7 @@ describe('StatsCommand', () => {
       text: async () => '',
     }));
 
-    cmd.parse(['node', 'test']);
-    await cmd.run();
+    await cmd.parseAsync(['node', 'test']);
 
     expect(fetch).toHaveBeenCalled();
   });
@@ -75,8 +74,7 @@ describe('StatsCommand', () => {
       text: async () => '',
     }));
 
-    cmd.parse(['node', 'test', '--json']);
-    await cmd.run();
+    await cmd.parseAsync(['node', 'test', '--json']);
 
     expect(fetch).toHaveBeenCalled();
   });
@@ -88,8 +86,7 @@ describe('StatsCommand', () => {
       text: async () => '',
     }));
 
-    cmd.parse(['node', 'test', '--verbose']);
-    await cmd.run();
+    await cmd.parseAsync(['node', 'test', '--verbose']);
 
     expect(fetch).toHaveBeenCalled();
   });
@@ -104,8 +101,7 @@ describe('StatsCommand', () => {
   it('logs error on fetch failure instead of calling process.exit', async () => {
     vi.stubGlobal('fetch', vi.fn().mockRejectedValue(new Error('fetch failed')));
 
-    cmd.parse(['node', 'test']);
-    await cmd.run();
+    await cmd.parseAsync(['node', 'test']);
 
     expect(console.error).toHaveBeenCalled();
     vi.unstubAllGlobals();
@@ -123,8 +119,7 @@ describe('StatsCommand', () => {
       .mockRejectedValueOnce(new Error('models unavailable'));
     vi.stubGlobal('fetch', mockFetch);
 
-    cmd.parse(['node', 'test']);
-    await cmd.run();
+    await cmd.parseAsync(['node', 'test']);
 
     expect(fetch).toHaveBeenCalledTimes(2);
   });
@@ -136,8 +131,7 @@ describe('StatsCommand', () => {
       text: async () => '',
     }));
 
-    cmd.parse(['node', 'test']);
-    await cmd.run();
+    await cmd.parseAsync(['node', 'test']);
 
     expect(console.log).toHaveBeenCalled();
   });

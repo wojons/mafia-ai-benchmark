@@ -24,6 +24,8 @@ export class BenchmarkCommand extends Command {
     
     // Add export subcommand
     this.addCommand(new ExportCommand());
+
+    this.action(async () => { await this.run(); });
   }
   
   async run(): Promise<void> {
