@@ -18,6 +18,7 @@ import type {
 import type { EventBus } from '../../services/event-bus.js';
 import type { StatsCollector } from '../../services/stats-collector.js';
 import type { AgentCoordinator, AgentConfig, AgentExecutionResult } from '../../services/agent-coordinator.js';
+import type { LegacyGameAdapter, LegacyGameConfig } from '../../services/legacy-game-adapter.js';
 
 // ---------------------------------------------------------------------------
 // EventBus fake — uses a real EventEmitter + a history array so subscribe /
@@ -565,6 +566,66 @@ export function createFakeAgentCoordinator(): FakeAgentCoordinator {
   };
 
   return fake as FakeAgentCoordinator;
+}
+
+// ---------------------------------------------------------------------------
+// LegacyGameAdapter fake — records startGame calls and returns a synthetic
+// LegacyGameState. No child processes are spawned; tests drive completion by
+// publishing terminal events on the fake EventBus.
+// ---------------------------------------------------------------------------
+
+export interface FakeLegacyGameAdapter extends LegacyGameAdapter {
+  started: Array<{
+    config: LegacyGameConfig;
+    gameId: string;
+  }>;
+  nextGameId: () => string;
+}
+
+export function createFakeLegacyGameAdapter(repo?: { db: { prepare: (sql: string) => { run: (...args: unknown[]) => void } } }): FakeLegacyGameAdapter {
+  const started: Array<{ config: LegacyGameConfig; gameId: string }> = [];
+  let counter = 0;
+
+  const fake: any = {
+    started,
+    nextGameId() {
+      counter += 1;
+      return `legacy-game-${counter}`;
+    },
+    startGame(config: LegacyGameConfig = {}) {
+      counter += 1;
+      const gameId = `legacy-game-${counter}`;
+      started.push({ config, gameId });
+      // Mirror the real adapter: it inserts a games row before returning so
+      // the benchmark_games FK (game_id -> games.id) is satisfied.
+      if (repo) {
+        repo.db
+          .prepare(`INSERT INTO games (id, status, config, created_at) VALUES (?, 'IN_PROGRESS', ?, ?)`)
+          .run(gameId, JSON.stringify({ numPlayers: config.numPlayers || 5, engineType: 'legacy' }), Date.now());
+      }
+      return {
+        gameId,
+        process: null as any,
+        eventCount: 0,
+        status: 'RUNNING',
+        startedAt: new Date(),
+      };
+    },
+    getActiveGames() {
+      return started.map((s) => s.gameId);
+    },
+    getGameState() {
+      return undefined;
+    },
+    stopGame() {
+      return false;
+    },
+    stopAll() {
+      // no-op
+    },
+  };
+
+  return fake as FakeLegacyGameAdapter;
 }
 
 // ---------------------------------------------------------------------------

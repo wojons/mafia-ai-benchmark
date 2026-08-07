@@ -5,7 +5,7 @@
  */
 
 import { Router, Request, Response } from 'express';
-import { ServerContext } from '../index.js';
+import type { ServerContext } from '../index.js';
 
 export function createBenchmarkRouter(context: ServerContext): Router {
   const { benchmarkRunner, statsCollector } = context;
@@ -115,6 +115,18 @@ export function createBenchmarkRouter(context: ServerContext): Router {
 
   // ==================== BENCHMARK RUNNER (managed runs) ====================
 
+  // List all benchmark runs (most recent first)
+  router.get('/api/v1/benchmark/runs', (req: Request, res: Response) => {
+    try {
+      res.json({ success: true, data: benchmarkRunner.listRuns() });
+    } catch (error) {
+      res.status(500).json({
+        success: false,
+        error: 'Failed to list benchmark runs',
+      });
+    }
+  });
+
   // Get benchmark run status + progress
   router.get(
     '/api/v1/benchmark/runs/:runId',
@@ -141,6 +153,30 @@ export function createBenchmarkRouter(context: ServerContext): Router {
       }
     },
   );
+
+  // Get benchmark run status + progress (alias: /api/v1/benchmark/:id)
+  router.get('/api/v1/benchmark/:runId', (req: Request, res: Response) => {
+    try {
+      const { runId } = req.params;
+      const status = benchmarkRunner.getStatus(runId);
+      if (!status) {
+        res.status(404).json({
+          success: false,
+          error: 'Run not found',
+        });
+        return;
+      }
+      const progress = benchmarkRunner.getProgress(runId);
+      res.json({ success: true, data: { status, progress } });
+    } catch (error) {
+      res
+        .status(500)
+        .json({
+          success: false,
+          error: 'Failed to get benchmark run',
+        });
+    }
+  });
 
   // Cancel benchmark run
   router.post(
@@ -170,6 +206,32 @@ export function createBenchmarkRouter(context: ServerContext): Router {
       }
     },
   );
+
+  // Cancel benchmark run (alias: POST /api/v1/benchmark/:id/cancel)
+  router.post('/api/v1/benchmark/:runId/cancel', (req: Request, res: Response) => {
+    try {
+      const { runId } = req.params;
+      const cancelled = benchmarkRunner.cancel(runId);
+      if (!cancelled) {
+        res.status(404).json({
+          success: false,
+          error: 'Run not found',
+        });
+        return;
+      }
+      res.json({
+        success: true,
+        data: { runId, message: 'Benchmark run cancelled' },
+      });
+    } catch (error) {
+      res
+        .status(500)
+        .json({
+          success: false,
+          error: 'Failed to cancel benchmark run',
+        });
+    }
+  });
 
   return router;
 }

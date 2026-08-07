@@ -15,6 +15,7 @@ import { AgentCoordinator } from './services/agent-coordinator.js';
 import { EventBus } from './services/event-bus.js';
 import { StatsCollector } from './services/stats-collector.js';
 import { BenchmarkRunner } from './services/benchmark-runner.js';
+import { LegacyGameAdapter } from './services/legacy-game-adapter.js';
 import GameRepositoryDefault, { GameRepository } from './db/repository.js';
 import { createDatabase } from './db/migrate.js';
 import { setupRoutes } from './routes/index.js';
@@ -31,6 +32,7 @@ export interface ServerContext {
   statsCollector: StatsCollector;
   gameRepository: GameRepository;
   benchmarkRunner: BenchmarkRunner;
+  legacyAdapter: LegacyGameAdapter | null;
 }
 
 async function main(): Promise<void> {
@@ -44,6 +46,17 @@ async function main(): Promise<void> {
   const agentCoordinator = new AgentCoordinator(eventBus, statsCollector);
   const gameEngine = new GameEngine(gameRepository, agentCoordinator, eventBus, statsCollector);
 
+  // Legacy engine adapter (the path that actually plays games). Created with
+  // the same singleton pattern as routes/index.ts so benchmark games and
+  // regular games share one adapter instance.
+  let legacyAdapter: LegacyGameAdapter | null = null;
+  try {
+    legacyAdapter = LegacyGameAdapter.getInstance(eventBus, gameRepository);
+    console.log('✅ Legacy game adapter initialized');
+  } catch (e) {
+    console.warn('⚠️ Legacy game adapter not available:', (e as Error).message);
+  }
+
   const bootstrapContext: ServerContext = {
     gameEngine,
     agentCoordinator,
@@ -51,6 +64,7 @@ async function main(): Promise<void> {
     statsCollector,
     gameRepository,
     benchmarkRunner: null as any,
+    legacyAdapter,
   };
   const benchmarkRunner = new BenchmarkRunner(bootstrapContext);
   bootstrapContext.benchmarkRunner = benchmarkRunner;

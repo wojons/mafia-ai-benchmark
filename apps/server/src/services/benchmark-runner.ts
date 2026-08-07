@@ -13,6 +13,7 @@ import type { AgentCoordinator } from './agent-coordinator.js';
 import type { EventBus } from './event-bus.js';
 import type { StatsCollector } from './stats-collector.js';
 import type { GameRepository } from '../db/repository.js';
+import type { LegacyGameAdapter } from './legacy-game-adapter.js';
 
 /** Configuration accepted by POST /api/v1/benchmark. */
 export interface BenchmarkConfig {
@@ -107,6 +108,7 @@ export class BenchmarkRunner {
   private eventBus: EventBus;
   private statsCollector: StatsCollector;
   private gameRepository: GameRepository;
+  private legacyAdapter: LegacyGameAdapter | null;
   private db: Database.Database;
 
   constructor(deps: {
@@ -115,12 +117,14 @@ export class BenchmarkRunner {
     eventBus: EventBus;
     statsCollector: StatsCollector;
     gameRepository: GameRepository;
+    legacyAdapter?: LegacyGameAdapter | null;
   }) {
     this.gameEngine = deps.gameEngine;
     this.agentCoordinator = deps.agentCoordinator;
     this.eventBus = deps.eventBus;
     this.statsCollector = deps.statsCollector;
     this.gameRepository = deps.gameRepository;
+    this.legacyAdapter = deps.legacyAdapter ?? null;
     this.db = this.gameRepository.getDatabase();
   }
 
@@ -353,6 +357,14 @@ export class BenchmarkRunner {
    * Create one game for a pairing, join players (split between the two models),
    * start the game, and persist the benchmark_games row.
    * Returns the game ID, or null if the game could not be created.
+   *
+   * When a LegacyGameAdapter is available the game is started through the
+   * legacy engine (the path that actually plays: it spawns legacy-bridge.js
+   * -> game-engine.js as a child process, runs the full night/day loop with
+   * real LLM calls, and publishes terminal events on the EventBus). The
+   * GameEngine path is kept as a degraded fallback for environments without
+   * the adapter — it assigns roles and flips IN_PROGRESS but never runs a
+   * game loop, so those games cannot complete (pre-existing limitation).
    */
   private launchGame(
     runId: string,
@@ -363,7 +375,9 @@ export class BenchmarkRunner {
     const [providerA, modelA] = this.parseModel(pairing.modelA);
     const [providerB, modelB] = this.parseModel(pairing.modelB);
 
-    // Register agents for each model in the pairing.
+    // Register agents for each model in the pairing. On the legacy path the
+    // engine resolves models per-role from env vars (roleModels), so these
+    // registrations are inert there; they remain for the GameEngine path.
     const agentIdA = `bench-${runId}-${pairing.pairingId}-A-${seed}`;
     const agentIdB = `bench-${runId}-${pairing.pairingId}-B-${seed}`;
     this.agentCoordinator.registerAgent({
@@ -381,6 +395,127 @@ export class BenchmarkRunner {
       temperature: config.temperature,
     });
 
+    let gameId: string | null = null;
+
+    if (this.legacyAdapter) {
+      gameId = this.launchLegacyGame(runId, pairing, seed, config, providerA, modelA, providerB, modelB);
+    } else {
+      gameId = this.launchEngineGame(runId, pairing, seed, config, providerA, modelA, providerB, modelB, agentIdA, agentIdB);
+    }
+
+    if (!gameId) return null;
+
+    // Subscribe to the game's terminal events to record the result. The
+    // GameEngine path publishes WINNER_DETERMINED; the legacy engine never
+    // emits that type — its terminal STATE_CHANGE (phase GAME_OVER, winner in
+    // content) is remapped to GAME_ENDED by LegacyGameAdapter (MAF-GAP-005) —
+    // so both types are subscribed. The handler is idempotent per game: the
+    // first terminal event wins and the subscription is removed.
+    const unsubscribe = this.eventBus.subscribe(
+      ['WINNER_DETERMINED', 'GAME_ENDED'],
+      (event) => {
+        if (event.gameId !== gameId) return;
+        const winner = (event.data as { winner?: string })?.winner ?? null;
+        const completedAt = Date.now();
+        this.db
+          .prepare(
+            `UPDATE benchmark_games
+               SET winner = ?, team_winner = ?, completed_at = ?
+             WHERE game_id = ?`,
+          )
+          .run(winner ?? null, winner ?? null, completedAt, gameId);
+        unsubscribe();
+        this.maybeCompleteRun(runId);
+      },
+    );
+
+    return gameId;
+  }
+
+  /**
+   * Legacy-engine launch path (the path that actually plays). The two pairing
+   * models are mapped onto the legacy per-role model config: model A drives
+   * the MAFIA + SHERIFF roles and model B drives TOWN + DOCTOR (deterministic
+   * split; the legacy engine resolves role models from env vars set by
+   * LegacyGameAdapter.startGame). Benchmark model specs use "provider:model"
+   * while the legacy engine expects "provider/model" role-model strings, so
+   * the spec is converted. Roles are not exposed on the legacy path
+   * (LegacyGameState carries no assignments), so model_a_role/model_b_role
+   * fall back to the VILLAGER default.
+   */
+  private launchLegacyGame(
+    runId: string,
+    pairing: PairingSchedule,
+    seed: number,
+    config: Required<BenchmarkConfig>,
+    providerA: LLMProvider,
+    modelA: string,
+    providerB: LLMProvider,
+    modelB: string,
+  ): string | null {
+    const modelSpecA = `${providerA}/${modelA}`;
+    const modelSpecB = `${providerB}/${modelB}`;
+
+    const gameState = this.legacyAdapter!.startGame({
+      numPlayers: config.numPlayers,
+      gameConfig: { numPlayers: config.numPlayers, engineType: 'legacy' },
+      // Deterministic role split: model A plays the informed/aggressive
+      // roles (MAFIA, SHERIFF), model B plays the town core (TOWN, DOCTOR).
+      roleModels: {
+        MAFIA: modelSpecA,
+        SHERIFF: modelSpecA,
+        TOWN: modelSpecB,
+        DOCTOR: modelSpecB,
+      },
+    });
+
+    const gameId = gameState.gameId;
+
+    // Persist the benchmark_games row. Roles are not observable on the
+    // legacy path (LegacyGameState carries no assignments), so both fall
+    // back to the VILLAGER default.
+    this.db
+      .prepare(
+        `INSERT INTO benchmark_games
+          (game_id, run_id, pairing_id, model_a, model_b, seed, model_a_role, model_b_role, valid)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, 1)`,
+      )
+      .run(
+        gameId,
+        runId,
+        pairing.pairingId,
+        pairing.modelA,
+        pairing.modelB,
+        seed,
+        'VILLAGER',
+        'VILLAGER',
+      );
+
+    console.log(
+      `[BenchmarkRunner] Run ${runId}: launched legacy game ${gameId} ` +
+        `(modelA=${pairing.modelA} -> MAFIA/SHERIFF, modelB=${pairing.modelB} -> TOWN/DOCTOR)`,
+    );
+
+    return gameId;
+  }
+
+  /**
+   * GameEngine fallback launch path (degraded: games cannot complete because
+   * GameEngine.startGame has no game loop). Kept exactly as before for
+   * environments without the legacy adapter.
+   */
+  private launchEngineGame(
+    runId: string,
+    pairing: PairingSchedule,
+    seed: number,
+    config: Required<BenchmarkConfig>,
+    providerA: LLMProvider,
+    modelA: string,
+    providerB: LLMProvider,
+    modelB: string,
+    agentIdA: string,
+    agentIdB: string,
+  ): string | null {
     // Create the game.
     const game = this.gameEngine.createGame({
       config: { numPlayers: config.numPlayers },
@@ -468,22 +603,6 @@ export class BenchmarkRunner {
         modelARole,
         modelBRole,
       );
-
-    // Subscribe to the game's WINNER_DETERMINED event to record the result.
-    const unsubscribe = this.eventBus.subscribe('WINNER_DETERMINED', (event) => {
-      if (event.gameId !== game.id) return;
-      const winner = (event.data as { winner?: string })?.winner ?? null;
-      const completedAt = Date.now();
-      this.db
-        .prepare(
-          `UPDATE benchmark_games
-             SET winner = ?, team_winner = ?, completed_at = ?
-           WHERE game_id = ?`,
-        )
-        .run(winner ?? null, winner ?? null, completedAt, game.id);
-      unsubscribe();
-      this.maybeCompleteRun(runId);
-    });
 
     return game.id;
   }
