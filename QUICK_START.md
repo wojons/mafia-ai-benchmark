@@ -158,6 +158,29 @@ The game will:
 | `/api/v1/benchmark`      | POST   | Run benchmarks     |
 | `/api/v1/stats`          | GET    | View statistics    |
 
+## Docker Deployment
+
+The repo ships a `docker-compose.yml` stack: `server` (API + WebSocket,
+host `:3004` → container `:3000`) and `web` (dashboard, host `:5174`).
+**The container runs the source at build time — after any code change you
+must rebuild, not just restart:**
+
+```bash
+# Rebuild the server image from current source and recreate the container
+docker compose up -d --build server
+
+# Verify the running instance serves the NEW code (old containers keep
+# serving pre-fix behavior for hours/days until rebuilt)
+curl -s http://localhost:3004/health
+```
+
+Health check: `docker ps` should show `mafia-ai-benchmark-server-1`
+`Up … (healthy)`. If an endpoint behaves differently from the latest
+git source (e.g. `GET /api/v1/games?limit=2` returning more than 2 games,
+or `/api/v1/benchmark/report` showing a fabricated 100% win-rate row),
+the container is stale — rebuild with the command above before debugging
+further. A stale container was the root cause of MAF-GAP-014.
+
 ## Configuration Options
 
 ### Environment Variables
