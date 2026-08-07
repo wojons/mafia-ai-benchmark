@@ -1,26 +1,61 @@
 /**
  * Benchmark Command
  * 
- * Run automated benchmark suite.
+ * Show the accumulated benchmark report from the server.
+ * 
+ * MAF-GAP-010: this command previously FABRICATED results (random wins,
+ * win rates, token/cost averages after a fake 500ms sleep). It now fetches
+ * and displays the real GET /api/v1/benchmark/report from the server.
+ * Fresh benchmark runs (POST /api/v1/benchmark) are not yet available
+ * (MAF-GAP-011), so the legacy pretend-run options are accepted for
+ * backward compatibility but only produce a note.
  */
 
-import { Command } from 'commander';
+import { Command, Option } from 'commander';
 import chalk from 'chalk';
-import inquirer from 'inquirer';
 import fs from 'fs';
 import { ExportCommand } from './export.js';
+import { resolveServerUrl } from '../config.js';
+
+interface BenchmarkReport {
+  generatedAt?: string;
+  summary: {
+    totalGames: number;
+    activeGames?: number;
+    completedGames?: number;
+    mafiaWinRate?: number;
+    avgDuration?: number;
+  };
+  modelPerformance: Array<{
+    provider: string;
+    model: string;
+    gamesPlayed: number;
+    wins: number;
+    winRate: number;
+    avgTokens: number;
+    avgCost: number;
+    avgLatency?: number;
+  }>;
+  agentStats?: unknown[];
+  recommendations?: string[];
+}
 
 export class BenchmarkCommand extends Command {
   constructor() {
     super('benchmark');
-    this.description('Run automated benchmark suite');
+    this.description('Show the accumulated benchmark report from the server');
     
-    this.option('-g, --games <n>', 'Number of games to run', '10');
-    this.option('--models <models>', 'Comma-separated list of models to benchmark');
-    this.option('--parallel', 'Run games in parallel', false);
-    this.option('--quick', 'Quick benchmark (3 games)', false);
+    this.option('--quick', 'Show the accumulated benchmark report (accepted for backward compatibility)', false);
     this.option('--export <path>', 'Export results to file');
     this.option('--json', 'Output results as JSON');
+    this.option('--server <url>', 'Server base URL (default: http://localhost:3004)');
+    
+    // Legacy pretend-run options — accepted (hidden) so existing invocations
+    // do not error; they cannot start fresh runs (POST /api/v1/benchmark is
+    // broken, MAF-GAP-011), so run() prints a note and shows the report.
+    this.addOption(new Option('-g, --games <n>', 'Number of games to run').hideHelp());
+    this.addOption(new Option('--models <models>', 'Comma-separated list of models to benchmark').hideHelp());
+    this.addOption(new Option('--parallel', 'Run games in parallel').hideHelp());
     
     // Add export subcommand
     this.addCommand(new ExportCommand());
@@ -29,156 +64,110 @@ export class BenchmarkCommand extends Command {
   }
   
   async run(): Promise<void> {
-    const { games, models, parallel, quick, export: exportPath, json } = this.opts();
+    const { quick: _quick, export: exportPath, json, server, games, models, parallel } = this.opts();
+    
+    const serverUrl = resolveServerUrl(server);
     
     console.log(chalk.cyan('\n🏁 Mafia AI Benchmark Suite\n'));
     
-    const numGames = quick ? 3 : parseInt(games);
-    const modelList = models ? models.split(',') : ['gpt-5.1', 'claude-sonnet-4.5', 'gemini-2.5-pro'];
-    
-    // Display benchmark configuration
-    console.log(chalk.white('Benchmark Configuration:'));
-    console.log(`  Games:           ${chalk.yellow(numGames.toString())}`);
-    console.log(`  Models:          ${chalk.yellow(modelList.join(', '))}`);
-    console.log(`  Mode:            ${chalk.yellow(parallel ? 'Parallel' : 'Sequential')}`);
-    console.log(`  Export:          ${exportPath ? chalk.yellow(exportPath) : chalk.gray('None')}`);
-    console.log('');
-    
-    if (!quick) {
-      const { confirm } = await inquirer.prompt([
-        {
-          type: 'confirm',
-          name: 'confirm',
-          message: `Run ${numGames} games across ${modelList.length} models?`,
-          default: true,
-        },
-      ]);
-      
-      if (!confirm) {
-        console.log(chalk.gray('\nCancelled.\n'));
-        return;
-      }
+    // The CLI cannot start fresh benchmark runs yet — these options implied
+    // running new games, which would have fabricated numbers. Note and proceed
+    // with the accumulated server report.
+    if (games !== undefined || models !== undefined || parallel !== undefined) {
+      console.log(chalk.yellow('⚠️  Fresh benchmark runs are not yet available — showing the accumulated server report instead.'));
+      console.log('');
     }
     
-    console.log(chalk.cyan('Running benchmark...\n'));
-    
     try {
-      const results = await this.runBenchmark({
-        numGames,
-        models: modelList,
-        parallel,
-      });
+      const report = await this.fetchReport(serverUrl);
       
       if (json) {
-        console.log(JSON.stringify(results, null, 2));
+        console.log(JSON.stringify(report, null, 2));
       } else {
-        this.displayResults(results);
+        this.displayResults(report);
       }
       
       // Export results if requested
       if (exportPath) {
-        this.exportResults(results, exportPath);
+        this.exportResults(report, exportPath);
       }
-    } catch (error) {
-      console.error(chalk.red('\n❌ Benchmark failed:'), error);
+    } catch (error: any) {
+      if (error.cause?.code === 'ECONNREFUSED' || error.message?.includes('fetch')) {
+        console.error(chalk.red(`\n❌ Cannot connect to server at ${serverUrl}`));
+        console.error(chalk.gray('   Make sure the server is running: pnpm run dev --filter=@mafia/server'));
+      } else {
+        console.error(chalk.red(`\n❌ Failed to fetch benchmark report: ${error.message}`));
+      }
       process.exit(1);
     }
   }
   
-  private async runBenchmark(options: {
-    numGames: number;
-    models: string[];
-    parallel: boolean;
-  }): Promise<Record<string, unknown>> {
-    const startTime = Date.now();
-    const results: Array<{
-      model: string;
-      gamesPlayed: number;
-      wins: number;
-      losses: number;
-      winRate: number;
-      avgDuration: number;
-      avgTokens: number;
-      avgCost: number;
-    }> = [];
+  private async fetchReport(serverUrl: string): Promise<BenchmarkReport> {
+    const url = `${serverUrl}/api/v1/benchmark/report`;
     
-    for (const model of options.models) {
-      console.log(chalk.gray(`  Testing ${model}...`));
-      
-      // Simulate benchmark
-      await new Promise(resolve => setTimeout(resolve, 500));
-      
-      const gamesPlayed = options.numGames;
-      const wins = Math.floor(Math.random() * gamesPlayed * 0.6);
-      
-      results.push({
-        model,
-        gamesPlayed,
-        wins,
-        losses: gamesPlayed - wins,
-        winRate: wins / gamesPlayed,
-        avgDuration: 1200000 + Math.random() * 300000,
-        avgTokens: 80000 + Math.floor(Math.random() * 40000),
-        avgCost: 1 + Math.random() * 2,
-      });
+    console.log(chalk.gray(`📡 Fetching benchmark report from ${url}...`));
+    
+    const response = await fetch(url, {
+      method: 'GET',
+      headers: { 'Accept': 'application/json' },
+      signal: AbortSignal.timeout(30000),
+    });
+    
+    if (!response.ok) {
+      const errorText = await response.text();
+      throw new Error(`Server returned ${response.status}: ${errorText}`);
     }
     
-    const totalTime = Date.now() - startTime;
-    
-    return {
-      summary: {
-        totalGames: options.numGames * options.models.length,
-        totalTime,
-        avgTimePerGame: totalTime / (options.numGames * options.models.length),
-      },
-      results,
-      winner: results.reduce((best, m) => m.winRate > best.winRate ? m : best, results[0]),
-      recommendations: this.generateRecommendations(results),
-    };
+    return await response.json() as BenchmarkReport;
   }
   
-  private displayResults(results: Record<string, unknown>): void {
-    const summary = results.summary as Record<string, number>;
-    const resultList = results.results as Array<{
-      model: string;
-      gamesPlayed: number;
-      wins: number;
-      losses: number;
-      winRate: number;
-      avgDuration: number;
-      avgTokens: number;
-      avgCost: number;
-    }>;
-    const winner = results.winner as { model: string; winRate: number };
+  private displayResults(report: BenchmarkReport): void {
+    const summary = report.summary || { totalGames: 0 };
+    const results = report.modelPerformance || [];
+    const recommendations = report.recommendations || [];
     
-    console.log(chalk.green('\n✅ Benchmark Complete!\n'));
+    console.log(chalk.green('\n✅ Benchmark Report\n'));
     
     console.log(chalk.white('Summary:'));
-    console.log(`  Total Games:      ${chalk.yellow(summary.totalGames.toString())}`);
-    console.log(`  Total Time:       ${chalk.yellow((summary.totalTime / 1000).toFixed(1) + 's')}`);
-    console.log(`  Avg Time/Game:    ${chalk.yellow((summary.avgTimePerGame / 1000).toFixed(1) + 's')}`);
+    console.log(`  Total Games:      ${chalk.yellow((summary.totalGames ?? 0).toString())}`);
+    if (summary.completedGames !== undefined) {
+      console.log(`  Completed Games:  ${chalk.yellow(summary.completedGames.toString())}`);
+    }
+    if (summary.activeGames !== undefined) {
+      console.log(`  Active Games:     ${chalk.yellow(summary.activeGames.toString())}`);
+    }
+    const avgDuration = summary.avgDuration ?? 0;
+    if (avgDuration > 0) {
+      console.log(`  Avg Time/Game:    ${chalk.yellow(this.formatDuration(avgDuration))}`);
+    } else {
+      console.log(`  Avg Time/Game:    ${chalk.gray('n/a')}`);
+    }
     
     console.log(chalk.white('\n📊 Results by Model:'));
     console.log(chalk.gray('  Model                  Games  Wins  Losses  Win Rate  Avg Tokens  Avg Cost'));
     console.log(chalk.gray('  ' + '─'.repeat(75)));
     
-    resultList.forEach(r => {
-      const model = r.model.padEnd(20);
-      const games = r.gamesPlayed.toString().padStart(5);
-      const wins = r.wins.toString().padStart(5);
-      const losses = r.losses.toString().padStart(6);
-      const winRate = (r.winRate * 100).toFixed(1).padStart(8) + '%';
-      const tokens = (r.avgTokens / 1000).toFixed(1).padStart(10) + 'K';
-      const cost = '$' + r.avgCost.toFixed(2).padStart(7);
+    results.forEach(r => {
+      const model = `${r.provider}/${r.model}`.padEnd(20);
+      const gamesPlayed = (r.gamesPlayed ?? 0);
+      const wins = (r.wins ?? 0);
+      const games = gamesPlayed.toString().padStart(5);
+      const winsStr = wins.toString().padStart(5);
+      const losses = (gamesPlayed - wins).toString().padStart(6);
+      const winRate = ((r.winRate ?? 0) * 100).toFixed(1).padStart(8) + '%';
+      const tokens = ((r.avgTokens ?? 0) / 1000).toFixed(1).padStart(10) + 'K';
+      const cost = '$' + (r.avgCost ?? 0).toFixed(2).padStart(7);
       
-      console.log(`  ${model} ${games}  ${wins}  ${losses}  ${winRate}  ${tokens}  ${cost}`);
+      console.log(`  ${model} ${games}  ${winsStr}  ${losses}  ${winRate}  ${tokens}  ${cost}`);
     });
     
-    console.log(chalk.green('\n🏆 Winner: ') + chalk.yellow(winner.model) + 
-                chalk.gray(` (${(winner.winRate * 100).toFixed(1)}% win rate)\n`));
+    if (results.length > 0) {
+      const winner = results.reduce((best, m) => (m.winRate ?? 0) > (best.winRate ?? 0) ? m : best, results[0]);
+      console.log(chalk.green('\n🏆 Winner: ') + chalk.yellow(`${winner.provider}/${winner.model}`) + 
+                  chalk.gray(` (${((winner.winRate ?? 0) * 100).toFixed(1)}% win rate)\n`));
+    }
     
-    // Recommendations
-    const recommendations = results.recommendations as string[];
+    // Recommendations come from the server report
     if (recommendations.length > 0) {
       console.log(chalk.white('💡 Recommendations:'));
       recommendations.forEach(r => {
@@ -188,34 +177,21 @@ export class BenchmarkCommand extends Command {
     }
   }
   
-  private generateRecommendations(results: Array<{
-    model: string;
-    winRate: number;
-    avgCost: number;
-  }>): string[] {
-    const recommendations: string[] = [];
+  private formatDuration(ms: number): string {
+    const seconds = Math.floor(ms / 1000);
+    const minutes = Math.floor(seconds / 60);
+    const hours = Math.floor(minutes / 60);
     
-    // Best performer
-    const best = results.reduce((b, m) => m.winRate > b.winRate ? m : b, results[0]);
-    recommendations.push(`${best.model} has the highest win rate (${(best.winRate * 100).toFixed(1)}%)`);
-    
-    // Best value
-    const value = results.reduce((b, m) => {
-      const bValue = b.winRate / b.avgCost;
-      const mValue = m.winRate / m.avgCost;
-      return mValue > bValue ? m : b;
-    }, results[0]);
-    recommendations.push(`${value.model} offers the best value (win rate per dollar)`);
-    
-    // Cost-effective option
-    const cheapest = results.reduce((b, m) => m.avgCost < b.avgCost ? m : b, results[0]);
-    recommendations.push(`${cheapest.model} is the most cost-effective option`);
-    
-    return recommendations;
+    if (hours > 0) {
+      return `${hours}h ${minutes % 60}m`;
+    } else if (minutes > 0) {
+      return `${minutes}m ${seconds % 60}s`;
+    }
+    return `${seconds}s`;
   }
   
-  private exportResults(results: Record<string, unknown>, exportPath: string): void {
-    fs.writeFileSync(exportPath, JSON.stringify(results, null, 2));
+  private exportResults(report: BenchmarkReport, exportPath: string): void {
+    fs.writeFileSync(exportPath, JSON.stringify(report, null, 2));
     console.log(chalk.green(`\n📁 Results exported to: ${exportPath}\n`));
   }
 }

@@ -62,7 +62,7 @@ program.on('--help', () => {
   console.log('  $ mafiactl list-games              # List recent games');
   console.log('  $ mafiactl config show             # Show current configuration');
   console.log('  $ mafiactl stats                   # Show statistics');
-  console.log('  $ mafiactl benchmark --games 10    # Run benchmark suite');
+  console.log('  $ mafiactl benchmark --quick    # Show accumulated benchmark report');
   console.log('  $ mafiactl benchmark export        # Export benchmark data');
   console.log('');
   console.log('🔗 Links:');

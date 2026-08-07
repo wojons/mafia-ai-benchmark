@@ -110,10 +110,13 @@ async function testCLIStatsModel() {
   }
 }
 
-async function testCLIBenchmarkList() {
-  const result = runCLI('benchmark list');
-  // Should show available benchmarks or empty list
-  if (result.error && !result.error.includes('ECONNREFUSED')) {
+async function testCLIBenchmark() {
+  const result = runCLI('benchmark --quick');
+  // Should show the accumulated benchmark report from the server (MAF-GAP-010)
+  if (result.success && !result.output.includes('Total Games')) {
+    throw new Error(`Failed: expected report summary in output`);
+  }
+  if (result.error && !result.error.includes('ECONNREFUSED') && !result.error.includes('Cannot connect to server')) {
     throw new Error(`Failed: ${result.error}`);
   }
 }
@@ -222,7 +225,7 @@ async function main() {
   await runTest('games watch', testCLIGamesWatch);
   await runTest('stats', testCLIStats);
   await runTest('stats --model', testCLIStatsModel);
-  await runTest('benchmark list', testCLIBenchmarkList);
+  await runTest('benchmark', testCLIBenchmark);
   await runTest('config get', testCLIConfigGet);
   await runTest('config set', testCLIConfigSet);
   await runTest('init', testCLIInit);
