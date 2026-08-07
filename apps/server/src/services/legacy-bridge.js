@@ -240,6 +240,32 @@ async function main() {
             });
           }
         }
+
+        // MAF-GAP-013: the legacy engine never emits a full role-assignment
+        // event, so players who never act and never die (plain villagers)
+        // surface as UNASSIGNED in the API. Emit one final synthetic
+        // ROLES_ASSIGNED event carrying the full roster; the adapter's
+        // extractPlayersFromEvents uses first-write-wins, so this fills only
+        // the UNASSIGNED gaps.
+        if (game.players && game.players.length > 0) {
+          emit('event', {
+            gameId: game.gameId,
+            round: 0,
+            phase: 'GAME_OVER',
+            eventType: 'ROLES_ASSIGNED',
+            playerId: null,
+            playerName: null,
+            timestamp: new Date().toISOString(),
+            content: {
+              assignments: game.players.map((p) => ({
+                playerId: p.id,
+                role: p.role || p.persona?.gameRole || 'UNASSIGNED',
+                isMafia: !!p.isMafia,
+              })),
+            },
+            visibility: 'ADMIN_ONLY',
+          });
+        }
         
         emit('done', {
           gameId: game.gameId,

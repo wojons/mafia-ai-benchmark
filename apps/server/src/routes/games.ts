@@ -254,10 +254,15 @@ export function createGamesRouter(
         ...legacyGames,
       ];
 
+      // MAF-GAP-013: the repository honors limit only for DB rows; legacy
+      // games are appended after, so the merged result must be sliced here
+      // for the limit to be enforced on the full response.
+      const limitedGames = allGames.slice(0, filters.limit);
+
       res.json({
         success: true,
-        data: allGames,
-        count: allGames.length,
+        data: limitedGames,
+        count: limitedGames.length,
       });
     } catch (error) {
       res

@@ -6,7 +6,7 @@
 
 | Category | Feature | Status | Tests |
 |----------|---------|--------|-------|
-| **HTTP API** | All REST endpoints | ✅ Working | 286 total (277 pass) ✅ |
+| **HTTP API** | All REST endpoints | ✅ Working | 695 total (695 pass) ✅ |
 | **CLI** | All 15 commands | ✅ Working | ✅ Manual tests pass |
 | **Game Management** | Create, start, stop, add players | ✅ Working | ✅ Integration tests |
 | **Model Configuration** | Player & role model settings | ✅ Working | ✅ |
@@ -19,11 +19,11 @@
 ### 🧪 Test Results
 
 ```
-✅ Server Tests: 39/39 PASSING (apps/server)
-✅ CLI Tests: 20/20 PASSING (apps/cli)
-✅ Shared Tests: 150/150 PASSING (packages/shared)
-✅ Web Tests: 2/2 PASSING (apps/web)
-✅ Total: 286 tests (277 pass; 9 server integration tests require running server)
+✅ Server Tests: 177/177 PASSING (apps/server)
+✅ CLI Tests: 82/82 PASSING (apps/cli)
+✅ Shared Tests: 407/407 PASSING (packages/shared)
+✅ Web Tests: 29/29 PASSING (apps/web)
+✅ Total: 695 tests (695 pass; 8 server integration tests require a running server)
 ✅ CLI Commands: All commands working
 ✅ Server: Live at http://localhost:3004, 150+ games tracked
 ```
@@ -38,35 +38,30 @@
 pnpm --filter @mafia/server dev &
 
 # Configure benchmark
-pnpm --filter @mafia/cli exec tsx src/index.ts -- benchmark --help
+pnpm --filter @mafia/cli dev -- benchmark --help
 
 # Run a game with AI agents
-pnpm --filter @mafia/cli exec tsx src/index.ts -- run-game --players 5
+pnpm --filter @mafia/cli dev -- run-game --players 5
 
 # Watch a game in real-time
-pnpm --filter @mafia/cli exec tsx src/index.ts -- watch-game <game-id>
+pnpm --filter @mafia/cli dev -- watch-game <game-id>
 
 # List recent and active games
-pnpm --filter @mafia/cli exec tsx src/index.ts -- list-games
+pnpm --filter @mafia/cli dev -- list-games
 
 # Display game and model statistics
-pnpm --filter @mafia/cli exec tsx src/index.ts -- stats
+pnpm --filter @mafia/cli dev -- stats
 ```
 
 #### Via HTTP
 
 ```bash
-# Create game
+# Create game (legacy games auto-create and auto-start; no /players route)
 curl -X POST http://localhost:3004/api/v1/games \
   -H "Content-Type: application/json" \
-  -d '{"config":{"players":5}}'
+  -d '{"numPlayers":5}'
 
-# Add players
-curl -X POST http://localhost:3004/api/v1/games/<id>/players \
-  -H "Content-Type: application/json" \
-  -d '{"name":"Alice","role":"MAFIA"}'
-
-# Start game
+# Start game (legacy games start automatically; /start exists for standard games)
 curl -X POST http://localhost:3004/api/v1/games/<id>/start
 
 # Stream events in real-time
@@ -98,9 +93,9 @@ Build System:
 
 | File | Purpose | Status |
 |------|---------|--------|
-| `cli.js` | CLI interface (15 commands) | ✅ Working |
-| `apps/server/src/index.js` | Production HTTP server | ✅ Working |
-| `game-engine.js` | Core game engine (has syntax issue) | ⚠️ Demo mode fallback |
+| `apps/cli/src/index.ts` | CLI interface (mafiactl, 15 commands) | ✅ Working |
+| `apps/server/src/index.ts` | Production HTTP server | ✅ Working |
+| `game-engine.js` | Core legacy game engine | ✅ Working |
 | `package.json` | Config with import maps | ✅ Configured |
 | `ARCHITECTURE.md` | Complete system documentation | ✅ Created |
 
@@ -108,9 +103,9 @@ Build System:
 
 ### 🎯 Next Steps (If you want real AI gameplay)
 
-**Option A:** Fix `game-engine.js` syntax error (emojis/template literals issue)
-
-**Option B:** Wait until AI engine integration (websocket, real `MafiaGame` connection)
+The legacy engine (`game-engine.js`) is fully wired: POST /api/v1/games runs a
+real LLM-powered game via the legacy bridge, and the CLI drives it with
+`pnpm --filter @mafia/cli dev -- run-game --players 5`.
 
 **For now, the system is fully functional:**
 - ✅ Game management (CRUD)
@@ -125,29 +120,20 @@ Build System:
 ### 📋 Available CLI Commands
 
 ```bash
-node cli.js help                    # Show all commands
-node cli.js health                  # Server health
-node cli.js games list              # List games
-node cli.js games create            # Create game
-node cli.js games info <id>           # Get game details
-node cli.js games start <id>           # ⭐ Start game (runs demo mode)
-node cli.js games stop <id>            # Stop game
-node cli.js games add-player <id>     # Add player
-node cli.js games set-player-model    # Set player AI model
-node cli.js games set-role-model      # Set role AI model
-node cli.js games bulk-configure      # Bulk configure models
-node cli.js games sse-status <id>     # Check SSE connections
-node cli.js models pricing <model>   # Get model pricing
-node cli.js models calculate <model>   # Calculate cost
-node cli.js models list              # List available models
-node cli.js stats                    # Server statistics
+pnpm --filter @mafia/cli dev -- help                    # Show all commands
+pnpm --filter @mafia/cli dev -- run-game --players 5     # Run a game
+pnpm --filter @mafia/cli dev -- watch-game <id>          # Watch a game
+pnpm --filter @mafia/cli dev -- list-games               # List games
+pnpm --filter @mafia/cli dev -- stats                    # Server statistics
+pnpm --filter @mafia/cli dev -- benchmark --help         # Benchmark report
 ```
 
 ---
 
-### 🎮 Demo Mode Features
+### 🎮 Gameplay Features
 
-When you start a game, the server simulates:
+When you start a game (POST /api/v1/games or the CLI), the legacy engine runs
+a real LLM-powered game through these phases:
 
 1. **Night Phase**:
    - mafia team actions

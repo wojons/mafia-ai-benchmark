@@ -154,7 +154,7 @@ The game will:
 | `/api/v1/games`          | GET    | List games         |
 | `/api/v1/games`          | POST   | Create a new game  |
 | `/api/v1/games/:id`      | GET    | Get game details   |
-| `/api/v1/games/:id/run`  | POST   | Start a game       |
+| `/api/v1/games/:id/start`| POST   | Start a game       |
 | `/api/v1/benchmark`      | POST   | Run benchmarks     |
 | `/api/v1/stats`          | GET    | View statistics    |
 

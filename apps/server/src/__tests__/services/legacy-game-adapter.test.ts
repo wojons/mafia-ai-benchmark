@@ -579,6 +579,114 @@ describe('LegacyGameAdapter', () => {
       expect(alice.isMafia).toBe(true);
       expect(alice.isAlive).toBe(false);
     });
+
+    it('late ROLES_ASSIGNED fills only UNASSIGNED gaps (MAF-GAP-013 bridge roster event)', () => {
+      // Simulates the legacy bridge's synthetic end-of-game ROLES_ASSIGNED
+      // event: roles already inferred from play (mafia chat, doctor action)
+      // must NOT be overwritten, while plain villagers who never acted and
+      // never died get their canonical role from the roster.
+      const events: GameEvent[] = [
+        {
+          id: 'e1',
+          gameId: 'g1',
+          type: 'AGENT_SAYS_BROADCASTED',
+          timestamp: new Date(),
+          visibility: 'PRIVATE',
+          actorId: 'p1',
+          data: { legacyType: 'MESSAGE', playerName: 'Alice', says: 'kill Bob' },
+          metadata: { turnNumber: 1, dayNumber: 1, phase: 'NIGHT_ACTIONS', sequence: 1 },
+        },
+        {
+          id: 'e2',
+          gameId: 'g1',
+          type: 'NIGHT_ACTION_SUBMITTED',
+          timestamp: new Date(),
+          visibility: 'ADMIN',
+          actorId: 'p2',
+          data: { legacyType: 'ACTION', targetId: 'p3', targetName: 'Carol', reason: 'Strategic' },
+          metadata: { turnNumber: 1, dayNumber: 1, phase: 'NIGHT_ACTIONS', sequence: 2 },
+        },
+        {
+          id: 'e3',
+          gameId: 'g1',
+          type: 'ROLES_ASSIGNED',
+          timestamp: new Date(),
+          visibility: 'ADMIN',
+          data: {
+            legacyType: 'ROLES_ASSIGNED',
+            assignments: [
+              { playerId: 'p1', role: 'MAFIA', isMafia: true },
+              { playerId: 'p2', role: 'DOCTOR', isMafia: false },
+              { playerId: 'p3', role: 'VILLAGER', isMafia: false },
+              { playerId: 'p4', role: 'SHERIFF', isMafia: false },
+              { playerId: 'p5', role: 'VILLAGER', isMafia: false },
+            ],
+          },
+          metadata: { turnNumber: 0, dayNumber: 0, phase: 'GAME_OVER', sequence: 3 },
+        },
+      ];
+
+      const players = LegacyGameAdapter.extractPlayersFromEvents(events);
+      expect(players).toHaveLength(5);
+
+      // Inferred roles survive (first-write-wins)
+      expect(players.find(p => p.id === 'p1')!.role).toBe('MAFIA');
+      expect(players.find(p => p.id === 'p1')!.isMafia).toBe(true);
+      expect(players.find(p => p.id === 'p2')!.role).toBe('DOCTOR');
+      expect(players.find(p => p.id === 'p2')!.isMafia).toBe(false);
+
+      // Plain villagers who never acted/died get their canonical role
+      expect(players.find(p => p.id === 'p3')!.role).toBe('VILLAGER');
+      expect(players.find(p => p.id === 'p3')!.isMafia).toBe(false);
+      expect(players.find(p => p.id === 'p4')!.role).toBe('SHERIFF');
+      expect(players.find(p => p.id === 'p4')!.isMafia).toBe(false);
+      expect(players.find(p => p.id === 'p5')!.role).toBe('VILLAGER');
+      expect(players.find(p => p.id === 'p5')!.isMafia).toBe(false);
+
+      // Zero UNASSIGNED after the roster event
+      expect(players.filter(p => p.role === 'UNASSIGNED')).toHaveLength(0);
+    });
+
+    it('bridge-emitted ROLES_ASSIGNED flows through translateAndPublishEvent into extraction (MAF-GAP-013)', () => {
+      // Full pipeline proof: the legacy bridge emits a synthetic ROLES_ASSIGNED
+      // event with the exact shape added in legacy-bridge.js; the adapter
+      // translates + stores it; extractPlayersFromEvents then resolves every
+      // player's role — including plain villagers who never acted or died.
+      eventBus.reset();
+      (adapter as any).translateAndPublishEvent('g1', {
+        eventType: 'ROLES_ASSIGNED',
+        playerId: null,
+        playerName: null,
+        visibility: 'ADMIN_ONLY',
+        phase: 'GAME_OVER',
+        content: {
+          assignments: [
+            { playerId: 'p1', role: 'MAFIA', isMafia: true },
+            { playerId: 'p2', role: 'DOCTOR', isMafia: false },
+            { playerId: 'p3', role: 'SHERIFF', isMafia: false },
+            { playerId: 'p4', role: 'VIGILANTE', isMafia: false },
+            { playerId: 'p5', role: 'VILLAGER', isMafia: false },
+          ],
+        },
+        round: 0,
+        timestamp: new Date().toISOString(),
+      }, 1);
+
+      const published = eventBus.published.find(e => e.type === 'ROLES_ASSIGNED');
+      expect(published).toBeDefined();
+      // normalizeStatementData must not clobber assignments on this path
+      expect(Array.isArray((published!.data as any).assignments)).toBe(true);
+
+      const stored = repo.getEvents('g1');
+      expect(stored).toHaveLength(1);
+      expect(stored[0].type).toBe('ROLES_ASSIGNED');
+
+      const players = LegacyGameAdapter.extractPlayersFromEvents(stored);
+      expect(players).toHaveLength(5);
+      expect(players.filter(p => p.role === 'UNASSIGNED')).toHaveLength(0);
+      expect(players.find(p => p.id === 'p5')!.role).toBe('VILLAGER');
+      expect(players.find(p => p.id === 'p1')!.isMafia).toBe(true);
+    });
   });
 
   // ==========================================================================
