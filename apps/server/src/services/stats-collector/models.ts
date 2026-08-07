@@ -10,9 +10,106 @@ import { getGameWinnerFromEvents } from './wins.js';
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 type AnyRecord = Record<string, any>;
 
+/** Roles that belong to the TOWN team. */
+const TOWN_ROLES = new Set([
+  'TOWN',
+  'SHERIFF',
+  'DOCTOR',
+  'VILLAGER',
+  'VIGILANTE',
+  'JESTER',
+  'DETECTIVE',
+  'BODYGUARD',
+]);
+
 /**
- * Get model comparison data, falling back to event-derived data
- * when the players table has no entries.
+ * Whether a role's team won a game with the given winner.
+ * MAFIA role wins when winner === 'MAFIA'; town roles win when
+ * winner === 'TOWN'. Unknown roles never count as a win — a game can
+ * never be attributed to a model that did not play it (MAF-GAP-012).
+ */
+function sideWon(
+  role: string | null | undefined,
+  winner: 'MAFIA' | 'TOWN' | null,
+): boolean {
+  if (!role || !winner) return false;
+  if (role === 'MAFIA') return winner === 'MAFIA';
+  if (TOWN_ROLES.has(role)) return winner === 'TOWN';
+  return false;
+}
+
+/**
+ * Derive honest per-model rows from real per-game model assignments
+ * (player_model_assignments joined to ended games). Wins are games where
+ * the model's assigned role side actually won (via game events). Returns
+ * [] when no assignments exist — empty is honest, fabricated is not.
+ */
+function getModelComparisonFromAssignments(
+  gameRepository: GameRepository,
+): Array<{
+  provider: string;
+  model: string;
+  gamesPlayed: number;
+  wins: number;
+  winRate: number;
+  avgTokens: number;
+  avgCost: number;
+  avgLatency: number;
+}> {
+  const db = gameRepository.getDatabase();
+  const rows = db.prepare(`
+    SELECT pma.provider, pma.model, pma.game_id, pma.role
+    FROM player_model_assignments pma
+    JOIN games g ON g.id = pma.game_id
+    WHERE g.status = 'ENDED'
+  `).all() as Array<{
+    provider: string;
+    model: string;
+    game_id: string;
+    role: string | null;
+  }>;
+
+  if (rows.length === 0) return [];
+
+  const byModel = new Map<
+    string,
+    { provider: string; model: string; games: Set<string>; winGames: Set<string> }
+  >();
+  for (const row of rows) {
+    if (!row.provider || !row.model) continue;
+    const key = `${row.provider}/${row.model}`;
+    let entry = byModel.get(key);
+    if (!entry) {
+      entry = {
+        provider: row.provider,
+        model: row.model,
+        games: new Set(),
+        winGames: new Set(),
+      };
+      byModel.set(key, entry);
+    }
+    entry.games.add(row.game_id);
+    const winner = getGameWinnerFromEvents(gameRepository, row.game_id);
+    if (sideWon(row.role, winner)) entry.winGames.add(row.game_id);
+  }
+
+  return Array.from(byModel.values()).map((e) => ({
+    provider: e.provider,
+    model: e.model,
+    gamesPlayed: e.games.size,
+    wins: e.winGames.size,
+    winRate: e.games.size > 0 ? e.winGames.size / e.games.size : 0,
+    avgTokens: 0,
+    avgCost: 0,
+    avgLatency: 0,
+  }));
+}
+
+/**
+ * Get model comparison data. Uses the players/token_usage tables when they
+ * have rows; otherwise derives honest per-model rows from real per-game
+ * model assignments (legacy path). NEVER fabricates a provider/model that
+ * did not play — returns [] when no real data exists (MAF-GAP-012).
  */
 export function getModelComparison(
   gameRepository: GameRepository,
@@ -36,31 +133,7 @@ export function getModelComparison(
   if (dbStats.length > 0) return dbStats;
 
   try {
-    const allGames = gameRepository.listGames({ limit: 1000, offset: 0 });
-    const provider = 'neuralwatt';
-    const model = 'qwen3.6-35b-fast';
-
-    let wins = 0;
-    let completedGames = 0;
-    for (const g of allGames) {
-      if (g.status !== 'ENDED') continue;
-      completedGames++;
-      const winner = getGameWinnerFromEvents(gameRepository, g.id);
-      if (winner) wins++;
-    }
-
-    return [
-      {
-        provider,
-        model,
-        gamesPlayed: completedGames,
-        wins,
-        winRate: completedGames > 0 ? wins / completedGames : 0,
-        avgTokens: 0,
-        avgCost: 0,
-        avgLatency: 0,
-      },
-    ];
+    return getModelComparisonFromAssignments(gameRepository);
   } catch (e) {
     console.error(
       'StatsCollector.getModelComparison: failed to compute model comparison data',
@@ -314,7 +387,11 @@ export function getCompareReport(
     .prepare(trendQuery)
     .all(...trendParams) as Record<string, unknown>[];
 
-  // Fallback: if no player-level trend data, build from events
+  // Fallback: if no player-level trend data, derive honest per-model
+  // trends from real per-game model assignments (legacy path). A game is
+  // only counted for a model that actually played it, and only as a win
+  // when that model's assigned role side won (MAF-GAP-012). No real
+  // assignments -> empty trends/models, never fabricated entries.
   if (trendRows.length === 0) {
     const fallbackModels: AnyRecord[] =
       models.length > 0 ? (models as AnyRecord[]) : getModelComparison(gameRepository);
@@ -337,29 +414,42 @@ export function getCompareReport(
       }>;
       cumulativeWinRate: number[];
     }> = [];
+
+    // Per-model game entries derived from real assignments + game events.
+    const assignmentRows = db.prepare(`
+      SELECT pma.provider, pma.model, pma.game_id, pma.role, g.created_at
+      FROM player_model_assignments pma
+      JOIN games g ON g.id = pma.game_id
+      WHERE g.status = 'ENDED'
+    `).all() as Array<{
+      provider: string;
+      model: string;
+      game_id: string;
+      role: string | null;
+      created_at: number;
+    }>;
+    const entriesByModel = new Map<
+      string,
+      Array<{ gameId: string; won: boolean; role: string; tokensUsed: number; createdAt: string }>
+    >();
+    for (const row of assignmentRows) {
+      if (!row.provider || !row.model) continue;
+      const key = `${row.provider}/${row.model}`;
+      if (!entriesByModel.has(key)) entriesByModel.set(key, []);
+      const winner = getGameWinnerFromEvents(gameRepository, row.game_id);
+      entriesByModel.get(key)!.push({
+        gameId: row.game_id,
+        won: sideWon(row.role, winner),
+        role: row.role || 'UNASSIGNED',
+        tokensUsed: 0,
+        createdAt: new Date(row.created_at).toISOString(),
+      });
+    }
+
     for (const fm of fallbackModels2) {
       if (modelList && !modelList.includes(fm.model)) continue;
 
-      const allGames = gameRepository.listGames({ limit: 1000, offset: 0 });
-      const gameEntries: Array<{
-        gameId: string;
-        won: boolean;
-        role: string;
-        tokensUsed: number;
-        createdAt: string;
-      }> = [];
-
-      for (const g of allGames) {
-        if (g.status !== 'ENDED') continue;
-        const winner = getGameWinnerFromEvents(gameRepository, g.id);
-        gameEntries.push({
-          gameId: g.id,
-          won: winner !== null,
-          role: 'LEGACY',
-          tokensUsed: 0,
-          createdAt: g.createdAt.toISOString(),
-        });
-      }
+      const gameEntries = entriesByModel.get(`${fm.provider}/${fm.model}`) || [];
 
       const cumulativeWinRate: number[] = [];
       let cumulativeWins = 0;

@@ -1,6 +1,6 @@
 import { describe, it, expect, beforeEach } from 'vitest';
 import { LegacyGameAdapter } from '../../services/legacy-game-adapter.js';
-import { createFakeEventBus, createFakeGameRepository } from './mocks.js';
+import { createFakeEventBus, createFakeGameRepository, createSqliteBackedRepository } from './mocks.js';
 import type { GameEvent } from '@mafia/shared/events';
 
 describe('LegacyGameAdapter', () => {
@@ -578,6 +578,106 @@ describe('LegacyGameAdapter', () => {
       expect(alice.role).toBe('MAFIA');
       expect(alice.isMafia).toBe(true);
       expect(alice.isAlive).toBe(false);
+    });
+  });
+
+  // ==========================================================================
+  // persistUsage — bridge USAGE line persistence (MAF-GAP-012)
+  // ==========================================================================
+
+  describe('persistUsage()', () => {
+    it('persists token_usage / api_calls / player_game_stats rows from a bridge usage aggregate', () => {
+      const sqliteRepo = createSqliteBackedRepository();
+      sqliteRepo.seedGame({ id: 'g-usage', status: 'IN_PROGRESS' });
+      const sqliteAdapter = new LegacyGameAdapter(eventBus, sqliteRepo as any);
+
+      (sqliteAdapter as any).persistUsage('g-usage', [
+        {
+          provider: 'providerA',
+          model: 'modelA',
+          promptTokens: 1000,
+          completionTokens: 500,
+          totalTokens: 1500,
+          cost: 0.0015,
+          apiCalls: 12,
+          latencyMs: 800,
+        },
+        {
+          provider: 'providerB',
+          model: 'modelB',
+          promptTokens: 2000,
+          completionTokens: 1000,
+          totalTokens: 3000,
+          cost: 0.003,
+          apiCalls: 20,
+          latencyMs: 1200,
+        },
+      ]);
+
+      const tu = sqliteRepo.db.prepare(
+        'SELECT * FROM token_usage WHERE game_id = ? ORDER BY provider'
+      ).all('g-usage') as Array<Record<string, unknown>>;
+      expect(tu).toHaveLength(2);
+      expect(tu[0].provider).toBe('providerA');
+      expect(tu[0].model).toBe('modelA');
+      expect(tu[0].total_tokens).toBe(1500);
+      expect(tu[0].cost).toBeCloseTo(0.0015, 6);
+      expect(tu[0].player_id).toBe('ALL');
+
+      const ac = sqliteRepo.db.prepare(
+        'SELECT * FROM api_calls WHERE game_id = ?'
+      ).all('g-usage') as Array<Record<string, unknown>>;
+      expect(ac).toHaveLength(2);
+      expect(ac[0].endpoint).toBe('legacy-engine');
+
+      const pgs = sqliteRepo.db.prepare(
+        'SELECT * FROM player_game_stats WHERE game_id = ?'
+      ).all('g-usage') as Array<Record<string, unknown>>;
+      expect(pgs).toHaveLength(2);
+      expect(pgs[0].tokens_used).toBe(1500);
+      expect(pgs[0].api_calls).toBe(12);
+    });
+
+    it('is a no-op when no usage is reported', () => {
+      const sqliteRepo = createSqliteBackedRepository();
+      sqliteRepo.seedGame({ id: 'g-nousage', status: 'IN_PROGRESS' });
+      const sqliteAdapter = new LegacyGameAdapter(eventBus, sqliteRepo as any);
+
+      (sqliteAdapter as any).persistUsage('g-nousage', undefined);
+      (sqliteAdapter as any).persistUsage('g-nousage', []);
+
+      expect(sqliteRepo.db.prepare('SELECT COUNT(*) as c FROM token_usage WHERE game_id = ?').get('g-nousage')).toEqual({ c: 0 });
+      expect(sqliteRepo.db.prepare('SELECT COUNT(*) as c FROM api_calls WHERE game_id = ?').get('g-nousage')).toEqual({ c: 0 });
+      expect(sqliteRepo.db.prepare('SELECT COUNT(*) as c FROM player_game_stats WHERE game_id = ?').get('g-nousage')).toEqual({ c: 0 });
+    });
+
+    it('attributes role from player_model_assignments when present', () => {
+      const sqliteRepo = createSqliteBackedRepository();
+      sqliteRepo.seedGame({ id: 'g-role', status: 'IN_PROGRESS' });
+      sqliteRepo.db.prepare(`
+        INSERT INTO player_model_assignments
+          (id, game_id, player_id, role, provider, model, temperature, max_tokens, priority, created_at)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      `).run('pma1', 'g-role', 'ALL', 'MAFIA', 'providerA', 'modelA', 0.7, 500, 0, Date.now());
+      const sqliteAdapter = new LegacyGameAdapter(eventBus, sqliteRepo as any);
+
+      (sqliteAdapter as any).persistUsage('g-role', [
+        {
+          provider: 'providerA',
+          model: 'modelA',
+          promptTokens: 10,
+          completionTokens: 5,
+          totalTokens: 15,
+          cost: 0.0001,
+          apiCalls: 2,
+          latencyMs: 100,
+        },
+      ]);
+
+      const pgs = sqliteRepo.db.prepare(
+        'SELECT * FROM player_game_stats WHERE game_id = ?'
+      ).get('g-role') as Record<string, unknown>;
+      expect(pgs.role).toBe('MAFIA');
     });
   });
 });

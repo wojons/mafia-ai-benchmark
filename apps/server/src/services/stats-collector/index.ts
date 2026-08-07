@@ -652,8 +652,10 @@ export class StatsCollector {
           playerId: p.id,
           name: p.name,
           role: p.role,
-          provider: (p as any).provider || 'neuralwatt',
-          model: (p as any).model || 'qwen3.6-35b-fast',
+          // MAF-GAP-012: never fabricate a provider/model — report
+          // 'unknown' when the players table has no real value.
+          provider: (p as any).provider || 'unknown',
+          model: (p as any).model || 'unknown',
           survived: p.isAlive,
           won: isWinner,
           tokensUsed: tokenUsage.reduce((sum, t) => sum + t.totalTokens, 0),

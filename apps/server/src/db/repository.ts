@@ -406,20 +406,24 @@ export class GameRepository {
     avgCost: number;
     avgLatency: number;
   }> {
+    // MAF-GAP-012: the previous query nested AVG(SELECT AVG(cost) ...)
+    // inside AVG() — invalid SQLite syntax that threw at runtime and
+    // masked real data. Use a LEFT JOIN with a correlated subquery so
+    // avg_cost is the mean per-player cost from token_usage.
     const rows = this.db.prepare(`
       SELECT 
-        provider,
-        model,
+        p.provider,
+        p.model,
         COUNT(*) as games_played,
-        SUM(CASE WHEN won = 1 THEN 1 ELSE 0 END) as wins,
-        AVG(tokens_used) as avg_tokens,
-        AVG(
-          SELECT AVG(cost) FROM token_usage 
-          WHERE game_id = players.game_id AND player_id = players.id
-        ) as avg_cost
-      FROM players
-      WHERE provider IS NOT NULL
-      GROUP BY provider, model
+        SUM(CASE WHEN p.won = 1 THEN 1 ELSE 0 END) as wins,
+        AVG(p.tokens_used) as avg_tokens,
+        COALESCE(AVG((
+          SELECT AVG(tu.cost) FROM token_usage tu
+          WHERE tu.game_id = p.game_id AND tu.player_id = p.id
+        )), 0) as avg_cost
+      FROM players p
+      WHERE p.provider IS NOT NULL
+      GROUP BY p.provider, p.model
       ORDER BY games_played DESC
     `).all() as Record<string, unknown>[];
     

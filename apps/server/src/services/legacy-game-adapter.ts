@@ -36,6 +36,9 @@ const ROLE_ENV_MAP: Record<string, string> = {
   'JESTER': 'JESTER_MODEL',
   'DETECTIVE': 'DETECTIVE_MODEL',
   'BODYGUARD': 'BODYGUARD_MODEL',
+  // Benchmark runner assigns the town core under the 'TOWN' role key;
+  // the legacy engine resolves town players via VILLAGER_MODEL.
+  'TOWN': 'VILLAGER_MODEL',
 };
 
 export interface LegacyGameState {
@@ -46,6 +49,23 @@ export interface LegacyGameState {
   startedAt: Date;
   endedAt?: Date;
   error?: string;
+}
+
+/**
+ * Per-model usage aggregate emitted by the legacy bridge in its 'done'
+ * message (MAF-GAP-012). Populated from the engine's real token/cost
+ * trackers; player_id is not known at this level, so rows are keyed by
+ * role via player_model_assignments.
+ */
+export interface UsageAggregate {
+  provider: string;
+  model: string;
+  promptTokens: number;
+  completionTokens: number;
+  totalTokens: number;
+  cost: number;
+  apiCalls: number;
+  latencyMs: number;
 }
 
 export class LegacyGameAdapter extends EventEmitter {
@@ -102,6 +122,43 @@ export class LegacyGameAdapter extends EventEmitter {
       }
     } catch (e: any) {
       console.error(`[LegacyAdapter] Failed to create game in repository: ${e?.message || e}`);
+    }
+
+    // Persist per-role model assignments so stats can attribute games to
+    // the REAL models that played them (MAF-GAP-012). The legacy engine
+    // resolves role models from env vars; mirroring them into
+    // player_model_assignments gives the stats service honest per-model
+    // data (wins only count for models that actually played).
+    if (config.roleModels) {
+      try {
+        const db = (this.gameRepository as any).db;
+        if (db) {
+          const insert = db.prepare(`
+            INSERT OR REPLACE INTO player_model_assignments
+              (id, game_id, player_id, role, provider, model, temperature, max_tokens, priority, created_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+          `);
+          for (const [role, modelSpec] of Object.entries(config.roleModels)) {
+            if (!modelSpec || typeof modelSpec !== 'string') continue;
+            const [provider, model] = modelSpec.split('/');
+            if (!provider || !model) continue;
+            insert.run(
+              uuidv4(),
+              gameId,
+              'ALL', // schema requires player_id NOT NULL; role-level sentinel
+              role.toUpperCase(),
+              provider,
+              model,
+              0.7,
+              500,
+              0,
+              Date.now(),
+            );
+          }
+        }
+      } catch (e: any) {
+        console.error(`[LegacyAdapter] Failed to persist role model assignments: ${e?.message || e}`);
+      }
     }
     
     // Build environment with per-role model assignments
@@ -243,18 +300,28 @@ export class LegacyGameAdapter extends EventEmitter {
         state.status = 'COMPLETED';
         console.log(`[LegacyAdapter:${gameId}] Game completed. Winner: ${message.winner || 'UNKNOWN'}. Total events: ${message.totalEvents}`);
         
-        // Update database with winner and completion
+        // Update database with winner, duration and completion
         try {
           const db = (this.gameRepository as any).db;
           if (db) {
             const winner = message.winner || 'UNKNOWN';
-            db.prepare(`UPDATE games SET status = 'ENDED', ended_at = ?, config = json_set(config, '$.winner', ?) WHERE id = ?`)
-              .run(Date.now(), winner, gameId);
-            console.log(`[LegacyAdapter:${gameId}] Database updated: winner=${winner}`);
+            // MAF-GAP-012: record a real duration (ended_at - created_at)
+            // so avgDuration is not always 0 for legacy games.
+            const duration = state.startedAt
+              ? Date.now() - state.startedAt.getTime()
+              : 0;
+            db.prepare(`UPDATE games SET status = 'ENDED', ended_at = ?, duration = ?, config = json_set(config, '$.winner', ?) WHERE id = ?`)
+              .run(Date.now(), duration, winner, gameId);
+            console.log(`[LegacyAdapter:${gameId}] Database updated: winner=${winner}, duration=${duration}ms`);
           }
         } catch (e: any) {
           console.error(`[LegacyAdapter] Failed to update game winner: ${e?.message || e}`);
         }
+
+        // MAF-GAP-012: persist real per-model usage reported by the bridge
+        // (token_usage + api_calls + player_game_stats) so cost tracking is
+        // no longer hollow for legacy games.
+        this.persistUsage(gameId, message.usage as UsageAggregate[] | undefined);
         
         // Publish game ended event
         this.publishEvent({
@@ -289,6 +356,118 @@ export class LegacyGameAdapter extends EventEmitter {
       default:
         console.log(`[LegacyAdapter:${gameId}] Unknown message type:`, message.type);
     }
+  }
+
+  /**
+   * Persist per-model usage aggregates from the bridge 'done' message into
+   * token_usage / api_calls / player_game_stats (MAF-GAP-012).
+   *
+   * The bridge reports per-model totals (player_id is not known at that
+   * level), so each model row is written once with a sentinel player_id of
+   * 'ALL' and turn_number 0. When the game has role-based model
+   * assignments, per-role rows are also written (player_id 'ALL', role from
+   * the assignment) so player_game_stats carries the role attribution.
+   * All writes are best-effort: a failure logs and never breaks the game
+   * completion path.
+   */
+  private persistUsage(gameId: string, usage: UsageAggregate[] | undefined): void {
+    if (!usage || !Array.isArray(usage) || usage.length === 0) return;
+
+    const db = (this.gameRepository as any).db;
+    if (!db) return;
+
+    const now = Date.now();
+
+    // Role -> model map from player_model_assignments (written at startGame).
+    let roleByModel = new Map<string, string>();
+    try {
+      const rows = db.prepare(
+        'SELECT role, provider, model FROM player_model_assignments WHERE game_id = ? AND role IS NOT NULL'
+      ).all(gameId) as Array<{ role: string; provider: string; model: string }>;
+      for (const r of rows) {
+        roleByModel.set(`${r.provider}/${r.model}`, r.role);
+      }
+    } catch (e: any) {
+      console.error(`[LegacyAdapter] Failed to read role model assignments: ${e?.message || e}`);
+    }
+
+    const insertTokenUsage = db.prepare(`
+      INSERT INTO token_usage
+        (id, game_id, player_id, turn_number, provider, model, prompt_tokens, completion_tokens, total_tokens, cost, timestamp)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    `);
+    const insertApiCall = db.prepare(`
+      INSERT INTO api_calls
+        (id, game_id, player_id, provider, model, endpoint, latency, status_code, timestamp)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+    `);
+    const insertPlayerGameStats = db.prepare(`
+      INSERT INTO player_game_stats
+        (id, game_id, player_id, role, survived, won, tokens_used, api_calls, actions_taken, role_performance)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    `);
+
+    for (const u of usage) {
+      if (!u || !u.provider || !u.model) continue;
+      const role = roleByModel.get(`${u.provider}/${u.model}`) || 'UNASSIGNED';
+
+      try {
+        insertTokenUsage.run(
+          uuidv4(),
+          gameId,
+          'ALL',
+          0,
+          u.provider,
+          u.model,
+          u.promptTokens || 0,
+          u.completionTokens || 0,
+          u.totalTokens || 0,
+          u.cost || 0,
+          now,
+        );
+      } catch (e: any) {
+        console.error(`[LegacyAdapter] Failed to persist token usage: ${e?.message || e}`);
+      }
+
+      try {
+        insertApiCall.run(
+          uuidv4(),
+          gameId,
+          'ALL',
+          u.provider,
+          u.model,
+          'legacy-engine',
+          u.latencyMs || 0,
+          200,
+          now,
+        );
+      } catch (e: any) {
+        console.error(`[LegacyAdapter] Failed to persist api call: ${e?.message || e}`);
+      }
+
+      try {
+        insertPlayerGameStats.run(
+          uuidv4(),
+          gameId,
+          'ALL',
+          role,
+          0,
+          null,
+          u.totalTokens || 0,
+          u.apiCalls || 0,
+          0,
+          null,
+        );
+      } catch (e: any) {
+        console.error(`[LegacyAdapter] Failed to persist player game stats: ${e?.message || e}`);
+      }
+    }
+
+    console.log(
+      `[LegacyAdapter:${gameId}] Persisted ${usage.length} usage aggregate(s) ` +
+        `(tokens=${usage.reduce((s, u) => s + (u.totalTokens || 0), 0)}, ` +
+        `cost=${usage.reduce((s, u) => s + (u.cost || 0), 0).toFixed(6)})`,
+    );
   }
   
   /**

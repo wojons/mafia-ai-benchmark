@@ -243,8 +243,10 @@ describe('StatsCollector', () => {
       }
     });
 
-    it('falls back to event-derived model when DB stats are empty', () => {
-      // Game with no players table rows, but events carry winner info.
+    it('returns [] when the players table is empty and no real assignments exist (no fabrication)', () => {
+      // Game with no players table rows and no player_model_assignments.
+      // MAF-GAP-012: the old code fabricated a 'neuralwatt/qwen3.6-35b-fast'
+      // row with 100% win rate; the honest answer is an empty list.
       repo.seedGame({
         id: 'fallback',
         status: 'ENDED',
@@ -254,13 +256,111 @@ describe('StatsCollector', () => {
       });
 
       const cmp = stats.getModelComparison();
-      // At least the synthetic model entry should be present.
-      expect(cmp.length).toBeGreaterThan(0);
-      const m = cmp[0];
-      expect(m.gamesPlayed).toBeGreaterThanOrEqual(0);
-      expect(typeof m.winRate).toBe('number');
-      expect(m.winRate).toBeGreaterThanOrEqual(0);
-      expect(m.winRate).toBeLessThanOrEqual(1);
+      expect(cmp).toEqual([]);
+    });
+
+    it('derives honest per-model rows from player_model_assignments when players table is empty', () => {
+      // Legacy path: no players rows, but real role-model assignments exist.
+      // Wins must only count for the model whose side actually won.
+      repo.seedGame({
+        id: 'legacy1',
+        status: 'ENDED',
+        events: [
+          { type: 'PHASE_CHANGED', data: { winner: 'MAFIA' }, phase: 'GAME_OVER' },
+        ],
+      });
+      repo.seedGame({
+        id: 'legacy2',
+        status: 'ENDED',
+        events: [
+          { type: 'PHASE_CHANGED', data: { winner: 'TOWN' }, phase: 'GAME_OVER' },
+        ],
+      });
+      const db = repo.db;
+      const insert = db.prepare(`
+        INSERT INTO player_model_assignments
+          (id, game_id, player_id, role, provider, model, temperature, max_tokens, priority, created_at)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      `);
+      // Model A plays MAFIA in both games: wins game 1 (MAFIA won), loses game 2.
+      insert.run('a1', 'legacy1', 'ALL', 'MAFIA', 'providerA', 'modelA', 0.7, 500, 0, Date.now());
+      insert.run('a2', 'legacy2', 'ALL', 'MAFIA', 'providerA', 'modelA', 0.7, 500, 0, Date.now());
+      // Model B plays TOWN in both games: loses game 1, wins game 2.
+      insert.run('b1', 'legacy1', 'ALL', 'TOWN', 'providerB', 'modelB', 0.7, 500, 0, Date.now());
+      insert.run('b2', 'legacy2', 'ALL', 'TOWN', 'providerB', 'modelB', 0.7, 500, 0, Date.now());
+
+      const cmp = stats.getModelComparison();
+      expect(cmp).toHaveLength(2);
+      const a = cmp.find(m => m.provider === 'providerA' && m.model === 'modelA')!;
+      expect(a.gamesPlayed).toBe(2);
+      expect(a.wins).toBe(1);
+      expect(a.winRate).toBeCloseTo(0.5, 5);
+      const b = cmp.find(m => m.provider === 'providerB' && m.model === 'modelB')!;
+      expect(b.gamesPlayed).toBe(2);
+      expect(b.wins).toBe(1);
+      expect(b.winRate).toBeCloseTo(0.5, 5);
+      // No fabricated model may appear.
+      expect(cmp.some(m => m.provider === 'neuralwatt' || m.model === 'qwen3.6-35b-fast')).toBe(false);
+    });
+
+    it('never counts a game as a win for a model that did not play it', () => {
+      repo.seedGame({
+        id: 'g-only-town',
+        status: 'ENDED',
+        events: [
+          { type: 'PHASE_CHANGED', data: { winner: 'MAFIA' }, phase: 'GAME_OVER' },
+        ],
+      });
+      const db = repo.db;
+      db.prepare(`
+        INSERT INTO player_model_assignments
+          (id, game_id, player_id, role, provider, model, temperature, max_tokens, priority, created_at)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      `).run('t1', 'g-only-town', 'ALL', 'TOWN', 'providerB', 'modelB', 0.7, 500, 0, Date.now());
+
+      const cmp = stats.getModelComparison();
+      // Only modelB appears, and it LOST this game (MAFIA won).
+      expect(cmp).toHaveLength(1);
+      expect(cmp[0].provider).toBe('providerB');
+      expect(cmp[0].wins).toBe(0);
+      expect(cmp[0].winRate).toBe(0);
+    });
+  });
+
+  // ==========================================================================
+  // getModelStats (repository SQL)
+  // ==========================================================================
+
+  describe('getModelStats() SQL', () => {
+    it('executes without throwing and returns rows when players exist', () => {
+      repo.seedGame({
+        id: 'sql1',
+        players: [
+          { id: 'p1', name: 'P1', role: 'MAFIA', joinOrder: 0, isMafia: true,
+            provider: 'OPENAI', model: 'gpt-4', won: 1, tokens_used: 100 },
+        ],
+      });
+      repo.insertTokenUsage({
+        gameId: 'sql1', playerId: 'p1', turnNumber: 1,
+        provider: 'OPENAI', model: 'gpt-4',
+        promptTokens: 100, completionTokens: 50, totalTokens: 150,
+        cost: 0.01, timestamp: Date.now(),
+      });
+
+      // MAF-GAP-012: the old nested-AVG query threw at runtime; this must
+      // execute and return the aggregated row with a real avg_cost.
+      const rows = repo.getModelStats();
+      expect(rows).toHaveLength(1);
+      expect(rows[0].provider).toBe('OPENAI');
+      expect(rows[0].model).toBe('gpt-4');
+      expect(rows[0].gamesPlayed).toBe(1);
+      expect(rows[0].wins).toBe(1);
+      expect(rows[0].avgCost).toBeCloseTo(0.01, 5);
+    });
+
+    it('returns [] without throwing when the players table is empty', () => {
+      expect(() => repo.getModelStats()).not.toThrow();
+      expect(repo.getModelStats()).toEqual([]);
     });
   });
 
