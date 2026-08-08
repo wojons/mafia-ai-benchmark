@@ -129,7 +129,7 @@ export class ConfigCommand extends Command {
     const defaultConfig = {
       numPlayers: 10,
       llmProvider: 'openai',
-      llmModel: 'gpt-5.1',
+      llmModel: 'openai/gpt-4o-mini',
       nightDuration: 60,
       dayDuration: 120,
       votingDuration: 30,

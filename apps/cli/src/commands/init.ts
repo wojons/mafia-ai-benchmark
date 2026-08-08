@@ -119,7 +119,7 @@ export class InitCommand extends Command {
         name: 'defaultModel',
         message: 'Default model:',
         choices: [
-          { name: 'GPT-5.1 (Recommended)', value: 'gpt-5.1' },
+          { name: 'GPT-4o mini (Recommended)', value: 'openai/gpt-4o-mini' },
           { name: 'GPT-4.1', value: 'gpt-4.1' },
           { name: 'Claude Sonnet 4.5', value: 'claude-sonnet-4.5' },
           { name: 'Gemini 2.5 Pro', value: 'gemini-2.5-pro' },
@@ -168,7 +168,7 @@ export class InitCommand extends Command {
       },
       llm: {
         provider: 'openai',
-        model: 'gpt-5.1',
+        model: 'openai/gpt-4o-mini',
         temperature: 0.7,
         maxTokens: 2000,
       },

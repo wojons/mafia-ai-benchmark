@@ -99,6 +99,6 @@ describe('ConfigCommand', () => {
     const saved = JSON.parse(readFileSync(path.join(tmpDir, 'mafia.config.json'), 'utf-8'));
     expect(saved.numPlayers).toBe(10);
     expect(saved.llmProvider).toBe('openai');
-    expect(saved.llmModel).toBe('gpt-5.1');
+    expect(saved.llmModel).toBe('openai/gpt-4o-mini');
   });
 });

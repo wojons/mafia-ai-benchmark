@@ -28,7 +28,7 @@ export class RunGameCommand extends Command {
     this.option('-c, --config <path>', 'Configuration file path', './mafia.config.json');
     this.option('--players <n>', 'Number of players', '10');
     this.option('--provider <name>', 'LLM provider', 'openai');
-    this.option('--model <name>', 'LLM model', 'gpt-5.1');
+    this.option('--model <name>', 'LLM model', 'openai/gpt-4o-mini');
     this.option('--auto', 'Run without confirmation', false);
     this.option('--watch', 'Watch game in real-time', false);
     this.option('--server <url>', 'Server base URL (default: http://localhost:3004)');
@@ -122,7 +122,7 @@ export class RunGameCommand extends Command {
     return {
       numPlayers: 10,
       llmProvider: 'openai',
-      llmModel: 'gpt-5.1',
+      llmModel: 'openai/gpt-4o-mini',
       nightDuration: 60,
       dayDuration: 120,
       votingDuration: 30,

@@ -20,7 +20,7 @@ describe('StatsCommand', () => {
     avgLatency: 850,
     errorRate: 0.02,
     topModels: [
-      { provider: 'openai', model: 'gpt-5.1', gamesPlayed: 50, winRate: 0.65, avgTokens: 80000, avgCost: 1.5 },
+      { provider: 'openai', model: 'openai/gpt-4o-mini', gamesPlayed: 50, winRate: 0.65, avgTokens: 80000, avgCost: 1.5 },
       { provider: 'anthropic', model: 'claude-sonnet-4', gamesPlayed: 40, winRate: 0.60, avgTokens: 75000, avgCost: 1.8 },
     ],
   };

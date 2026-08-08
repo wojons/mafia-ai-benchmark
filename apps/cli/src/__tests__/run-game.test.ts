@@ -84,7 +84,7 @@ describe('RunGameCommand', () => {
     expect(config).toBeDefined();
     expect(config.numPlayers).toBe(10);
     expect(config.llmProvider).toBe('openai');
-    expect(config.llmModel).toBe('gpt-5.1');
+    expect(config.llmModel).toBe('openai/gpt-4o-mini');
     expect(config.nightDuration).toBe(60);
     expect(config.dayDuration).toBe(120);
     expect(config.votingDuration).toBe(30);
