@@ -82,7 +82,10 @@ class CostTracker {
     const playerState = state.playerTracking.get(playerId);
     playerState.totalTurns++;
     playerState.totalCost += estimatedCost.totalCost;
-    playerState.totalTokens += estimatedCost.totalTokens;
+    // estimatedCost.tokens.totalTokens — the top-level of
+    // _calculateTurnCost's return has no totalTokens (only .totalCost);
+    // reading it directly produced NaN totals (MAF-GAP-018).
+    playerState.totalTokens += estimatedCost.tokens.totalTokens;
 
     // Update phase-specific tracking
     if (!playerState.costsByPhase.has(phase)) {
@@ -96,7 +99,7 @@ class CostTracker {
     const phaseState = playerState.costsByPhase.get(phase);
     phaseState.turns++;
     phaseState.totalCost += estimatedCost.totalCost;
-    phaseState.totalTokens += estimatedCost.totalTokens;
+    phaseState.totalTokens += estimatedCost.tokens.totalTokens;
 
     // Update model tracking
     const modelKey = `${provider}:${model}`;
@@ -112,11 +115,11 @@ class CostTracker {
     const modelState = state.modelTracking.get(modelKey);
     modelState.totalTurns++;
     modelState.totalCost += estimatedCost.totalCost;
-    modelState.totalTokens += estimatedCost.totalTokens;
+    modelState.totalTokens += estimatedCost.tokens.totalTokens;
 
     // Update game totals
     state.totalCost += estimatedCost.totalCost;
-    state.totalTokens += estimatedCost.totalTokens;
+    state.totalTokens += estimatedCost.tokens.totalTokens;
 
     // Check budget limits
     this._checkBudgetLimits(gameId, playerId, playerState, state);

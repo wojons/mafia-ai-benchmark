@@ -43,6 +43,12 @@ function sideWon(
  * (player_model_assignments joined to ended games). Wins are games where
  * the model's assigned role side actually won (via game events). Returns
  * [] when no assignments exist — empty is honest, fabricated is not.
+ *
+ * avgTokens/avgCost/avgLatency are filled from the real token_usage and
+ * api_calls rows the legacy adapter persists at game completion
+ * (MAF-GAP-018): per-game token/cost totals averaged over the games the
+ * model actually played, and mean per-call latency. Models with no
+ * recorded usage keep honest zeros.
  */
 function getModelComparisonFromAssignments(
   gameRepository: GameRepository,
@@ -93,23 +99,166 @@ function getModelComparisonFromAssignments(
     if (sideWon(row.role, winner)) entry.winGames.add(row.game_id);
   }
 
-  return Array.from(byModel.values()).map((e) => ({
-    provider: e.provider,
-    model: e.model,
-    gamesPlayed: e.games.size,
-    wins: e.winGames.size,
-    winRate: e.games.size > 0 ? e.winGames.size / e.games.size : 0,
-    avgTokens: 0,
-    avgCost: 0,
-    avgLatency: 0,
-  }));
+  // Real per-game token/cost totals recorded by the legacy adapter from
+  // the engine's actual API responses (MAF-GAP-018). Keyed by model, one
+  // entry per game, so the average is per-game usage.
+  const usageByModel = new Map<
+    string,
+    Array<{ gameId: string; tokens: number; cost: number }>
+  >();
+  try {
+    const usageRows = db.prepare(`
+      SELECT provider, model, game_id,
+             SUM(total_tokens) as tokens, COALESCE(SUM(cost), 0) as cost
+      FROM token_usage
+      GROUP BY provider, model, game_id
+    `).all() as Array<{
+      provider: string;
+      model: string;
+      game_id: string;
+      tokens: number;
+      cost: number;
+    }>;
+    for (const row of usageRows) {
+      if (!row.provider || !row.model) continue;
+      const key = `${row.provider}/${row.model}`;
+      let list = usageByModel.get(key);
+      if (!list) {
+        list = [];
+        usageByModel.set(key, list);
+      }
+      list.push({ gameId: row.game_id, tokens: row.tokens || 0, cost: row.cost || 0 });
+    }
+  } catch {
+    // token_usage unavailable — keep honest zeros below.
+  }
+
+  // Real mean per-call latency per model from recorded api_calls.
+  const latencyByModel = new Map<string, number>();
+  try {
+    const latencyRows = db.prepare(`
+      SELECT provider, model, AVG(latency) as avg_latency
+      FROM api_calls
+      GROUP BY provider, model
+    `).all() as Array<{
+      provider: string;
+      model: string;
+      avg_latency: number;
+    }>;
+    for (const row of latencyRows) {
+      if (!row.provider || !row.model) continue;
+      latencyByModel.set(`${row.provider}/${row.model}`, row.avg_latency || 0);
+    }
+  } catch {
+    // api_calls unavailable — keep honest zeros below.
+  }
+
+  return Array.from(byModel.values()).map((e) => {
+    const key = `${e.provider}/${e.model}`;
+    // Only count usage from games this model actually played.
+    const played = (usageByModel.get(key) || []).filter((u) => e.games.has(u.gameId));
+    const avgTokens = played.length > 0
+      ? played.reduce((sum, u) => sum + u.tokens, 0) / played.length
+      : 0;
+    const avgCost = played.length > 0
+      ? played.reduce((sum, u) => sum + u.cost, 0) / played.length
+      : 0;
+    return {
+      provider: e.provider,
+      model: e.model,
+      gamesPlayed: e.games.size,
+      wins: e.winGames.size,
+      winRate: e.games.size > 0 ? e.winGames.size / e.games.size : 0,
+      avgTokens,
+      avgCost,
+      avgLatency: latencyByModel.get(key) || 0,
+    };
+  });
 }
 
 /**
- * Get model comparison data. Uses the players/token_usage tables when they
- * have rows; otherwise derives honest per-model rows from real per-game
- * model assignments (legacy path). NEVER fabricates a provider/model that
- * did not play — returns [] when no real data exists (MAF-GAP-012).
+ * Derive honest per-model rows directly from recorded token_usage for
+ * ended games that have NO player_model_assignments rows (the default
+ * POST /api/v1/games legacy path, MAF-GAP-018). The usage data is real
+ * (recorded from actual API responses), but role/side attribution is
+ * unknown, so wins stay 0 — we never guess which side the model played.
+ * Keys already covered by the players table or assignments are skipped.
+ */
+function getModelComparisonFromUsage(
+  gameRepository: GameRepository,
+  excludeKeys: Set<string>,
+): Array<{
+  provider: string;
+  model: string;
+  gamesPlayed: number;
+  wins: number;
+  winRate: number;
+  avgTokens: number;
+  avgCost: number;
+  avgLatency: number;
+}> {
+  const db = gameRepository.getDatabase();
+  const rows = db.prepare(`
+    SELECT tu.provider, tu.model,
+           COUNT(DISTINCT tu.game_id) as games,
+           SUM(tu.total_tokens) as tokens,
+           COALESCE(SUM(tu.cost), 0) as cost
+    FROM token_usage tu
+    JOIN games g ON g.id = tu.game_id
+    WHERE g.status = 'ENDED'
+    GROUP BY tu.provider, tu.model
+  `).all() as Array<{
+    provider: string;
+    model: string;
+    games: number;
+    tokens: number;
+    cost: number;
+  }>;
+
+  const latencyByModel = new Map<string, number>();
+  try {
+    const latencyRows = db.prepare(`
+      SELECT provider, model, AVG(latency) as avg_latency
+      FROM api_calls
+      GROUP BY provider, model
+    `).all() as Array<{ provider: string; model: string; avg_latency: number }>;
+    for (const row of latencyRows) {
+      if (!row.provider || !row.model) continue;
+      latencyByModel.set(`${row.provider}/${row.model}`, row.avg_latency || 0);
+    }
+  } catch {
+    // api_calls unavailable — keep honest zeros below.
+  }
+
+  const out = [];
+  for (const row of rows) {
+    if (!row.provider || !row.model) continue;
+    const key = `${row.provider}/${row.model}`;
+    if (excludeKeys.has(key)) continue;
+    out.push({
+      provider: row.provider,
+      model: row.model,
+      gamesPlayed: row.games,
+      wins: 0,
+      winRate: 0,
+      avgTokens: row.games > 0 ? row.tokens / row.games : 0,
+      avgCost: row.games > 0 ? row.cost / row.games : 0,
+      avgLatency: latencyByModel.get(key) || 0,
+    });
+  }
+  return out;
+}
+
+/**
+ * Get model comparison data. Merges three honest sources, keyed by
+ * provider/model (MAF-GAP-018):
+ *   1. players/token_usage tables (new engine path),
+ *   2. player_model_assignments + recorded usage (legacy benchmark path),
+ *   3. recorded token_usage for ended games with no assignments (legacy
+ *      default path — usage is real, wins unattributable so kept 0).
+ * NEVER fabricates a provider/model that did not play — returns [] when
+ * no real data exists (MAF-GAP-012). Earlier sources win on key
+ * collision.
  */
 export function getModelComparison(
   gameRepository: GameRepository,
@@ -123,17 +272,51 @@ export function getModelComparison(
   avgCost: number;
   avgLatency: number;
 }> {
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  let dbStats: any[];
-  try {
-    dbStats = gameRepository.getModelStats();
-  } catch {
-    dbStats = [];
-  }
-  if (dbStats.length > 0) return dbStats;
+  const merged = new Map<
+    string,
+    {
+      provider: string;
+      model: string;
+      gamesPlayed: number;
+      wins: number;
+      winRate: number;
+      avgTokens: number;
+      avgCost: number;
+      avgLatency: number;
+    }
+  >();
+  const addRows = (
+    rows: Array<{
+      provider: string;
+      model: string;
+      gamesPlayed: number;
+      wins: number;
+      winRate: number;
+      avgTokens: number;
+      avgCost: number;
+      avgLatency: number;
+    }>,
+  ) => {
+    for (const row of rows) {
+      const key = `${row.provider}/${row.model}`;
+      if (!merged.has(key)) merged.set(key, row);
+    }
+  };
 
   try {
-    return getModelComparisonFromAssignments(gameRepository);
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    let dbStats: any[] = [];
+    try {
+      dbStats = gameRepository.getModelStats();
+    } catch {
+      dbStats = [];
+    }
+    addRows(dbStats);
+    addRows(getModelComparisonFromAssignments(gameRepository));
+    addRows(getModelComparisonFromUsage(gameRepository, new Set(merged.keys())));
+    return Array.from(merged.values()).sort(
+      (a, b) => b.gamesPlayed - a.gamesPlayed,
+    );
   } catch (e) {
     console.error(
       'StatsCollector.getModelComparison: failed to compute model comparison data',

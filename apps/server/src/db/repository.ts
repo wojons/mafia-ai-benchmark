@@ -420,7 +420,11 @@ export class GameRepository {
         COALESCE(AVG((
           SELECT AVG(tu.cost) FROM token_usage tu
           WHERE tu.game_id = p.game_id AND tu.player_id = p.id
-        )), 0) as avg_cost
+        )), 0) as avg_cost,
+        COALESCE(AVG((
+          SELECT AVG(ac.latency) FROM api_calls ac
+          WHERE ac.game_id = p.game_id AND ac.provider = p.provider AND ac.model = p.model
+        )), 0) as avg_latency
       FROM players p
       WHERE p.provider IS NOT NULL
       GROUP BY p.provider, p.model
@@ -435,7 +439,7 @@ export class GameRepository {
       winRate: (row.games_played as number) > 0 ? (row.wins as number) / (row.games_played as number) : 0,
       avgTokens: row.avg_tokens as number || 0,
       avgCost: row.avg_cost as number || 0,
-      avgLatency: 0,
+      avgLatency: row.avg_latency as number || 0,
     }));
   }
 

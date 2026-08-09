@@ -787,5 +787,58 @@ describe('LegacyGameAdapter', () => {
       ).get('g-role') as Record<string, unknown>;
       expect(pgs.role).toBe('MAFIA');
     });
+
+    it('persists usage end-to-end when the bridge done message arrives (MAF-GAP-018)', () => {
+      // Full path: bridge emits 'done' with usage aggregates collected from
+      // the engine's real trackers -> handleBridgeMessage -> persistUsage ->
+      // token_usage/api_calls/player_game_stats rows for the model played.
+      const sqliteRepo = createSqliteBackedRepository();
+      sqliteRepo.seedGame({ id: 'g-done', status: 'IN_PROGRESS' });
+      const sqliteAdapter = new LegacyGameAdapter(eventBus, sqliteRepo as any);
+      (sqliteAdapter as any).activeGames.set('g-done', {
+        gameId: 'g-done',
+        process: null,
+        eventCount: 3,
+        status: 'RUNNING',
+        startedAt: new Date(Date.now() - 5000),
+      });
+
+      (sqliteAdapter as any).handleBridgeMessage('g-done', {
+        type: 'done',
+        winner: 'TOWN',
+        totalEvents: 3,
+        dayCount: 2,
+        usage: [
+          {
+            provider: 'openai',
+            model: 'gpt-4o-mini',
+            promptTokens: 3000,
+            completionTokens: 1500,
+            totalTokens: 4500,
+            cost: 0.0036,
+            apiCalls: 12,
+            latencyMs: 1840,
+          },
+        ],
+      });
+
+      const tu = sqliteRepo.db.prepare(
+        'SELECT * FROM token_usage WHERE game_id = ?'
+      ).get('g-done') as Record<string, unknown>;
+      expect(tu).toBeDefined();
+      expect(tu.provider).toBe('openai');
+      expect(tu.model).toBe('gpt-4o-mini');
+      expect(tu.total_tokens).toBe(4500);
+      expect(tu.cost).toBeCloseTo(0.0036, 6);
+
+      const ac = sqliteRepo.db.prepare(
+        'SELECT * FROM api_calls WHERE game_id = ?'
+      ).get('g-done') as Record<string, unknown>;
+      expect(ac).toBeDefined();
+      expect(ac.latency).toBe(1840);
+
+      const state = (sqliteAdapter as any).activeGames.get('g-done');
+      expect(state.status).toBe('COMPLETED');
+    });
   });
 });

@@ -325,6 +325,175 @@ describe('StatsCollector', () => {
       expect(cmp[0].wins).toBe(0);
       expect(cmp[0].winRate).toBe(0);
     });
+
+    it('fills avgTokens/avgCost/avgLatency from real token_usage/api_calls rows (MAF-GAP-018)', () => {
+      // Legacy path: no players rows, real assignment + real usage rows as
+      // persisted by LegacyGameAdapter.persistUsage after a completed game.
+      repo.seedGame({
+        id: 'legacy-usage',
+        status: 'ENDED',
+        events: [
+          { type: 'PHASE_CHANGED', data: { winner: 'TOWN' }, phase: 'GAME_OVER' },
+        ],
+      });
+      const db = repo.db;
+      db.prepare(`
+        INSERT INTO player_model_assignments
+          (id, game_id, player_id, role, provider, model, temperature, max_tokens, priority, created_at)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      `).run('u1', 'legacy-usage', 'ALL', 'TOWN', 'providerB', 'modelB', 0.7, 500, 0, Date.now());
+
+      stats.recordTokenUsage({
+        gameId: 'legacy-usage', playerId: 'ALL', turnNumber: 0,
+        provider: 'providerB', model: 'modelB',
+        promptTokens: 3000, completionTokens: 1500, totalTokens: 4500,
+        cost: 0.0036, timestamp: Date.now(),
+      });
+      stats.recordAPICall({
+        gameId: 'legacy-usage', playerId: 'ALL',
+        provider: 'providerB', model: 'modelB',
+        endpoint: 'legacy-engine', latency: 1840, statusCode: 200,
+        timestamp: Date.now(),
+      });
+
+      const cmp = stats.getModelComparison();
+      expect(cmp).toHaveLength(1);
+      expect(cmp[0].provider).toBe('providerB');
+      expect(cmp[0].model).toBe('modelB');
+      expect(cmp[0].avgTokens).toBe(4500);
+      expect(cmp[0].avgCost).toBeCloseTo(0.0036, 6);
+      expect(cmp[0].avgLatency).toBe(1840);
+    });
+
+    it('keeps honest zeros for a model whose game has no recorded usage', () => {
+      repo.seedGame({
+        id: 'legacy-no-usage',
+        status: 'ENDED',
+        events: [
+          { type: 'PHASE_CHANGED', data: { winner: 'TOWN' }, phase: 'GAME_OVER' },
+        ],
+      });
+      repo.db.prepare(`
+        INSERT INTO player_model_assignments
+          (id, game_id, player_id, role, provider, model, temperature, max_tokens, priority, created_at)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      `).run('z1', 'legacy-no-usage', 'ALL', 'TOWN', 'providerC', 'modelC', 0.7, 500, 0, Date.now());
+
+      const cmp = stats.getModelComparison();
+      expect(cmp).toHaveLength(1);
+      expect(cmp[0].avgTokens).toBe(0);
+      expect(cmp[0].avgCost).toBe(0);
+      expect(cmp[0].avgLatency).toBe(0);
+    });
+
+    it('does not leak usage from games the model did not play into its averages', () => {
+      // Model played game A only; usage rows exist for game A AND an
+      // unrelated game B (same model string, but no assignment for B).
+      repo.seedGame({
+        id: 'played', status: 'ENDED',
+        events: [{ type: 'PHASE_CHANGED', data: { winner: 'MAFIA' }, phase: 'GAME_OVER' }],
+      });
+      repo.seedGame({
+        id: 'not-played', status: 'ENDED',
+        events: [{ type: 'PHASE_CHANGED', data: { winner: 'TOWN' }, phase: 'GAME_OVER' }],
+      });
+      repo.db.prepare(`
+        INSERT INTO player_model_assignments
+          (id, game_id, player_id, role, provider, model, temperature, max_tokens, priority, created_at)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      `).run('p1', 'played', 'ALL', 'MAFIA', 'providerA', 'modelA', 0.7, 500, 0, Date.now());
+
+      stats.recordTokenUsage({
+        gameId: 'played', playerId: 'ALL', turnNumber: 0,
+        provider: 'providerA', model: 'modelA',
+        promptTokens: 100, completionTokens: 50, totalTokens: 150,
+        cost: 0.001, timestamp: Date.now(),
+      });
+      stats.recordTokenUsage({
+        gameId: 'not-played', playerId: 'ALL', turnNumber: 0,
+        provider: 'providerA', model: 'modelA',
+        promptTokens: 9000, completionTokens: 9000, totalTokens: 18000,
+        cost: 0.5, timestamp: Date.now(),
+      });
+
+      const cmp = stats.getModelComparison();
+      expect(cmp).toHaveLength(1);
+      expect(cmp[0].gamesPlayed).toBe(1);
+      // Only the played game's usage counts — not the 18000-token outlier.
+      expect(cmp[0].avgTokens).toBe(150);
+      expect(cmp[0].avgCost).toBeCloseTo(0.001, 6);
+    });
+
+    it('surfaces recorded usage for ended games with no assignments (POST /games default path)', () => {
+      // Legacy default path: no players rows, no assignments — but the
+      // adapter persisted real usage at game completion. The model must
+      // appear with its real averages and unattributed (0) wins.
+      repo.seedGame({
+        id: 'unassigned-1', status: 'ENDED',
+        events: [{ type: 'PHASE_CHANGED', data: { winner: 'TOWN' }, phase: 'GAME_OVER' }],
+      });
+      repo.seedGame({
+        id: 'unassigned-2', status: 'ENDED',
+        events: [{ type: 'PHASE_CHANGED', data: { winner: 'MAFIA' }, phase: 'GAME_OVER' }],
+      });
+      // An IN_PROGRESS game's usage must NOT count.
+      repo.seedGame({ id: 'still-running', status: 'IN_PROGRESS' });
+
+      for (const [gameId, tokens, cost] of [['unassigned-1', 1000, 0.002], ['unassigned-2', 3000, 0.004], ['still-running', 99999, 9.99]] as const) {
+        stats.recordTokenUsage({
+          gameId, playerId: 'ALL', turnNumber: 0,
+          provider: 'openai', model: 'gpt-4o-mini',
+          promptTokens: tokens, completionTokens: 0, totalTokens: tokens,
+          cost, timestamp: Date.now(),
+        });
+      }
+
+      const cmp = stats.getModelComparison();
+      expect(cmp).toHaveLength(1);
+      expect(cmp[0].provider).toBe('openai');
+      expect(cmp[0].model).toBe('gpt-4o-mini');
+      expect(cmp[0].gamesPlayed).toBe(2);
+      expect(cmp[0].avgTokens).toBe(2000); // (1000 + 3000) / 2, running game excluded
+      expect(cmp[0].avgCost).toBeCloseTo(0.003, 6);
+      expect(cmp[0].wins).toBe(0); // role unattributable — never guessed
+    });
+
+    it('merges players-table rows with assignment-derived rows instead of short-circuiting', () => {
+      // Live-data shape: a few players rows exist (3 games, no usage) AND
+      // many assignment-based legacy games have real usage. Both must
+      // appear — previously the players rows short-circuited and hid the
+      // assignment games entirely.
+      repo.seedGame({
+        id: 'p-game',
+        players: [
+          { id: 'pp1', name: 'PP1', role: 'MAFIA', joinOrder: 0, isMafia: true,
+            provider: 'CUSTOM', model: 'gpt-4o', won: 1, tokens_used: 0, role_performance: 50 },
+        ],
+      });
+      repo.seedGame({
+        id: 'a-game', status: 'ENDED',
+        events: [{ type: 'PHASE_CHANGED', data: { winner: 'TOWN' }, phase: 'GAME_OVER' }],
+      });
+      repo.db.prepare(`
+        INSERT INTO player_model_assignments
+          (id, game_id, player_id, role, provider, model, temperature, max_tokens, priority, created_at)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      `).run('m1', 'a-game', 'ALL', 'TOWN', 'CUSTOM', 'gpt-4o-mini', 0.7, 500, 0, Date.now());
+      stats.recordTokenUsage({
+        gameId: 'a-game', playerId: 'ALL', turnNumber: 0,
+        provider: 'CUSTOM', model: 'gpt-4o-mini',
+        promptTokens: 500, completionTokens: 200, totalTokens: 700,
+        cost: 0.0007, timestamp: Date.now(),
+      });
+
+      const cmp = stats.getModelComparison();
+      expect(cmp).toHaveLength(2);
+      const assigned = cmp.find(m => m.model === 'gpt-4o-mini')!;
+      expect(assigned.avgTokens).toBe(700);
+      expect(assigned.avgCost).toBeCloseTo(0.0007, 6);
+      const playersRow = cmp.find(m => m.model === 'gpt-4o')!;
+      expect(playersRow.gamesPlayed).toBe(1);
+    });
   });
 
   // ==========================================================================
