@@ -17,39 +17,37 @@ ws://localhost:3004/ws
 
 #### Create New Game
 
-**Endpoint:** `POST /api/games`
+**Endpoint:** `POST /api/v1/games`
 
 **Request:**
 
 ```json
 {
-  "players": 10,
-  "mafia": 3,
-  "seed": 12345,
-  "mode": "scripted", // "scripted" or "llm"
-  "playerSeeds": [
-    "suspicious lawyer who questions everyone",
-    "quiet bookstore owner who observes everything",
-    "charismatic politician persuasive and ambitious",
-    "retired detective skeptical of everyone",
-    "new in town mysterious stranger",
-    "friendly neighbor who is too trusting",
-    "arrogant businessperson who thinks they're always right",
-    "wise old teacher who mediates conflicts",
-    "impulsive young activist who rushes to judgment",
-    "cynical journalist investigating the truth"
-  ]
+  "config": {
+    "numPlayers": 10,
+    "llmProvider": "openai",
+    "llmModel": "openai/gpt-4o-mini",
+    "nightDuration": 60,
+    "dayDuration": 120,
+    "votingDuration": 30,
+    "roles": [
+      { "role": "MAFIA", "count": 3 },
+      { "role": "DOCTOR", "count": 1 },
+      { "role": "SHERIFF", "count": 1 },
+      { "role": "VILLAGER", "count": 5 }
+    ]
+  },
+  "numPlayers": 10
 }
 ```
 
-**Alternative: Auto-generate personas (no seeds):**
+**Alternative: minimal body (defaults applied):**
 
 ```json
 {
-  "players": 5,
-  "mafia": 2,
-  "mode": "llm",
-  "personaMode": "auto" // Default - auto-generate interesting seeds
+  "config": {
+    "numPlayers": 5
+  }
 }
 ```
 
@@ -99,29 +97,24 @@ ws://localhost:3004/ws
     // ... other players
   ],
   "links": {
-    "self": "/api/games/game-123",
+    "self": "/api/v1/games/game-123",
     "stream": "/ws/game-123",
-    "export": "/api/games/game-123/export"
+    "export": "/api/v1/games/game-123/export"
   }
 }
 ```
 
 **Validation Rules:**
 
-- `players`: Must be even number, minimum 5, maximum 20
+- `numPlayers`: Must be between 5 and 20
 - `mafia`: Must be 20-40% of players, rounded down
 - `seed`: Optional random seed (auto-generated if not provided)
-- `mode`: Must be "scripted" or "llm"
-- `playerSeeds`: Optional array of seed descriptions (1-3 words each)
-  - Must match `players` count if provided
-  - Seeds are expanded into full personas by AI at game start
-- `personaMode`: "auto" (generate seeds), "custom" (use playerSeeds), or "none" (no personas)
 
 ---
 
 #### Get Game Status
 
-**Endpoint:** `GET /api/games/:gameId`
+**Endpoint:** `GET /api/v1/games/:gameId`
 
 **Response (200 OK):**
 
@@ -163,7 +156,7 @@ ws://localhost:3004/ws
 
 #### List Games
 
-**Endpoint:** `GET /api/games`
+**Endpoint:** `GET /api/v1/games`
 
 **Query Parameters:**
 
@@ -199,7 +192,7 @@ ws://localhost:3004/ws
 
 #### Start Game
 
-**Endpoint:** `POST /api/games/:gameId/start`
+**Endpoint:** `POST /api/v1/games/:gameId/start`
 
 **Response (200 OK):**
 
@@ -222,7 +215,7 @@ ws://localhost:3004/ws
 
 #### Pause Game
 
-**Endpoint:** `POST /api/games/:gameId/pause`
+**Endpoint:** `POST /api/v1/games/:gameId/pause`
 
 **Request:** (empty body)
 
@@ -241,7 +234,7 @@ ws://localhost:3004/ws
 
 #### Resume Game
 
-**Endpoint:** `POST /api/games/:gameId/resume`
+**Endpoint:** `POST /api/v1/games/:gameId/resume`
 
 **Response (200 OK):**
 
@@ -258,7 +251,7 @@ ws://localhost:3004/ws
 
 #### Execute Single Step
 
-**Endpoint:** `POST /api/games/:gameId/step`
+**Endpoint:** `POST /api/v1/games/:gameId/step`
 
 **Response (200 OK):**
 
@@ -280,7 +273,7 @@ ws://localhost:3004/ws
 
 #### Export Event Log
 
-**Endpoint:** `GET /api/games/:gameId/export`
+**Endpoint:** `GET /api/v1/games/:gameId/export`
 
 **Query Parameters:**
 
@@ -319,7 +312,7 @@ For `json` format:
 
 #### Get Event Stream (Polling)
 
-**Endpoint:** `GET /api/games/:gameId/events`
+**Endpoint:** `GET /api/v1/games/:gameId/events`
 
 **Query Parameters:**
 
@@ -542,7 +535,7 @@ All errors follow this response format:
 
 **REST API:**
 
-- GET/POST /api/games: 10 requests/second per IP
+- GET/POST /api/v1/games: 10 requests/second per IP
 - Other endpoints: 100 requests/minute per IP
 
 ---
