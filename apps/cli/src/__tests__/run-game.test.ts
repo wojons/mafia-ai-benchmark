@@ -55,6 +55,22 @@ describe('RunGameCommand', () => {
     expect((fetch as any).mock.calls[0][1].method).toBe('POST');
   });
 
+  it('starts a game with --yes flag (alias for --auto) via POST /api/v1/games', async () => {
+    const mockResponse = {
+      ok: true,
+      json: async () => ({ success: true, data: { gameId: 'game-789', status: 'setup' } }),
+      text: async () => '',
+    };
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(mockResponse));
+
+    await cmd.parseAsync(['node', 'test', '--yes']);
+
+    expect(fetch).toHaveBeenCalledTimes(1);
+    const url = (fetch as any).mock.calls[0][0];
+    expect(url).toContain('/api/v1/games');
+    expect((fetch as any).mock.calls[0][1].method).toBe('POST');
+  });
+
   it('exits with code 1 on server connection error', async () => {
     vi.stubGlobal('fetch', vi.fn().mockRejectedValue(new Error('fetch failed')));
     const exitSpy = vi.spyOn(process, 'exit').mockImplementation((() => {}) as any);

@@ -30,6 +30,7 @@ export class RunGameCommand extends Command {
     this.option('--provider <name>', 'LLM provider', 'openai');
     this.option('--model <name>', 'LLM model', 'openai/gpt-4o-mini');
     this.option('--auto', 'Run without confirmation', false);
+    this.option('--yes', 'Skip confirmation prompt (alias for --auto)', false);
     this.option('--watch', 'Watch game in real-time', false);
     this.option('--server <url>', 'Server base URL (default: http://localhost:3004)');
 
@@ -37,7 +38,7 @@ export class RunGameCommand extends Command {
   }
   
   async run(): Promise<void> {
-    const { config, players, provider, model, auto, watch, server } = this.opts();
+    const { config, players, provider, model, auto, yes, watch, server } = this.opts();
     
     const serverUrl = resolveServerUrl(server);
     
@@ -65,7 +66,7 @@ export class RunGameCommand extends Command {
     console.log(`  Voting:      ${chalk.yellow(gameConfig.votingDuration + 's')}`);
     console.log('');
     
-    if (!auto) {
+    if (!auto && !yes) {
       const { confirm } = await inquirer.prompt([
         {
           type: 'confirm',
