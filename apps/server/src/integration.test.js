@@ -10,7 +10,7 @@
 
 import http from 'http';
 
-const SERVER_URL = process.env.SERVER_URL || 'http://localhost:3000';
+const SERVER_URL = process.env.SERVER_URL || 'http://localhost:3004';
 const SERVER_HOST = new URL(SERVER_URL).hostname;
 const SERVER_PORT = parseInt(new URL(SERVER_URL).port) || 3000;
 

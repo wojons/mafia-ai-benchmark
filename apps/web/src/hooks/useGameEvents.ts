@@ -21,7 +21,7 @@ type EventHandler = (event: GameEvent) => void;
 
 /**
  * Hook to connect to the game WebSocket and receive real-time events.
- * Connects to ws://localhost:3000/ws and parses incoming JSON events.
+ * Connects to ws://localhost:3004/ws and parses incoming JSON events.
  * Automatically reconnects on disconnect.
  */
 export function useGameEvents(gameId: string | null) {
@@ -49,7 +49,7 @@ export function useGameEvents(gameId: string | null) {
   useEffect(() => {
     if (!gameId) return;
 
-    const wsUrl = import.meta.env.VITE_WS_URL || 'ws://localhost:3000/ws';
+    const wsUrl = import.meta.env.VITE_WS_URL || 'ws://localhost:3004/ws';
     let reconnectTimer: ReturnType<typeof setTimeout>;
     let reconnectAttempts = 0;
     const maxReconnectAttempts = 10;

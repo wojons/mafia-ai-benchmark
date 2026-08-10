@@ -10,6 +10,6 @@ describe('Web UI smoke', () => {
     const config = await import('../../vite.config');
     const proxy = config.default.server?.proxy?.['/api'];
     const target = typeof proxy === 'string' ? proxy : (proxy as { target?: string })?.target;
-    expect(target).toBe('http://localhost:3000');
+    expect(target).toBe('http://localhost:3004');
   });
 });

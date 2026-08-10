@@ -14,7 +14,7 @@
 import http from 'http';
 import { URL } from 'url';
 
-const SERVER_URL = process.env.MAFIA_SERVER_URL || 'http://localhost:3000';
+const SERVER_URL = process.env.MAFIA_SERVER_URL || 'http://localhost:3004';
 
 // Colors
 const colors = {
@@ -104,7 +104,7 @@ ${colors.white('Options:')}
   --help       Show help
 
 ${colors.white('Environment:')}
-  MAFIA_SERVER_URL   Server URL (default: http://localhost:3000)
+  MAFIA_SERVER_URL   Server URL (default: http://localhost:3004)
 
 ${colors.white('Examples:')}
   node cli.js games create --players 5
@@ -552,7 +552,7 @@ ${colors.white('Options:')}
   --help       Show help
 
 ${colors.white('Environment:')}
-  MAFIA_SERVER_URL   Server URL (default: http://localhost:3000)
+  MAFIA_SERVER_URL   Server URL (default: http://localhost:3004)
 
 ${colors.white('Examples:')}
   node cli.js games create --players 5
