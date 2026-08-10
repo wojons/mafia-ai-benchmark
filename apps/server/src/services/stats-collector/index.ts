@@ -106,6 +106,28 @@ export interface AgentStats {
   model?: string;
 }
 
+/**
+ * Empty report shape shared by generateReport()'s error fallback — keeps
+ * the response contract stable (generatedAt / summary / modelPerformance /
+ * agentStats / recommendations) even when report generation fails.
+ */
+function createEmptyReport(): Record<string, unknown> {
+  const noAgentStats: AgentStats[] = [];
+  return {
+    generatedAt: new Date().toISOString(),
+    summary: {
+      totalGames: 0,
+      activeGames: 0,
+      completedGames: 0,
+      mafiaWinRate: 0,
+      avgDuration: 0,
+    },
+    modelPerformance: [],
+    agentStats: noAgentStats,
+    recommendations: [],
+  };
+}
+
 export class StatsCollector {
   private gameRepository: GameRepository;
   
@@ -278,10 +300,78 @@ export class StatsCollector {
   }
   
   /**
-   * Get agent stats
+   * Get agent stats.
+   *
+   * MAF-GAP-028: this used to read only agent_sessions, which only the
+   * native agent-coordinator path writes — every legacy game (the entire
+   * recorded fleet) was invisible, so the benchmark report always carried
+   * an empty agentStats array. The primary source is now token_usage
+   * (written on every real billed API response by both the legacy adapter
+   * and the stats path) LEFT JOINed to api_calls aggregates for latency
+   * and success (api_calls.error IS NULL = success). agent_sessions
+   * remains as a secondary source for agents with no recorded token usage
+   * (native path); usage-derived rows win on key collision so nothing is
+   * double-counted. Returns [] when no real data exists — never
+   * fabricates.
    */
   getAgentStats(): AgentStats[] {
-    const rows = this.gameRepository.getDatabase().prepare(`
+    const db = this.gameRepository.getDatabase();
+
+    // Aggregate per (player, provider, model). token_usage and api_calls
+    // are paired 1:1 per recorded call, but aggregating each side before
+    // the LEFT JOIN keeps the sums correct even when one side has no
+    // matching rows.
+    const usageRows = db.prepare(`
+      SELECT
+        tu.player_id as agentId,
+        tu.provider as provider,
+        tu.model as model,
+        tu.executions as executions,
+        COALESCE(ac.successes, tu.executions) as successes,
+        COALESCE(ac.totalLatency, 0) as totalLatency,
+        tu.totalTokens as totalTokens,
+        tu.totalCost as totalCost
+      FROM (
+        SELECT player_id, provider, model,
+               COUNT(*) as executions,
+               SUM(total_tokens) as totalTokens,
+               COALESCE(SUM(cost), 0) as totalCost
+        FROM token_usage
+        GROUP BY player_id, provider, model
+      ) tu
+      LEFT JOIN (
+        SELECT player_id, provider, model,
+               SUM(CASE WHEN error IS NULL THEN 1 ELSE 0 END) as successes,
+               COALESCE(SUM(latency), 0) as totalLatency
+        FROM api_calls
+        GROUP BY player_id, provider, model
+      ) ac ON ac.player_id = tu.player_id
+          AND ac.provider = tu.provider
+          AND ac.model = tu.model
+    `).all() as Record<string, unknown>[];
+
+    const merged = new Map<string, AgentStats>();
+    for (const row of usageRows) {
+      // A token_usage row only exists when a real billed API response was
+      // recorded, so when api_calls has no matching rows the executions
+      // themselves are the successes (same contract as agent_sessions:
+      // response IS NOT NULL).
+      merged.set(`${row.agentId}/${row.provider}/${row.model}`, {
+        agentId: row.agentId as string,
+        executions: row.executions as number,
+        successes: row.successes as number,
+        totalLatency: row.totalLatency as number,
+        totalTokens: row.totalTokens as number,
+        totalCost: row.totalCost as number,
+        provider: row.provider as string | undefined,
+        model: row.model as string | undefined,
+      });
+    }
+
+    // Secondary source: agent_sessions (native agent-coordinator path)
+    // for agents that have no recorded token usage. Usage rows win on key
+    // collision so an agent recorded in both tables is not double-counted.
+    const sessionRows = db.prepare(`
       SELECT 
         player_id as agentId,
         COUNT(*) as executions,
@@ -294,17 +384,26 @@ export class StatsCollector {
       FROM agent_sessions
       GROUP BY player_id, provider, model
     `).all() as Record<string, unknown>[];
-    
-    return rows.map(row => ({
-      agentId: row.agentId as string,
-      executions: row.executions as number,
-      successes: row.successes as number,
-      totalLatency: row.totalLatency as number,
-      totalTokens: row.totalTokens as number,
-      totalCost: row.totalCost as number,
-      provider: row.provider as string | undefined,
-      model: row.model as string | undefined,
-    }));
+
+    for (const row of sessionRows) {
+      const key = `${row.agentId}/${row.provider}/${row.model}`;
+      if (merged.has(key)) continue;
+      merged.set(key, {
+        agentId: row.agentId as string,
+        executions: row.executions as number,
+        successes: row.successes as number,
+        totalLatency: row.totalLatency as number,
+        totalTokens: row.totalTokens as number,
+        totalCost: row.totalCost as number,
+        provider: row.provider as string | undefined,
+        model: row.model as string | undefined,
+      });
+    }
+
+    // Deterministic order (most active agents first) so the report's
+    // top-10 slice is meaningful.
+    return Array.from(merged.values())
+      .sort((a, b) => b.executions - a.executions || b.totalCost - a.totalCost);
   }
   
   // ==================== GAME STATISTICS ====================
@@ -456,20 +555,13 @@ export class StatsCollector {
       return report;
     } catch (error) {
       const msg = error instanceof Error ? error.message : String(error);
+      // Same response contract as the success path (MAF-GAP-028): built
+      // from the shared empty-report factory so the fallback can never
+      // drift from the real shape.
       return {
-        generatedAt: new Date().toISOString(),
+        ...createEmptyReport(),
         error: 'Failed to generate report',
         message: msg,
-        summary: {
-          totalGames: 0,
-          activeGames: 0,
-          completedGames: 0,
-          mafiaWinRate: 0,
-          avgDuration: 0,
-        },
-        modelPerformance: [],
-        agentStats: [],
-        recommendations: [],
       };
     }
   }

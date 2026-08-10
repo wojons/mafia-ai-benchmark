@@ -160,6 +160,124 @@ describe('StatsCollector', () => {
       expect(agentStats[0].provider).toBe('OPENAI');
       expect(agentStats[0].model).toBe('gpt-4');
     });
+
+    it('aggregates from token_usage + api_calls when agent_sessions is empty (MAF-GAP-028)', () => {
+      // Legacy path shape: no agent_sessions rows at all — token_usage and
+      // api_calls (written by LegacyGameAdapter.persistUsage) are the only
+      // real data sources. token_usage/api_calls have FK to games.id.
+      repo.seedGame({ id: 'g1' });
+      repo.seedGame({ id: 'g2' });
+      // p1 (OPENAI/gpt-4): two recorded calls across two games, one errored.
+      repo.insertTokenUsage({ gameId: 'g1', playerId: 'p1', turnNumber: 1,
+        provider: 'OPENAI', model: 'gpt-4', promptTokens: 100, completionTokens: 50,
+        totalTokens: 150, cost: 0.01, timestamp: Date.now() });
+      repo.insertTokenUsage({ gameId: 'g2', playerId: 'p1', turnNumber: 1,
+        provider: 'OPENAI', model: 'gpt-4', promptTokens: 200, completionTokens: 100,
+        totalTokens: 300, cost: 0.02, timestamp: Date.now() });
+      repo.insertApiCall({ gameId: 'g1', playerId: 'p1', provider: 'OPENAI', model: 'gpt-4',
+        endpoint: '/chat', latency: 120, timestamp: Date.now() });
+      repo.insertApiCall({ gameId: 'g2', playerId: 'p1', provider: 'OPENAI', model: 'gpt-4',
+        endpoint: '/chat', latency: 180, error: 'timeout', timestamp: Date.now() });
+      // p2 (ANTHROPIC/claude-3): one clean call.
+      repo.insertTokenUsage({ gameId: 'g1', playerId: 'p2', turnNumber: 1,
+        provider: 'ANTHROPIC', model: 'claude-3', promptTokens: 50, completionTokens: 25,
+        totalTokens: 75, cost: 0.005, timestamp: Date.now() });
+      repo.insertApiCall({ gameId: 'g1', playerId: 'p2', provider: 'ANTHROPIC', model: 'claude-3',
+        endpoint: '/chat', latency: 90, timestamp: Date.now() });
+
+      const agentStats = stats.getAgentStats();
+      expect(agentStats).toHaveLength(2);
+      const p1 = agentStats.find(a => a.agentId === 'p1')!;
+      expect(p1.executions).toBe(2);
+      expect(p1.successes).toBe(1); // one of the two api_calls rows has an error
+      expect(p1.totalLatency).toBe(300);
+      expect(p1.totalTokens).toBe(450);
+      expect(p1.totalCost).toBeCloseTo(0.03, 5);
+      expect(p1.provider).toBe('OPENAI');
+      expect(p1.model).toBe('gpt-4');
+      const p2 = agentStats.find(a => a.agentId === 'p2')!;
+      expect(p2.executions).toBe(1);
+      expect(p2.successes).toBe(1);
+      expect(p2.totalLatency).toBe(90);
+      expect(p2.totalTokens).toBe(75);
+      expect(p2.totalCost).toBeCloseTo(0.005, 5);
+    });
+
+    it('counts recorded usage as successful when api_calls rows are missing (LEFT JOIN keeps the agent)', () => {
+      repo.seedGame({ id: 'g' });
+      repo.insertTokenUsage({ gameId: 'g', playerId: 'p1', turnNumber: 1,
+        provider: 'OPENAI', model: 'gpt-4', promptTokens: 80, completionTokens: 20,
+        totalTokens: 100, cost: 0.001, timestamp: Date.now() });
+
+      const agentStats = stats.getAgentStats();
+      expect(agentStats).toHaveLength(1);
+      expect(agentStats[0].executions).toBe(1);
+      // A token_usage row is only written for a real billed response, so
+      // the execution is a success even without an api_calls row.
+      expect(agentStats[0].successes).toBe(1);
+      expect(agentStats[0].totalLatency).toBe(0);
+      expect(agentStats[0].totalTokens).toBe(100);
+    });
+
+    it('merges agent_sessions rows for agents with no recorded token usage (native path)', () => {
+      repo.seedGame({ id: 'g1' });
+      // Usage-covered agent (legacy path).
+      repo.insertTokenUsage({ gameId: 'g1', playerId: 'pLegacy', turnNumber: 0,
+        provider: 'CUSTOM', model: 'openai', promptTokens: 400, completionTokens: 100,
+        totalTokens: 500, cost: 0.002, timestamp: Date.now() });
+      repo.insertApiCall({ gameId: 'g1', playerId: 'pLegacy', provider: 'CUSTOM', model: 'openai',
+        endpoint: 'legacy-engine', latency: 800, timestamp: Date.now() });
+      // Sessions-only agent (native path writes agent_sessions only).
+      stats.recordAgentSession({
+        gameId: 'g1', playerId: 'pNative', turnNumber: 1, phase: 'DAY_DISCUSSION',
+        prompt: 'hi', response: 'ok', think: 't', says: 's',
+        tokensUsed: 10, promptTokens: 5, completionTokens: 5,
+        latency: 100, cost: 0.001, provider: 'OPENAI', model: 'gpt-4', timestamp: Date.now(),
+      });
+      stats.recordAgentSession({
+        gameId: 'g1', playerId: 'pNative', turnNumber: 2, phase: 'DAY_DISCUSSION',
+        prompt: 'hi', response: 'ok', think: 't', says: 's',
+        tokensUsed: 20, promptTokens: 10, completionTokens: 10,
+        latency: 150, cost: 0.002, provider: 'OPENAI', model: 'gpt-4', timestamp: Date.now(),
+      });
+
+      const agentStats = stats.getAgentStats();
+      expect(agentStats).toHaveLength(2);
+      // Most active agent first (2 executions > 1).
+      expect(agentStats[0].agentId).toBe('pNative');
+      expect(agentStats[0].executions).toBe(2);
+      expect(agentStats[0].totalTokens).toBe(30);
+      const legacy = agentStats.find(a => a.agentId === 'pLegacy')!;
+      expect(legacy.executions).toBe(1);
+      expect(legacy.successes).toBe(1);
+      expect(legacy.totalLatency).toBe(800);
+      expect(legacy.totalTokens).toBe(500);
+    });
+
+    it('usage-derived rows win over agent_sessions on key collision (no double count)', () => {
+      repo.seedGame({ id: 'g1' });
+      repo.insertTokenUsage({ gameId: 'g1', playerId: 'p1', turnNumber: 1,
+        provider: 'OPENAI', model: 'gpt-4', promptTokens: 100, completionTokens: 50,
+        totalTokens: 150, cost: 0.01, timestamp: Date.now() });
+      repo.insertApiCall({ gameId: 'g1', playerId: 'p1', provider: 'OPENAI', model: 'gpt-4',
+        endpoint: '/chat', latency: 120, timestamp: Date.now() });
+      // Same (player, provider, model) key also present in agent_sessions.
+      stats.recordAgentSession({
+        gameId: 'g1', playerId: 'p1', turnNumber: 1, phase: 'DAY_DISCUSSION',
+        prompt: 'hi', response: 'ok', think: 't', says: 's',
+        tokensUsed: 10, promptTokens: 5, completionTokens: 5,
+        latency: 100, cost: 0.001, provider: 'OPENAI', model: 'gpt-4', timestamp: Date.now(),
+      });
+
+      const agentStats = stats.getAgentStats();
+      expect(agentStats).toHaveLength(1);
+      expect(agentStats[0].executions).toBe(1); // NOT 2 — the usage row wins
+      expect(agentStats[0].totalTokens).toBe(150);
+    });
+
+    it('returns [] when no usage, calls, or sessions exist (no fabrication)', () => {
+      expect(stats.getAgentStats()).toEqual([]);
+    });
   });
 
   // ==========================================================================
@@ -727,6 +845,25 @@ describe('StatsCollector', () => {
       expect(summary.mafiaWinRate).toBe(1);
     });
 
+    it('generateReport populates agentStats from real recorded usage (MAF-GAP-028)', () => {
+      repo.seedGame({ id: 'g1', status: 'ENDED', winner: 'TOWN', duration: 30_000 });
+      repo.insertTokenUsage({ gameId: 'g1', playerId: 'p1', turnNumber: 1,
+        provider: 'OPENAI', model: 'gpt-4', promptTokens: 100, completionTokens: 50,
+        totalTokens: 150, cost: 0.01, timestamp: Date.now() });
+      repo.insertApiCall({ gameId: 'g1', playerId: 'p1', provider: 'OPENAI', model: 'gpt-4',
+        endpoint: '/chat', latency: 120, timestamp: Date.now() });
+
+      const report = stats.generateReport();
+      const agentStats = report.agentStats as any[];
+      expect(agentStats.length).toBeGreaterThan(0);
+      expect(agentStats[0].agentId).toBe('p1');
+      expect(agentStats[0].executions).toBe(1);
+      expect(agentStats[0].successes).toBe(1);
+      expect(agentStats[0].totalTokens).toBe(150);
+      expect(agentStats[0].provider).toBe('OPENAI');
+      expect(agentStats[0].model).toBe('gpt-4');
+    });
+
     it('generateReport includes per-game details when gameId is provided', () => {
       repo.seedGame({
         id: 'g1', status: 'ENDED', winner: 'TOWN', duration: 30_000,
@@ -754,6 +891,11 @@ describe('StatsCollector', () => {
       const summary = report.summary as any;
       expect(summary.totalGames).toBe(0);
       expect((report as any).error).toBe('Failed to generate report');
+      // The response contract stays stable on the error path (MAF-GAP-028).
+      expect(report.generatedAt).toBeDefined();
+      expect(report.modelPerformance).toEqual([]);
+      expect(report.agentStats).toEqual([]);
+      expect(report.recommendations).toEqual([]);
     });
 
     it('exportJSON returns valid JSON containing the report', () => {
