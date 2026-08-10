@@ -426,7 +426,7 @@ export class GameRepository {
         COALESCE(AVG((
           SELECT AVG(ac.latency) FROM api_calls ac
           WHERE ac.game_id = p.game_id AND ac.provider = p.provider AND ac.model = p.model
-            AND ac.latency > 0
+            AND ac.latency >= 50
         )), 0) as avg_latency
       FROM players p
       WHERE p.provider IS NOT NULL

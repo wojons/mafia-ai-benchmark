@@ -616,6 +616,30 @@ describe('StatsCollector', () => {
       // rows are latency 0/NULL and were dragging the mean to ~4ms.
       expect(rows[0].avgLatency).toBeCloseTo(618, 5);
     });
+
+    it('excludes physically-impossible sub-50ms latencies from avgLatency (MAF-GAP-026 floor)', () => {
+      // CUSTOM/openai legacy-engine rows carry 23-49ms values that are
+      // impossible for a billed LLM call (the API contract treats latency as
+      // ms; real calls measure 600ms+). The 50ms floor keeps the mean honest.
+      repo.seedGame({
+        id: 'lat2',
+        players: [
+          { id: 'lp2', name: 'LP2', role: 'MAFIA', joinOrder: 0, isMafia: true,
+            provider: 'CUSTOM', model: 'openai', won: 1, tokens_used: 100 },
+        ],
+      });
+      for (const latency of [23, 30, 700, 800]) {
+        repo.insertApiCall({
+          gameId: 'lat2', playerId: 'lp2', provider: 'CUSTOM', model: 'openai',
+          endpoint: 'legacy-engine', latency, timestamp: Date.now(),
+        });
+      }
+
+      const rows = repo.getModelStats();
+      expect(rows).toHaveLength(1);
+      // Sub-50ms rows dropped: mean(700, 800) = 750.
+      expect(rows[0].avgLatency).toBeCloseTo(750, 5);
+    });
   });
 
   // ==========================================================================
