@@ -57,7 +57,9 @@ const httpServer = http.createServer((req, res) => {
   });
 });
 
-const HTTP_PORT = 3000;
+// Direct-run port: default 3004 (host :3000 is DuckBrain's on fleet hosts);
+// override with PORT=3000 or any other port when :3004 is taken.
+const HTTP_PORT = Number(process.env.PORT) || 3004;
 httpServer.listen(HTTP_PORT, () => {
   console.log(`\n` + "=".repeat(70));
   console.log(`🎮 Mafia AI - Integrated Demo`);

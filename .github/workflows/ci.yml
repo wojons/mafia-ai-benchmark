@@ -80,6 +80,11 @@ jobs:
 
           # Run tests
           echo "Running vitest..."
+          # The suite's BASE_URL default is :3004 (compose host port); CI's own
+          # source server runs on :3000, so pin TEST_BASE_URL for the server package.
+          if [ "${{ matrix.package }}" = "apps/server" ]; then
+            export TEST_BASE_URL=http://localhost:3000
+          fi
           npx vitest run
           TEST_EXIT=$?
           echo "vitest exit code: $TEST_EXIT"

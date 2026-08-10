@@ -1,14 +1,15 @@
 import { describe, it, expect } from 'vitest';
 
 // Host port 3000 is owned by DuckBrain's HTTP server on fleet hosts; the
-// mafia compose stack exposes the server on :3004 (docker "3004:3000").
-// CI starts its own source server on :3000, so the default stays :3000.
-const BASE_URL = process.env.TEST_BASE_URL || 'http://localhost:3000';
+// mafia compose stack exposes the server on :3004 (docker "3004:3000") and
+// direct runs should use PORT=3004. CI starts its own source server on :3000
+// and pins TEST_BASE_URL to that host port (see .github/workflows/ci.yml).
+const BASE_URL = process.env.TEST_BASE_URL || 'http://localhost:3004';
 
 /**
  * Pre-test probe: these integration tests require a LIVE mafia server. Fresh
  * contributors running `pnpm test` from the root often have no server up, and
- * on fleet hosts localhost:3000 is owned by DuckBrain's HTTP daemon (its
+ * on fleet hosts the loopback port 3000 is owned by DuckBrain's HTTP daemon (its
  * /health returns 200 but has no `memory` field), which used to surface as 8
  * confusing red failures. The suite is skipped with a clear message unless the
  * resolved base URL is a reachable mafia server (GET /health with a `memory`

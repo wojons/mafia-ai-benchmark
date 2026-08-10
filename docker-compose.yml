@@ -13,6 +13,10 @@ services:
       - "3004:3000"
     env_file:
       - .env
+    environment:
+      # Container-internal port stays 3000 regardless of .env PORT (which may
+      # be 3004 for direct runs on hosts where :3000 is DuckBrain's).
+      PORT: "3000"
     volumes:
       - data:/app/data
     restart: unless-stopped

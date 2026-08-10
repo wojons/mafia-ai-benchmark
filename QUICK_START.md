@@ -45,6 +45,13 @@ pnpm run server
 pnpm --filter @mafia/cli dev -- run-game --players 5
 ```
 
+> **Note — direct-run port:** `pnpm run server` listens on `PORT` (default
+> `3000`). On hosts where port 3000 is already taken (e.g. fleet hosts where
+> DuckBrain's HTTP daemon owns `:3000`), run with `PORT=3004 pnpm run server`
+> and the server is reachable at `http://localhost:3004` — the same host port
+> the compose stack exposes (`3004:3000`). The compose stack itself keeps the
+> container-internal port at 3000 regardless of `.env`.
+
 ### Option B: Interactive CLI
 
 ```bash
@@ -136,7 +143,7 @@ The game will:
 > none is reachable they are **skipped with a clear message** instead of
 > failing. To run them, start the server (`pnpm run server`) and point the
 > tests at it with `TEST_BASE_URL=http://localhost:3004 pnpm test` (the
-> compose host port; the default probe URL is `http://localhost:3000`).
+> compose host port; the default probe URL is `http://localhost:3004`).
 
 ### CLI Commands (mafiactl)
 
@@ -195,8 +202,8 @@ Create a `.env` file in the project root:
 OPENAI_API_KEY=sk-or-v1-your-key-here
 
 # Optional
-PORT=3000                # Container server port (default: 3000; exposed on host as :3004)
-TEST_BASE_URL=http://localhost:3004  # Where API integration tests look for the server (default: http://localhost:3000)
+PORT=3004                # Direct-run server port (default: 3000; compose exposes the container-internal :3000 on host :3004)
+TEST_BASE_URL=http://localhost:3004  # Where API integration tests look for the server (default: http://localhost:3004)
 DATABASE_PATH=./data/games.db  # SQLite path
 LOG_LEVEL=info           # debug, info, warn, error
 ```
