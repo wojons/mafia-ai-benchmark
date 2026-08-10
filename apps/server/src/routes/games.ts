@@ -7,6 +7,7 @@
 import { Router, Request, Response } from 'express';
 import { ServerContext } from '../index.js';
 import { LegacyGameAdapter } from '../services/legacy-game-adapter.js';
+import { enrichPlayersWithAttribution } from '../services/player-attribution.js';
 import type { Player } from '@mafia/shared/types';
 
 // Store for SSE connections per game (shared across game routes)
@@ -354,6 +355,16 @@ export function createGamesRouter(
             const players =
               LegacyGameAdapter.extractPlayersFromEvents(events).map(toApiPlayer);
 
+            // MAF-GAP-029: attach per-player provider/model (+ usage for
+            // completed games). The route maps RUNNING -> IN_PROGRESS and
+            // everything else -> ENDED, so completion is !RUNNING.
+            const enriched = enrichPlayersWithAttribution(
+              gameRepository,
+              req.params.gameId,
+              players,
+              state.status !== 'RUNNING',
+            );
+
             return res.json({
               success: true,
               data: {
@@ -363,7 +374,7 @@ export function createGamesRouter(
                 config: { engineType: 'legacy' },
                 eventCount: state.eventCount,
                 startedAt: state.startedAt,
-                players,
+                players: enriched,
               },
             });
           }
@@ -377,6 +388,14 @@ export function createGamesRouter(
         game.players =
           LegacyGameAdapter.extractPlayersFromEvents(game.events).map(toApiPlayer);
       }
+
+      // MAF-GAP-029: attach per-player provider/model (+ usage when ENDED).
+      game.players = enrichPlayersWithAttribution(
+        gameRepository,
+        game.id,
+        game.players,
+        game.status === 'ENDED',
+      );
 
       res.json({
         success: true,

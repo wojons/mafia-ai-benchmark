@@ -14,6 +14,19 @@ export interface Player {
   isAlive: boolean;
   isMafia: boolean;
   joinOrder: number;
+  /**
+   * Per-player model attribution (MAF-GAP-029). Populated by the game
+   * detail route from real player_model_assignments / token_usage /
+   * api_calls rows — never fabricated. provider/model are absent when the
+   * player's model cannot be determined; tokensUsed/apiCalls are only
+   * attached for completed games (0 means no attributable recorded usage,
+   * e.g. multiple players shared one model in a legacy game and the
+   * per-model aggregate cannot be split honestly).
+   */
+  provider?: string;
+  model?: string;
+  tokensUsed?: number;
+  apiCalls?: number;
 }
 
 export type RoleType = 
