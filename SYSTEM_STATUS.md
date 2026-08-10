@@ -6,7 +6,7 @@
 
 | Category | Feature | Status | Tests |
 |----------|---------|--------|-------|
-| **HTTP API** | All REST endpoints | ✅ Working | 695 total (695 pass) ✅ |
+| **HTTP API** | All REST endpoints | ✅ Working | 716 total (708 pass, 8 require server) ✅ |
 | **CLI** | All 15 commands | ✅ Working | ✅ Manual tests pass |
 | **Game Management** | Create, start, stop, add players | ✅ Working | ✅ Integration tests |
 | **Model Configuration** | Player & role model settings | ✅ Working | ✅ |
@@ -19,11 +19,11 @@
 ### 🧪 Test Results
 
 ```
-✅ Server Tests: 177/177 PASSING (apps/server)
-✅ CLI Tests: 82/82 PASSING (apps/cli)
+✅ Server Tests: 195/195 PASSING (apps/server)
+✅ CLI Tests: 85/85 PASSING (apps/cli)
 ✅ Shared Tests: 407/407 PASSING (packages/shared)
 ✅ Web Tests: 29/29 PASSING (apps/web)
-✅ Total: 695 tests (695 pass; 8 server integration tests require a running server)
+✅ Total: 716 tests (708 pass; 8 server integration tests require a running server)
 ✅ CLI Commands: All commands working
 ✅ Server: Live at http://localhost:3004, 150+ games tracked
 ```

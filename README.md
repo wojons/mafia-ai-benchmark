@@ -13,7 +13,7 @@ An advanced AI-powered Mafia game simulation that benchmarks different AI models
 - **☀️ Day Phase**: Discussion, voting, lynching
 - **📊 Event Sourcing**: Complete game audit trail with visibility levels
 - **💰 Cost Tracking**: Track API costs per game and player
-- **🧪 695 Tests**: Comprehensive test coverage (407 shared, 190 server, 84 CLI, 29 web)
+- **🧪 716 Tests**: Comprehensive test coverage (407 shared, 195 server, 85 CLI, 29 web)
 
 ## 🚀 Quick Start
 
@@ -183,16 +183,16 @@ See **[specs/correct-night-flow.md](specs/correct-night-flow.md)** for complete 
 | Command | Purpose | When to Use |
 | --- | --- | --- |
 | `pnpm --filter @mafia/server dev` | **Start server** | Run REST API + WebSocket |
-| `pnpm --filter @mafia/server test:run` | **Run tests** | Verify server tests (39) |
+| `pnpm --filter @mafia/server test:run` | **Run tests** | Verify server tests (195) |
 
 ### Root Commands
 
 ```bash
 pnpm install              # Install all dependencies
 pnpm build                # Build all packages (4/4)
-pnpm --filter @mafia/server test:run    # Server tests (39)
-pnpm --filter @mafia/shared test:run    # Shared tests (150)
-pnpm --filter @mafia/web test:run       # Web tests (2)
+pnpm --filter @mafia/server test:run    # Server tests (195)
+pnpm --filter @mafia/shared test:run    # Shared tests (407)
+pnpm --filter @mafia/web test:run       # Web tests (29)
 ```
 
 ## 🎭 Roles
@@ -222,7 +222,7 @@ mafia-ai-benchmark/
 │   │   ├── events/              ✅ Event definitions
 │   │   ├── providers/           ✅ AI provider configs
 │   │   └── persona/             ✅ Persona generation
-│   └── __tests__/               ✅ 286 tests
+│   └── __tests__/               ✅ 407 tests
 ├── specs/                       ✅ Technical specifications
 ├── pnpm-workspace.yaml          ✅ Monorepo workspace config
 ├── turbo.json                   ✅ Build pipeline config
@@ -233,12 +233,12 @@ mafia-ai-benchmark/
 
 ```bash
 # All tests from root
-pnpm --filter @mafia/server test:run   # Server (39 tests)
-pnpm --filter @mafia/shared test:run   # Shared (150 tests)
-pnpm --filter @mafia/web test:run      # Web (2 tests)
+pnpm --filter @mafia/server test:run   # Server (195 tests)
+pnpm --filter @mafia/shared test:run   # Shared (407 tests)
+pnpm --filter @mafia/web test:run      # Web (29 tests)
 ```
 
-**Test Coverage**: 286 tests (Shared 150, Server 114, CLI 20, Web 2)
+**Test Coverage**: 716 tests (Shared 407, Server 195, CLI 85, Web 29)
 
 ### Game Events
 
@@ -320,7 +320,7 @@ MIT License - see LICENSE file
 
 ---
 
-**Status**: ✅ Production Ready | ✅ Fully Documented | ✅ 695 Tests (687 pass, 8 integration require a running server)
+**Status**: ✅ Production Ready | ✅ Fully Documented | ✅ 716 Tests (708 pass, 8 integration require a running server)
 
 **Quick Start**: See [QUICK_START.md](QUICK_START.md) for 5-minute setup guide!
 
