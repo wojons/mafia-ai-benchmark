@@ -67,7 +67,7 @@ export class StatsCommand extends Command {
       console.log(`  Completed Games:   ${chalk.gray(stats.completedGames.toString())}`);
       console.log(`  Mafia Wins:        ${chalk.red(stats.mafiaWins.toString())}`);
       console.log(`  Town Wins:         ${chalk.blue(stats.townWins.toString())}`);
-      console.log(`  Avg Duration:      ${chalk.yellow(this.formatDuration(stats.avgDuration))}`);
+      console.log(`  Avg Duration:      ${chalk.yellow(this.formatDuration(stats.avgDuration * 1000))}`);
       
       // Mafia win rate
       if (stats.completedGames > 0) {

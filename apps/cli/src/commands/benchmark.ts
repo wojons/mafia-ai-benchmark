@@ -330,7 +330,8 @@ export class BenchmarkCommand extends Command {
     }
     const avgDuration = summary.avgDuration ?? 0;
     if (avgDuration > 0) {
-      console.log(`  Avg Time/Game:    ${chalk.yellow(this.formatDuration(avgDuration))}`);
+      // The report's avgDuration is in SECONDS (MAF-GAP-026); formatDuration takes ms.
+      console.log(`  Avg Time/Game:    ${chalk.yellow(this.formatDuration(avgDuration * 1000))}`);
     } else {
       console.log(`  Avg Time/Game:    ${chalk.gray('n/a')}`);
     }

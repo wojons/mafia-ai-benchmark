@@ -211,7 +211,7 @@ const StatsPanel: React.FC = () => {
         <div className="stat-card purple">
           <div className="stat-icon">⏱️</div>
           <div className="stat-content">
-            <span className="stat-value">{formatDuration(s.avgDuration)}</span>
+            <span className="stat-value">{formatDuration(s.avgDuration * 1000)}</span>
             <span className="stat-label">Avg Duration</span>
           </div>
         </div>

@@ -187,7 +187,22 @@ describe('StatsCollector', () => {
       expect(s.activeGames).toBe(1);
       expect(s.mafiaWins).toBe(1);
       expect(s.townWins).toBe(1);
-      expect(s.avgDuration).toBe(90_000); // avg(60000, 120000)
+      // avg(60000ms, 120000ms) = 90000ms -> 90s (MAF-GAP-026: seconds contract)
+      expect(s.avgDuration).toBe(90);
+    });
+
+    it('returns avgDuration in seconds and excludes in-progress games (MAF-GAP-026)', () => {
+      repo.seedGame({ id: 'dur1', status: 'ENDED', winner: 'MAFIA', duration: 249_053 });
+      repo.seedGame({ id: 'dur2', status: 'ENDED', winner: 'TOWN', duration: 120_000 });
+      // A running game with a (hypothetical) duration must NOT skew the mean.
+      repo.seedGame({ id: 'dur3', status: 'IN_PROGRESS', duration: 999_999_999 });
+
+      const s = stats.getGameStats();
+      // avg(249053, 120000) ms = 184526.5 ms -> 184.5 s -> 185 s (rounded).
+      // Without the ENDED filter the 999999999 ms row would dominate.
+      expect(s.avgDuration).toBe(185);
+      expect(s.completedGames).toBe(2);
+      expect(s.activeGames).toBe(1);
     });
 
     it('returns zeroes when no games exist', () => {
@@ -494,6 +509,54 @@ describe('StatsCollector', () => {
       const playersRow = cmp.find(m => m.model === 'gpt-4o')!;
       expect(playersRow.gamesPlayed).toBe(1);
     });
+
+    it('excludes zero-latency api_calls from avgLatency for assignment-derived models (MAF-GAP-026)', () => {
+      // Legacy benchmark path: no players rows — the model is known only via
+      // player_model_assignments. Its latency must come from non-zero calls.
+      repo.seedGame({
+        id: 'leg1', status: 'ENDED',
+        events: [{ type: 'PHASE_CHANGED', data: { winner: 'TOWN' }, phase: 'GAME_OVER' }],
+      });
+      repo.db.prepare(`
+        INSERT INTO player_model_assignments
+          (id, game_id, player_id, role, provider, model, temperature, max_tokens, priority, created_at)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      `).run('leg1a', 'leg1', 'ALL', 'TOWN', 'CUSTOM', 'legacy-model', 0.7, 500, 0, Date.now());
+      for (const latency of [0, 0, 800]) {
+        repo.insertApiCall({
+          gameId: 'leg1', playerId: 'ALL', provider: 'CUSTOM', model: 'legacy-model',
+          endpoint: '/v1/chat/completions', latency, timestamp: Date.now(),
+        });
+      }
+
+      const cmp = stats.getModelComparison();
+      const row = cmp.find(m => m.model === 'legacy-model')!;
+      expect(row).toBeDefined();
+      // Mean of non-zero latencies only (800) — zeros no longer drag it down.
+      expect(row.avgLatency).toBeCloseTo(800, 5);
+    });
+
+    it('excludes zero-latency api_calls from avgLatency for usage-derived models (MAF-GAP-026)', () => {
+      // Legacy default path: no players rows, no assignments — usage only.
+      repo.seedGame({ id: 'u-lat', status: 'ENDED' });
+      stats.recordTokenUsage({
+        gameId: 'u-lat', playerId: 'ALL', turnNumber: 0,
+        provider: 'openai', model: 'gpt-4o-mini',
+        promptTokens: 100, completionTokens: 50, totalTokens: 150,
+        cost: 0.001, timestamp: Date.now(),
+      });
+      for (const latency of [0, 300, 300]) {
+        repo.insertApiCall({
+          gameId: 'u-lat', playerId: 'ALL', provider: 'openai', model: 'gpt-4o-mini',
+          endpoint: '/v1/chat/completions', latency, timestamp: Date.now(),
+        });
+      }
+
+      const cmp = stats.getModelComparison();
+      const row = cmp.find(m => m.model === 'gpt-4o-mini')!;
+      expect(row).toBeDefined();
+      expect(row.avgLatency).toBeCloseTo(300, 5); // mean(300, 300) — zero dropped
+    });
   });
 
   // ==========================================================================
@@ -530,6 +593,28 @@ describe('StatsCollector', () => {
     it('returns [] without throwing when the players table is empty', () => {
       expect(() => repo.getModelStats()).not.toThrow();
       expect(repo.getModelStats()).toEqual([]);
+    });
+
+    it('excludes zero/null latency rows from avgLatency (MAF-GAP-026)', () => {
+      repo.seedGame({
+        id: 'lat1',
+        players: [
+          { id: 'lp1', name: 'LP1', role: 'MAFIA', joinOrder: 0, isMafia: true,
+            provider: 'OPENAI', model: 'gpt-4', won: 1, tokens_used: 100 },
+        ],
+      });
+      for (const latency of [0, 0, 618, 618]) {
+        repo.insertApiCall({
+          gameId: 'lat1', playerId: 'lp1', provider: 'OPENAI', model: 'gpt-4',
+          endpoint: '/v1/chat/completions', latency, timestamp: Date.now(),
+        });
+      }
+
+      const rows = repo.getModelStats();
+      expect(rows).toHaveLength(1);
+      // Mean of the non-zero latencies only (618, 618) — 79.6% of real api_calls
+      // rows are latency 0/NULL and were dragging the mean to ~4ms.
+      expect(rows[0].avgLatency).toBeCloseTo(618, 5);
     });
   });
 

@@ -139,6 +139,7 @@ function getModelComparisonFromAssignments(
     const latencyRows = db.prepare(`
       SELECT provider, model, AVG(latency) as avg_latency
       FROM api_calls
+      WHERE latency > 0
       GROUP BY provider, model
     `).all() as Array<{
       provider: string;
@@ -220,6 +221,7 @@ function getModelComparisonFromUsage(
     const latencyRows = db.prepare(`
       SELECT provider, model, AVG(latency) as avg_latency
       FROM api_calls
+      WHERE latency > 0
       GROUP BY provider, model
     `).all() as Array<{ provider: string; model: string; avg_latency: number }>;
     for (const row of latencyRows) {
@@ -483,6 +485,7 @@ export function getCompareReport(
         COALESCE(AVG(ac.latency), 0) as avg_latency
       FROM api_calls ac
       WHERE ac.provider IS NOT NULL AND ac.model IS NOT NULL
+        AND ac.latency > 0
     `;
   const latencyParams: string[] = [];
   if (modelList) {

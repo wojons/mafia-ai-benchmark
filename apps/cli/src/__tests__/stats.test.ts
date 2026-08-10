@@ -12,7 +12,7 @@ describe('StatsCommand', () => {
     completedGames: 145,
     mafiaWins: 72,
     townWins: 73,
-    avgDuration: 1800000,
+    avgDuration: 1800, // seconds per the API contract (MAF-GAP-026)
     totalTokens: 50000000,
     totalCost: 250.50,
     avgCostPerGame: 1.73,
@@ -96,6 +96,22 @@ describe('StatsCommand', () => {
     expect(cmd['formatDuration'](90000)).toBe('1m 30s');
     expect(cmd['formatDuration'](45000)).toBe('45s');
     expect(cmd['formatDuration'](0)).toBe('0s');
+  });
+
+  it('renders avgDuration from the API as seconds (MAF-GAP-026)', async () => {
+    // The /api/v1/stats contract exposes avgDuration in SECONDS; 1800s = 30m.
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue({
+      ok: true,
+      json: async () => ({ success: true, data: mockStats }),
+      text: async () => '',
+    }));
+
+    await cmd.parseAsync(['node', 'test']);
+
+    const logs = (console.log as unknown as { mock: { calls: Array<Array<unknown>> } }).mock.calls
+      .map(c => c.join(' '))
+      .join('\n');
+    expect(logs).toContain('30m 0s');
   });
 
   it('logs error on fetch failure instead of calling process.exit', async () => {

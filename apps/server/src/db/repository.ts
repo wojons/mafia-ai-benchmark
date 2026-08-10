@@ -379,7 +379,7 @@ export class GameRepository {
     const total = this.db.prepare('SELECT COUNT(*) as count FROM games').get() as { count: number };
     const active = this.db.prepare("SELECT COUNT(*) as count FROM games WHERE status = 'IN_PROGRESS'").get() as { count: number };
     const completed = this.db.prepare("SELECT COUNT(*) as count FROM games WHERE status = 'ENDED'").get() as { count: number };
-    const avgDuration = this.db.prepare('SELECT AVG(duration) as avg FROM games WHERE duration IS NOT NULL').get() as { avg: number | null };
+    const avgDuration = this.db.prepare("SELECT AVG(duration) as avg FROM games WHERE status = 'ENDED' AND duration IS NOT NULL").get() as { avg: number | null };
     const mafiaWins = this.db.prepare("SELECT COUNT(*) as count FROM games WHERE winner = 'MAFIA'").get() as { count: number };
     const townWins = this.db.prepare("SELECT COUNT(*) as count FROM games WHERE winner = 'TOWN'").get() as { count: number };
     
@@ -387,7 +387,9 @@ export class GameRepository {
       totalGames: total.count,
       activeGames: active.count,
       completedGames: completed.count,
-      avgDuration: avgDuration.avg || 0,
+      // games.duration is stored in milliseconds; the API contract exposes
+      // avgDuration in SECONDS (MAF-GAP-026). Round to the nearest second.
+      avgDuration: Math.round((avgDuration.avg || 0) / 1000),
       mafiaWins: mafiaWins.count,
       townWins: townWins.count,
     };
@@ -424,6 +426,7 @@ export class GameRepository {
         COALESCE(AVG((
           SELECT AVG(ac.latency) FROM api_calls ac
           WHERE ac.game_id = p.game_id AND ac.provider = p.provider AND ac.model = p.model
+            AND ac.latency > 0
         )), 0) as avg_latency
       FROM players p
       WHERE p.provider IS NOT NULL

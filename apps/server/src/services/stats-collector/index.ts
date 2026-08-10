@@ -496,7 +496,7 @@ export class StatsCollector {
     rows.push(`Completed Games,${stats.completedGames}`);
     rows.push(`Mafia Wins,${stats.mafiaWins}`);
     rows.push(`Town Wins,${stats.townWins}`);
-    rows.push(`Avg Duration (ms),${stats.avgDuration.toFixed(0)}`);
+    rows.push(`Avg Duration (s),${stats.avgDuration.toFixed(0)}`);
     
     return rows.join('\n');
   }

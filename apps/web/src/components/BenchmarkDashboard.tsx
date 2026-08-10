@@ -304,7 +304,7 @@ const BenchmarkDashboard: React.FC = () => {
         <div className="flex items-center gap-4 p-5 bg-[rgba(139,92,246,0.05)] rounded-xl">
           <span className="text-[32px]">⏱️</span>
           <div className="flex flex-col">
-            <span className="text-[28px] font-bold">{formatDuration(stats.avgDuration)}</span>
+            <span className="text-[28px] font-bold">{formatDuration(stats.avgDuration * 1000)}</span>
             <span className="text-xs text-[var(--color-text-muted)]">Avg Duration</span>
           </div>
         </div>
