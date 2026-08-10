@@ -36,6 +36,7 @@ export class ExportCommand extends Command {
     if (format !== 'json' && format !== 'csv') {
       console.error(chalk.red(`❌ Invalid format: ${format}. Use json or csv.`));
       process.exit(1);
+      return; // defense in depth: never fall through to fetch if exit is stubbed
     }
     
     const serverUrl = resolveServerUrl(opts.server);

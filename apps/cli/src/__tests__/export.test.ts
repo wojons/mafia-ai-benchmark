@@ -77,6 +77,14 @@ describe('ExportCommand', () => {
 
   it('rejects invalid format with exit code 1', async () => {
     const exitSpy = vi.spyOn(process, 'exit').mockImplementation((() => {}) as any);
+    // Defense: mock fetch + stdout so a stubbed process.exit can never
+    // fall through to a real network call or dump a live payload.
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue({
+      ok: true,
+      json: async () => ({ results: [] }),
+      text: async () => '',
+    }));
+    vi.spyOn(process.stdout, 'write').mockImplementation(() => true);
 
     cmd.parse(['node', 'test', '--format', 'xml']);
     await cmd.run();
