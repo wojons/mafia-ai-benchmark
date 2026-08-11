@@ -188,4 +188,100 @@ async function collectUsage(game) {
   return usage;
 }
 
-module.exports = { collectUsage, collectLatencyByModel };
+/**
+ * Collect real per-player usage aggregates from the engine's trackers
+ * (MAF-GAP-029). Where collectUsage() collapses the per-player dimension
+ * into per-model rows, this keeps it: one row per engine player id (the
+ * same ids that surface as event actor_id and players[].id in the API).
+ *
+ * Sources (both populated from actual API responses during play):
+ *   - TokenTracker.getGameMetrics(gameId): per-player metrics carrying
+ *     playerId/model/provider/totalPromptTokens/totalCompletionTokens/
+ *     totalTokens/turns/estimatedCost.
+ *   - APITracker.metrics: per-player call records with real per-call
+ *     durations; supplies apiCalls when the token tracker recorded none
+ *     and the average per-call latency (same convention as
+ *     collectLatencyByModel — the api tracker never overrides token
+ *     counts, only fills gaps).
+ *
+ * Honesty contract: nothing is invented. Players with no recorded data
+ * simply do not appear; every number comes from a tracker record.
+ *
+ * Returns:
+ *   [{ playerId, playerName (best-effort, may be undefined), provider,
+ *      model, promptTokens, completionTokens, totalTokens, cost,
+ *      apiCalls, latencyMs }]
+ */
+async function collectUsageByPlayer(game) {
+  const rows = new Map(); // playerId -> aggregate row
+
+  // Player names are best-effort display data from the engine roster.
+  const nameByPlayerId = new Map();
+  if (game && Array.isArray(game.players)) {
+    for (const p of game.players) {
+      if (p && p.id) nameByPlayerId.set(p.id, p.name);
+    }
+  }
+
+  // 1. TokenTracker per-player metrics — authoritative token/cost totals.
+  if (game.tokenTracker && typeof game.tokenTracker.getGameMetrics === 'function') {
+    try {
+      const metrics = await game.tokenTracker.getGameMetrics(game.gameId);
+      if (Array.isArray(metrics)) {
+        for (const metric of metrics) {
+          if (!metric || !metric.playerId) continue;
+          rows.set(metric.playerId, {
+            playerId: metric.playerId,
+            playerName: nameByPlayerId.get(metric.playerId) || undefined,
+            provider: metric.provider || 'unknown',
+            model: metric.model || 'unknown',
+            promptTokens: metric.totalPromptTokens || 0,
+            completionTokens: metric.totalCompletionTokens || 0,
+            totalTokens: metric.totalTokens || 0,
+            cost: (metric.estimatedCost && metric.estimatedCost.totalCost) || 0,
+            apiCalls: (metric.turns && metric.turns.length) || 0,
+            latencyMs: 0,
+          });
+        }
+      }
+    } catch (e) {
+      // Fall through to the api tracker below.
+    }
+  }
+
+  // 2. APITracker per-player call records — real wire calls + latency.
+  //    Only fills gaps: apiCalls when the token tracker recorded none,
+  //    latencyMs as the average per-call duration (0 when unmeasured).
+  const tracker = game && game.apiTracker;
+  if (tracker && tracker.metrics instanceof Map) {
+    for (const metric of tracker.metrics.values()) {
+      if (!metric || metric.gameId !== game.gameId || !metric.playerId) continue;
+      const calls = metric.calls || [];
+      let row = rows.get(metric.playerId);
+      if (!row) {
+        row = {
+          playerId: metric.playerId,
+          playerName: nameByPlayerId.get(metric.playerId) || undefined,
+          provider: metric.provider || 'unknown',
+          model: metric.model || 'unknown',
+          promptTokens: 0,
+          completionTokens: 0,
+          totalTokens: 0,
+          cost: 0,
+          apiCalls: 0,
+          latencyMs: 0,
+        };
+        rows.set(metric.playerId, row);
+      }
+      if (row.apiCalls === 0) row.apiCalls = calls.length;
+      if (calls.length > 0) {
+        const totalMs = calls.reduce((sum, call) => sum + (call.duration || 0), 0);
+        row.latencyMs = Math.round(totalMs / calls.length);
+      }
+    }
+  }
+
+  return Array.from(rows.values());
+}
+
+module.exports = { collectUsage, collectLatencyByModel, collectUsageByPlayer };

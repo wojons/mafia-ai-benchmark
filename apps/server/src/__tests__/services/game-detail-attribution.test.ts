@@ -16,6 +16,12 @@
  *  (e) native game with real player_id assignment + usage rows, incl.
  *      name-keyed assignment and direct usage without any assignment
  *  (f) pure legacy-adapter path (game row absent from the repository)
+ *  (g) no assignments but per-player usage rows (the MAF-GAP-029 write
+ *      path) -> provider/model from the rows AND tokensUsed/apiCalls > 0
+ *  (h) no assignments, exactly one model in the 'ALL' rows -> every player
+ *      attributed, tokens honestly 0 (the reopened PM case)
+ *  (i) no assignments, several models in the 'ALL' rows -> no fabricated
+ *      attribution
  */
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import express from 'express';
@@ -352,5 +358,71 @@ describe('GET /api/v1/games/:id per-player model attribution (MAF-GAP-029)', () 
     const liveP1 = liveBody.data.players.find((p: any) => p.id === 'p1');
     expect(liveP1).toMatchObject({ provider: 'provA', model: 'modelA' });
     expect('tokensUsed' in liveP1).toBe(false);
+  });
+
+  it('(g) no assignments but per-player usage rows: provider/model from the rows, tokensUsed/apiCalls > 0 (PASS criterion)', async () => {
+    // A roleModels-less legacy game played AFTER the MAF-GAP-029 write
+    // path: real per-player token_usage/api_calls rows exist alongside the
+    // per-model 'ALL' aggregates the stats pipeline keeps.
+    repo.seedGame({ id: 'g-perplayer', status: 'ENDED', events: [ROLES_EVENT] });
+    repo.insertTokenUsage({ gameId: 'g-perplayer', playerId: 'p1', turnNumber: 0, provider: 'openai', model: 'gpt-4o-mini', promptTokens: 2000, completionTokens: 1000, totalTokens: 3000, cost: 0.0024 });
+    repo.insertTokenUsage({ gameId: 'g-perplayer', playerId: 'p2', turnNumber: 0, provider: 'openai', model: 'gpt-4o-mini', promptTokens: 1400, completionTokens: 600, totalTokens: 2000, cost: 0.0016 });
+    repo.insertApiCall({ gameId: 'g-perplayer', playerId: 'p1', provider: 'openai', model: 'gpt-4o-mini', endpoint: 'legacy-engine', latency: 800 });
+    repo.insertApiCall({ gameId: 'g-perplayer', playerId: 'p2', provider: 'openai', model: 'gpt-4o-mini', endpoint: 'legacy-engine', latency: 1000 });
+    // The 'ALL' aggregate exists too — it must not double-count into the
+    // per-player numbers (Branch 1 reads only real player_id rows).
+    repo.insertTokenUsage({ gameId: 'g-perplayer', playerId: 'ALL', turnNumber: 0, provider: 'openai', model: 'gpt-4o-mini', promptTokens: 3400, completionTokens: 1600, totalTokens: 5000, cost: 0.004 });
+    repo.insertApiCall({ gameId: 'g-perplayer', playerId: 'ALL', provider: 'openai', model: 'gpt-4o-mini', endpoint: 'legacy-engine', latency: 900 });
+
+    await mount();
+    const players = await getPlayers('g-perplayer');
+    const byId = new Map(players.map((p) => [p.id, p]));
+
+    // The PASS criterion: real provider/model AND tokensUsed > 0 AND
+    // apiCalls > 0 per player with recorded rows.
+    expect(byId.get('p1')).toMatchObject({ provider: 'openai', model: 'gpt-4o-mini', tokensUsed: 3000, apiCalls: 1 });
+    expect(byId.get('p2')).toMatchObject({ provider: 'openai', model: 'gpt-4o-mini', tokensUsed: 2000, apiCalls: 1 });
+
+    // Players without recorded rows honestly report the game's single
+    // recorded model (fallback 5) with unsplittable 0 usage.
+    for (const rest of ['p3', 'p4', 'p5']) {
+      expect(byId.get(rest)).toMatchObject({ provider: 'openai', model: 'gpt-4o-mini', tokensUsed: 0, apiCalls: 0 });
+    }
+  });
+
+  it('(h) no assignments and one model in the ALL rows: every player attributed, tokens honestly 0 (the reopened PM case)', async () => {
+    // Mirrors the 3 reopened games (6cad2f3a, 280bb2b2, 6e9bc047): no
+    // player_model_assignments rows, only per-model 'ALL' aggregates with
+    // a single distinct model.
+    repo.seedGame({ id: 'g-pm', status: 'ENDED', events: [ROLES_EVENT] });
+    repo.insertTokenUsage({ gameId: 'g-pm', playerId: 'ALL', turnNumber: 0, provider: 'openai', model: 'gpt-4o-mini', promptTokens: 24000, completionTokens: 12000, totalTokens: 36000, cost: 0.036 });
+    repo.insertApiCall({ gameId: 'g-pm', playerId: 'ALL', provider: 'openai', model: 'gpt-4o-mini', endpoint: 'legacy-engine', latency: 900 });
+
+    await mount();
+    const players = await getPlayers('g-pm');
+    expect(players).toHaveLength(5);
+    for (const p of players) {
+      expect(p.provider).toBe('openai');
+      expect(p.model).toBe('gpt-4o-mini');
+      // The per-model aggregate sums every player and cannot be split.
+      expect(p.tokensUsed).toBe(0);
+      expect(p.apiCalls).toBe(0);
+    }
+  });
+
+  it('(i) no assignments but several models in the ALL rows: no fabricated attribution', async () => {
+    repo.seedGame({ id: 'g-multi', status: 'ENDED', events: [ROLES_EVENT] });
+    repo.insertTokenUsage({ gameId: 'g-multi', playerId: 'ALL', turnNumber: 0, provider: 'provA', model: 'modelA', promptTokens: 700, completionTokens: 300, totalTokens: 1000, cost: 0.01 });
+    repo.insertTokenUsage({ gameId: 'g-multi', playerId: 'ALL', turnNumber: 0, provider: 'provB', model: 'modelB', promptTokens: 1400, completionTokens: 600, totalTokens: 2000, cost: 0.02 });
+
+    await mount();
+    const players = await getPlayers('g-multi');
+    expect(players).toHaveLength(5);
+    for (const p of players) {
+      expect(p.provider).toBeUndefined();
+      expect(p.model).toBeUndefined();
+      expect(p.tokensUsed).toBe(0);
+      expect(p.apiCalls).toBe(0);
+    }
   });
 });

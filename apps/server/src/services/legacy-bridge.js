@@ -38,7 +38,7 @@ const { MafiaGame } = require(gameEnginePath);
 // Real per-model usage collection (tokens/cost/latency) from the engine's
 // in-memory trackers — extracted to its own module so it is unit-testable
 // (MAF-GAP-012 / MAF-GAP-018).
-const { collectUsage } = require('./legacy-usage-collector.js');
+const { collectUsage, collectUsageByPlayer } = require('./legacy-usage-collector.js');
 
 function emit(type, data) {
   process.stdout.write(JSON.stringify({ type, ...data }) + '\n');
@@ -154,6 +154,16 @@ async function main() {
           });
         }
         
+        // MAF-GAP-029: real per-player usage (which LLM played which
+        // player) alongside the per-model aggregates. Best-effort — a
+        // failure here must never break the done message.
+        let usageByPlayer = [];
+        try {
+          usageByPlayer = await collectUsageByPlayer(game);
+        } catch (usageByPlayerError) {
+          console.error('collectUsageByPlayer failed: ' + (usageByPlayerError && usageByPlayerError.message));
+        }
+
         emit('done', {
           gameId: game.gameId,
           totalEvents: game.gameEvents ? game.gameEvents.length : 0,
@@ -167,6 +177,9 @@ async function main() {
           // MAF-GAP-012: real per-model usage aggregates from the engine's
           // in-memory trackers (populated from actual API responses).
           usage: await collectUsage(game),
+          // MAF-GAP-029: real per-player usage aggregates (same trackers,
+          // per-player dimension kept).
+          usageByPlayer,
         });
         
         return result;

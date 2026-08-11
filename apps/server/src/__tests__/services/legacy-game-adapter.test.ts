@@ -840,5 +840,142 @@ describe('LegacyGameAdapter', () => {
       const state = (sqliteAdapter as any).activeGames.get('g-done');
       expect(state.status).toBe('COMPLETED');
     });
+
+    it('persists per-player token_usage/api_calls rows with real player_id AND keeps the ALL rows (MAF-GAP-029)', () => {
+      const sqliteRepo = createSqliteBackedRepository();
+      sqliteRepo.seedGame({ id: 'g-perplayer', status: 'IN_PROGRESS' });
+      const sqliteAdapter = new LegacyGameAdapter(eventBus, sqliteRepo as any);
+
+      (sqliteAdapter as any).persistUsage(
+        'g-perplayer',
+        [
+          {
+            provider: 'openai',
+            model: 'gpt-4o-mini',
+            promptTokens: 3400,
+            completionTokens: 1600,
+            totalTokens: 5000,
+            cost: 0.004,
+            apiCalls: 20,
+            latencyMs: 900,
+          },
+        ],
+        [
+          {
+            playerId: 'p17863974617470',
+            playerName: 'Alice',
+            provider: 'openai',
+            model: 'gpt-4o-mini',
+            promptTokens: 2000,
+            completionTokens: 1000,
+            totalTokens: 3000,
+            cost: 0.0024,
+            apiCalls: 12,
+            latencyMs: 800,
+          },
+          {
+            playerId: 'p17863974617471',
+            playerName: 'Bob',
+            provider: 'openai',
+            model: 'gpt-4o-mini',
+            promptTokens: 1400,
+            completionTokens: 600,
+            totalTokens: 2000,
+            cost: 0.0016,
+            apiCalls: 8,
+            latencyMs: 1000,
+          },
+        ],
+      );
+
+      // The per-model 'ALL' rows are kept (stats pipeline depends on them).
+      const allTokens = sqliteRepo.db.prepare(
+        "SELECT * FROM token_usage WHERE game_id = ? AND player_id = 'ALL'"
+      ).all('g-perplayer') as Array<Record<string, unknown>>;
+      expect(allTokens).toHaveLength(1);
+      expect(allTokens[0].total_tokens).toBe(5000);
+      const allCalls = sqliteRepo.db.prepare(
+        "SELECT * FROM api_calls WHERE game_id = ? AND player_id = 'ALL'"
+      ).all('g-perplayer') as Array<Record<string, unknown>>;
+      expect(allCalls).toHaveLength(1);
+
+      // Per-player rows carry the real engine player ids.
+      const playerTokens = sqliteRepo.db.prepare(
+        "SELECT * FROM token_usage WHERE game_id = ? AND player_id != 'ALL' ORDER BY player_id"
+      ).all('g-perplayer') as Array<Record<string, unknown>>;
+      expect(playerTokens).toHaveLength(2);
+      expect(playerTokens[0].player_id).toBe('p17863974617470');
+      expect(playerTokens[0].provider).toBe('openai');
+      expect(playerTokens[0].model).toBe('gpt-4o-mini');
+      expect(playerTokens[0].total_tokens).toBe(3000);
+      expect(playerTokens[0].cost).toBeCloseTo(0.0024, 6);
+      expect(playerTokens[1].player_id).toBe('p17863974617471');
+      expect(playerTokens[1].total_tokens).toBe(2000);
+
+      const playerCalls = sqliteRepo.db.prepare(
+        "SELECT * FROM api_calls WHERE game_id = ? AND player_id != 'ALL' ORDER BY player_id"
+      ).all('g-perplayer') as Array<Record<string, unknown>>;
+      expect(playerCalls).toHaveLength(2);
+      expect(playerCalls[0].player_id).toBe('p17863974617470');
+      expect(playerCalls[0].endpoint).toBe('legacy-engine');
+      expect(playerCalls[0].latency).toBe(800);
+      expect(playerCalls[1].latency).toBe(1000);
+    });
+
+    it('persists per-player rows end-to-end when the bridge done message carries usageByPlayer (MAF-GAP-029)', () => {
+      const sqliteRepo = createSqliteBackedRepository();
+      sqliteRepo.seedGame({ id: 'g-done-pp', status: 'IN_PROGRESS' });
+      const sqliteAdapter = new LegacyGameAdapter(eventBus, sqliteRepo as any);
+      (sqliteAdapter as any).activeGames.set('g-done-pp', {
+        gameId: 'g-done-pp',
+        process: null,
+        eventCount: 3,
+        status: 'RUNNING',
+        startedAt: new Date(Date.now() - 5000),
+      });
+
+      (sqliteAdapter as any).handleBridgeMessage('g-done-pp', {
+        type: 'done',
+        winner: 'TOWN',
+        totalEvents: 3,
+        dayCount: 2,
+        usage: [
+          {
+            provider: 'openai',
+            model: 'gpt-4o-mini',
+            promptTokens: 3400,
+            completionTokens: 1600,
+            totalTokens: 5000,
+            cost: 0.004,
+            apiCalls: 20,
+            latencyMs: 900,
+          },
+        ],
+        usageByPlayer: [
+          {
+            playerId: 'p1',
+            provider: 'openai',
+            model: 'gpt-4o-mini',
+            promptTokens: 2000,
+            completionTokens: 1000,
+            totalTokens: 3000,
+            cost: 0.0024,
+            apiCalls: 12,
+            latencyMs: 800,
+          },
+        ],
+      });
+
+      const tu = sqliteRepo.db.prepare(
+        "SELECT * FROM token_usage WHERE game_id = ? AND player_id = 'p1'"
+      ).get('g-done-pp') as Record<string, unknown>;
+      expect(tu).toBeDefined();
+      expect(tu.total_tokens).toBe(3000);
+      const ac = sqliteRepo.db.prepare(
+        "SELECT * FROM api_calls WHERE game_id = ? AND player_id = 'p1'"
+      ).get('g-done-pp') as Record<string, unknown>;
+      expect(ac).toBeDefined();
+      expect(ac.endpoint).toBe('legacy-engine');
+    });
   });
 });

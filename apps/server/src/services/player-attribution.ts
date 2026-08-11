@@ -14,6 +14,20 @@
  *                         runner's 'TOWN' config key is normalised to
  *                         'VILLAGER' — the legacy engine runs town players
  *                         via VILLAGER_MODEL, see ROLE_ENV_MAP)
+ *                      For games with NO assignment rows at all (legacy
+ *                      games created without roleModels), two recorded-row
+ *                      fallbacks follow:
+ *                      4. a per-player token_usage/api_calls row for the
+ *                         player's id names the exact model that player
+ *                         ran on (written by the MAF-GAP-029 write path /
+ *                         native engine)
+ *                      5. when the game's 'ALL' aggregate rows contain
+ *                         exactly ONE distinct (provider, model), that
+ *                         model ran the whole game (a roleModels-less
+ *                         legacy game runs every player on one MODEL env
+ *                         var), so it is attributed to every player —
+ *                         their tokensUsed/apiCalls stay 0 because the
+ *                         per-model aggregate cannot be split honestly
  *   tokensUsed/apiCalls (completed games only):
  *                      1. direct per-player aggregates (native games write
  *                         real player_id rows to token_usage/api_calls)
@@ -124,9 +138,51 @@ export function enrichPlayersWithAttribution(
         ? gameRepository.getGameModelAssignments(gameId)
         : [];
 
+    // Recorded-row attribution data for games with NO assignments (legacy
+    // games created without roleModels): per-player usage rows name the
+    // exact model a player ran on; the 'ALL' aggregate rows reveal whether
+    // the whole game ran on a single model.
+    const perPlayerRowModel = new Map<string, { provider: string; model: string }>();
+    const legacyAllModels = new Map<string, { provider: string; model: string }>();
+    const usageModelRows = db.prepare(`
+      SELECT player_id, provider, model FROM token_usage WHERE game_id = ?
+      GROUP BY player_id, provider, model
+    `).all(gameId) as Array<{ player_id: string; provider: string; model: string }>;
+    const apiModelRows = db.prepare(`
+      SELECT player_id, provider, model FROM api_calls WHERE game_id = ?
+      GROUP BY player_id, provider, model
+    `).all(gameId) as Array<{ player_id: string; provider: string; model: string }>;
+    for (const row of [...usageModelRows, ...apiModelRows]) {
+      if (row.player_id === LEGACY_PLAYER_SENTINEL) {
+        const key = modelKey(row.provider, row.model);
+        if (!legacyAllModels.has(key)) {
+          legacyAllModels.set(key, { provider: row.provider, model: row.model });
+        }
+      } else if (!perPlayerRowModel.has(row.player_id)) {
+        perPlayerRowModel.set(row.player_id, { provider: row.provider, model: row.model });
+      }
+    }
+    // Exactly one distinct model across the 'ALL' aggregate rows means a
+    // single model ran the whole game (honest game-level attribution).
+    const singleRecordedModel = legacyAllModels.size === 1
+      ? Array.from(legacyAllModels.values())[0]
+      : undefined;
+
     // Resolve provider/model for every player first — the ambiguity rule
     // needs the full per-model player count before attributing tokens.
-    const resolved = players.map((p) => resolveAssignment(p, assignments));
+    // Where assignment rows exist they are the sole authority; the
+    // recorded-row fallbacks only apply to games without any assignments.
+    const hasAssignments = assignments.length > 0;
+    const resolved = players.map((p) => {
+      const assignment = resolveAssignment(p, assignments);
+      if (assignment) return assignment;
+      if (hasAssignments) return undefined;
+      // Fallback 4: this player's own recorded usage row.
+      const byRow = perPlayerRowModel.get(p.id);
+      if (byRow) return byRow;
+      // Fallback 5: the whole game ran on one recorded model.
+      return singleRecordedModel;
+    });
     const modelPlayerCount = new Map<string, number>();
     for (const r of resolved) {
       if (!r) continue;

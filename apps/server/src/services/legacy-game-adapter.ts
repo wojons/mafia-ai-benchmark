@@ -68,6 +68,25 @@ export interface UsageAggregate {
   latencyMs: number;
 }
 
+/**
+ * Per-player usage aggregate emitted by the legacy bridge in its 'done'
+ * message (MAF-GAP-029). Same tracker data as UsageAggregate but keyed by
+ * the engine's real player id, so token_usage/api_calls can carry the
+ * per-player dimension the game detail attribution needs.
+ */
+export interface PlayerUsageAggregate {
+  playerId: string;
+  playerName?: string;
+  provider: string;
+  model: string;
+  promptTokens: number;
+  completionTokens: number;
+  totalTokens: number;
+  cost: number;
+  apiCalls: number;
+  latencyMs: number;
+}
+
 export class LegacyGameAdapter extends EventEmitter {
   private eventBus: EventBus;
   private gameRepository: GameRepository;
@@ -320,8 +339,13 @@ export class LegacyGameAdapter extends EventEmitter {
 
         // MAF-GAP-012: persist real per-model usage reported by the bridge
         // (token_usage + api_calls + player_game_stats) so cost tracking is
-        // no longer hollow for legacy games.
-        this.persistUsage(gameId, message.usage as UsageAggregate[] | undefined);
+        // no longer hollow for legacy games. MAF-GAP-029: also persist the
+        // per-player rows (real player_id) for game detail attribution.
+        this.persistUsage(
+          gameId,
+          message.usage as UsageAggregate[] | undefined,
+          message.usageByPlayer as PlayerUsageAggregate[] | undefined,
+        );
         
         // Publish game ended event
         this.publishEvent({
@@ -367,11 +391,24 @@ export class LegacyGameAdapter extends EventEmitter {
    * 'ALL' and turn_number 0. When the game has role-based model
    * assignments, per-role rows are also written (player_id 'ALL', role from
    * the assignment) so player_game_stats carries the role attribution.
+   *
+   * MAF-GAP-029: when the bridge also reports per-player aggregates
+   * (usageByPlayer), they are written as token_usage / api_calls rows
+   * keyed by the REAL engine player id — the per-player dimension the
+   * game detail attribution needs. The 'ALL' per-model rows are kept
+   * regardless (the stats pipeline depends on them).
+   *
    * All writes are best-effort: a failure logs and never breaks the game
    * completion path.
    */
-  private persistUsage(gameId: string, usage: UsageAggregate[] | undefined): void {
-    if (!usage || !Array.isArray(usage) || usage.length === 0) return;
+  private persistUsage(
+    gameId: string,
+    usage: UsageAggregate[] | undefined,
+    usageByPlayer?: PlayerUsageAggregate[] | undefined,
+  ): void {
+    const hasUsage = !!usage && Array.isArray(usage) && usage.length > 0;
+    const hasPlayerUsage = !!usageByPlayer && Array.isArray(usageByPlayer) && usageByPlayer.length > 0;
+    if (!hasUsage && !hasPlayerUsage) return;
 
     const db = (this.gameRepository as any).db;
     if (!db) return;
@@ -407,7 +444,7 @@ export class LegacyGameAdapter extends EventEmitter {
       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `);
 
-    for (const u of usage) {
+    if (usage && Array.isArray(usage)) for (const u of usage) {
       if (!u || !u.provider || !u.model) continue;
       const role = roleByModel.get(`${u.provider}/${u.model}`) || 'UNASSIGNED';
 
@@ -463,10 +500,59 @@ export class LegacyGameAdapter extends EventEmitter {
       }
     }
 
+    // MAF-GAP-029: per-player rows keyed by the real engine player id.
+    // token_usage + api_calls only — player_game_stats keeps its per-model
+    // 'ALL' shape above (the stats pipeline depends on it). One aggregate
+    // api_calls row per player, same convention as the per-model rows.
+    if (usageByPlayer && Array.isArray(usageByPlayer)) {
+      for (const u of usageByPlayer) {
+        if (!u || !u.playerId || !u.provider || !u.model) continue;
+
+        try {
+          insertTokenUsage.run(
+            uuidv4(),
+            gameId,
+            u.playerId,
+            0,
+            u.provider,
+            u.model,
+            u.promptTokens || 0,
+            u.completionTokens || 0,
+            u.totalTokens || 0,
+            u.cost || 0,
+            now,
+          );
+        } catch (e: any) {
+          console.error(`[LegacyAdapter] Failed to persist per-player token usage: ${e?.message || e}`);
+        }
+
+        try {
+          insertApiCall.run(
+            uuidv4(),
+            gameId,
+            u.playerId,
+            u.provider,
+            u.model,
+            'legacy-engine',
+            u.latencyMs || 0,
+            200,
+            now,
+          );
+        } catch (e: any) {
+          console.error(`[LegacyAdapter] Failed to persist per-player api call: ${e?.message || e}`);
+        }
+      }
+    }
+
+    const persistedUsage = usage && Array.isArray(usage) ? usage : [];
+    const persistedPlayerUsage = usageByPlayer && Array.isArray(usageByPlayer) ? usageByPlayer : [];
     console.log(
-      `[LegacyAdapter:${gameId}] Persisted ${usage.length} usage aggregate(s) ` +
-        `(tokens=${usage.reduce((s, u) => s + (u.totalTokens || 0), 0)}, ` +
-        `cost=${usage.reduce((s, u) => s + (u.cost || 0), 0).toFixed(6)})`,
+      `[LegacyAdapter:${gameId}] Persisted ${persistedUsage.length} usage aggregate(s) ` +
+        `(tokens=${persistedUsage.reduce((s, u) => s + (u.totalTokens || 0), 0)}, ` +
+        `cost=${persistedUsage.reduce((s, u) => s + (u.cost || 0), 0).toFixed(6)})` +
+        (persistedPlayerUsage.length > 0
+          ? ` + ${persistedPlayerUsage.length} per-player usage row(s)`
+          : ''),
     );
   }
   
