@@ -17,7 +17,7 @@
 const http = require("http");
 const { URL } = require("url");
 
-const SERVER_URL = process.env.MAFIA_SERVER_URL || "http://localhost:3000";
+const SERVER_URL = process.env.MAFIA_SERVER_URL || "http://localhost:3004";
 
 const C = {
   green: (s) => `\x1b[32m${s}\x1b[0m`,

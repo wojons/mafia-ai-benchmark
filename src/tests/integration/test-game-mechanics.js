@@ -13,14 +13,14 @@
  * 9. Error Handling
  *
  * Run via: node games/test-game-mechanics.js
- * Or via HTTP: curl http://localhost:3000/api/v1/test/mechanics
+ * Or via HTTP: curl http://localhost:3004/api/v1/test/mechanics
  */
 
 const http = require("http");
 const { URL } = require("url");
 
 // Configuration
-const SERVER_URL = process.env.MAFIA_SERVER_URL || "http://localhost:3000";
+const SERVER_URL = process.env.MAFIA_SERVER_URL || "http://localhost:3004";
 const API_KEY = process.env.OPENAI_API_KEY;
 
 // ANSI colors

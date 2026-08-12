@@ -23,7 +23,7 @@ import { spawn } from 'child_process';
 import { URL } from 'url';
 
 // Configuration
-const SERVER_URL = process.env.MAFIA_SERVER_URL || 'http://localhost:3000';
+const SERVER_URL = process.env.MAFIA_SERVER_URL || 'http://localhost:3004';
 
 // Colors for output
 const colors = {
