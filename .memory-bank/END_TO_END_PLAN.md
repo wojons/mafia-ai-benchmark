@@ -45,7 +45,7 @@
 **Current:** Server code exists (Express + WS + SSE, 181 lines main, 616 routes, 371 WS) but untested in current env
 **Fix:** Build the server package, start it, verify GET /api/v1/health returns 200, verify WebSocket accepts connections on :3001
 **Depends on:** WI-001
-**Verification:** `curl http://localhost:3000/api/v1/health` → 200, `wscat -c ws://localhost:3001/ws` connects
+**Verification:** `curl http://localhost:3004/api/v1/health` → 200, `wscat -c ws://localhost:3001/ws` connects
 
 ### WI-004: Wire legacy game engine events to server event bus
 **Priority:** P0 — the legacy engine works but doesn't emit through the server

@@ -148,7 +148,7 @@ pnpm build
 - `GET /api/games/:id/export` - Export event log (JSONL)
 
 ### WebSocket
-- `ws://localhost:3000/ws/:gameId` - Live event stream
+- `ws://localhost:3004/ws/:gameId` - Live event stream
 
 ## CLI Commands
 
