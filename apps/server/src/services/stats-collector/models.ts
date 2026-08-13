@@ -352,12 +352,28 @@ export function getModelComparison(
       if (!row.provider || !row.model) continue;
       const norm = normalizeModelKey(row.provider, row.model);
       const key = `${norm.provider}/${norm.model}`;
-      // Earlier sources win on key collision (MAF-GAP-012): the players
-      // table and player_model_assignments are authoritative about which
-      // games a model played; token_usage rows for games without
-      // assignments (fake 'ALL' player) must not shadow them (MAF-GAP-036).
-      if (!merged.has(key)) {
-        merged.set(key, { ...row, provider: norm.provider, model: norm.model });
+      const normalized = { ...row, provider: norm.provider, model: norm.model };
+      const existing = merged.get(key);
+      if (!existing) {
+        merged.set(key, normalized);
+      } else {
+        // MAF-GAP-036: after key normalization the same model can arrive
+        // from multiple sources (players / assignments / token_usage).
+        // Keep the row with the most games (most complete) — legacy games
+        // exist ONLY in token_usage ('ALL'-player rows), so the earlier
+        // source must not shadow hundreds of real games. Wins may only
+        // come from real players.won rows, so take the max (never fabricate).
+        if ((normalized.gamesPlayed || 0) > (existing.gamesPlayed || 0)) {
+          merged.set(key, {
+            ...normalized,
+            wins: Math.max(existing.wins || 0, normalized.wins || 0),
+          });
+        } else {
+          merged.set(key, {
+            ...existing,
+            wins: Math.max(existing.wins || 0, normalized.wins || 0),
+          });
+        }
       }
     }
   };
@@ -372,7 +388,11 @@ export function getModelComparison(
     }
     addRows(dbStats);
     addRows(getModelComparisonFromAssignments(gameRepository));
-    addRows(getModelComparisonFromUsage(gameRepository, new Set(merged.keys())));
+    // Pass NO exclusions: after key normalization (MAF-GAP-036) the same
+    // model can legitimately appear in multiple sources (e.g. assignments
+    // with 1 game vs token_usage with 495). addRows' merge-max keeps the
+    // most complete row instead of letting the earlier source shadow it.
+    addRows(getModelComparisonFromUsage(gameRepository, new Set()));
     return Array.from(merged.values()).sort(
       (a, b) => b.gamesPlayed - a.gamesPlayed,
     );

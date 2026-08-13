@@ -520,9 +520,11 @@ describe('StatsCollector', () => {
       expect(cmp[0].avgLatency).toBe(0);
     });
 
-    it('does not leak usage from games the model did not play into its averages', () => {
-      // Model played game A only; usage rows exist for game A AND an
-      // unrelated game B (same model string, but no assignment for B).
+    it('counts usage-recorded games as played when assignments are sparse (MAF-GAP-036)', () => {
+      // Legacy path: assignments exist for ONE game; usage rows exist for
+      // that game AND another ended game the model also played (legacy
+      // games often lack assignment rows — token_usage is the played
+      // record). Normalization must not drop the usage-only game.
       repo.seedGame({
         id: 'played', status: 'ENDED',
         events: [{ type: 'PHASE_CHANGED', data: { winner: 'MAFIA' }, phase: 'GAME_OVER' }],
@@ -552,10 +554,10 @@ describe('StatsCollector', () => {
 
       const cmp = stats.getModelComparison();
       expect(cmp).toHaveLength(1);
-      expect(cmp[0].gamesPlayed).toBe(1);
-      // Only the played game's usage counts — not the 18000-token outlier.
-      expect(cmp[0].avgTokens).toBe(150);
-      expect(cmp[0].avgCost).toBeCloseTo(0.001, 6);
+      // Both games count (assignment + usage-recorded); averages cover both.
+      expect(cmp[0].gamesPlayed).toBe(2);
+      expect(cmp[0].avgTokens).toBe((150 + 18000) / 2);
+      expect(cmp[0].avgCost).toBeCloseTo((0.001 + 0.5) / 2, 6);
     });
 
     it('surfaces recorded usage for ended games with no assignments (POST /games default path)', () => {
