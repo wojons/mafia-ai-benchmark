@@ -344,6 +344,75 @@ For `json` format:
 
 ---
 
+### Benchmark Report
+
+#### Get Benchmark Report
+
+**Endpoint:** `GET /api/v1/benchmark/report`
+
+**Query Parameters:**
+
+- `gameId`: Optional. Include a per-game detail block for the given game.
+- `format`: Optional. `json` (default) or `csv`.
+
+**Response (200 OK):** Top-level payload — NOT wrapped in a `data` field.
+
+```json
+{
+  "generatedAt": "2026-08-13T00:00:00.000Z",
+  "summary": {
+    "totalGames": 1058,
+    "activeGames": 76,
+    "completedGames": 982,
+    "mafiaWinRate": 0.1802,
+    "avgDuration": 197
+  },
+  "modelPerformance": [
+    {
+      "provider": "openai",
+      "model": "gpt-4o-mini",
+      "gamesPlayed": 511,
+      "wins": 0,
+      "winRate": 0,
+      "avgTokens": 30400,
+      "avgCost": 0.0072,
+      "avgLatency": 102
+    }
+  ],
+  "agentStats": [
+    {
+      "agentId": "p1",
+      "executions": 122,
+      "successes": 122,
+      "totalLatency": 13000,
+      "totalTokens": 49000000,
+      "totalCost": 15.04,
+      "provider": "CUSTOM",
+      "model": "openai"
+    }
+  ],
+  "recommendations": [
+    "Best win rate: openai/gpt-4o-mini (18.0%)",
+    "Best value: openai/gpt-4o-mini (win rate per dollar)"
+  ]
+}
+```
+
+**`summary` semantics:** `mafiaWinRate` is the mafia win count over completed games. The winner is derived from the game's `GAME_OVER`-phase event (`data.winner`), falling back to the `games.winner` column.
+
+**`modelPerformance[].wins` / `winRate` semantics (MAF-GAP-039):**
+
+Per-model wins are games the model's side won, attributed from real per-game model participation:
+
+1. `players.won = 1` rows — explicit per-player win flags.
+2. Side attribution — a player row's `is_mafia` compared to the game winner (`games.winner`, falling back to the `GAME_OVER` event winner — the same derivation as `summary.mafiaWinRate`): the model's side won iff `is_mafia = 1` and MAFIA won, or `is_mafia = 0` and TOWN won. A game counts at most once per model.
+
+`winRate = wins / gamesPlayed`. `wins` is **0 when unattributable** — legacy usage-only games (e.g. `token_usage` rows with `player_id = 'ALL'`) record real usage but no side/role data, so their wins are never guessed. A row with `gamesPlayed > 0` and `wins = 0` therefore means "no attributable wins," not "lost every game." Game-level winners are never assigned to every model in a game, and one row per model string is guaranteed (provider-prefixed spellings are normalized).
+
+**`agentStats[]`:** per-agent execution aggregates (`executions`, `successes`, totals). Rows with zero executions legitimately show `totalLatency: 0`.
+
+---
+
 ## WebSocket API
 
 ### Connection

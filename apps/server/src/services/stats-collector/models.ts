@@ -5,6 +5,7 @@
  */
 
 import type { GameRepository } from '../../db/repository.js';
+import { getGameWinnerFromEvents } from './wins.js';
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 type AnyRecord = Record<string, any>;
@@ -120,6 +121,9 @@ function getModelComparisonFromAssignments(
   // from game-level winners (MAF-GAP-036). The previous sideWon
   // attribution credited every role-group on the winning side, which
   // fabricated the 'CUSTOM/openai' 127/127 winRate=1.0 row.
+  // MAF-GAP-039 adds honest side attribution at the getModelComparison
+  // merge level instead: players.is_mafia joined to the real game winner
+  // (per-player participation, never fake 'ALL'-player assignment rows).
   try {
     const pExpr = normalizedModelSql('p');
     const wonRows = db.prepare(`
@@ -226,6 +230,86 @@ function getModelComparisonFromAssignments(
 }
 
 /**
+ * MAF-GAP-039: per-model side-attributed win games.
+ *
+ * A model "wins" a game when the side it played on won that game. The side
+ * comes from REAL per-player participation rows (players.is_mafia) joined
+ * to the REAL game-level winner — games.winner first, falling back to the
+ * GAME_OVER-phase event winner (getGameWinnerFromEvents), which is the
+ * same derivation the report summary's win totals use. This is NOT the
+ * MAF-GAP-036 sideWon fabrication: only models with actual players rows
+ * are attributed (one win per game per model), never fake 'ALL'-player
+ * assignment rows, and legacy usage-only games (no players rows, e.g.
+ * token_usage player_id='ALL') are never attributed here.
+ *
+ * Returns a map of normalized model key -> set of game ids the model won.
+ */
+function getSideAttributedWinGames(
+  gameRepository: GameRepository,
+): Map<string, Set<string>> {
+  const winGamesByModel = new Map<string, Set<string>>();
+  let db;
+  try {
+    db = gameRepository.getDatabase();
+  } catch {
+    return winGamesByModel;
+  }
+  if (!db) return winGamesByModel;
+  try {
+    const rows = db.prepare(`
+      SELECT p.game_id, p.provider,
+             ${normalizedModelSql('p')} as model,
+             p.is_mafia, g.winner
+      FROM players p
+      JOIN games g ON g.id = p.game_id
+      WHERE g.status = 'ENDED'
+        AND p.provider IS NOT NULL AND p.model IS NOT NULL
+    `).all() as Array<{
+      game_id: string;
+      provider: string;
+      model: string;
+      is_mafia: number | null;
+      winner: string | null;
+    }>;
+    // games.winner is NULL for many legacy rows — the winner lives in the
+    // GAME_OVER event. Cache per game so the event lookup runs at most once.
+    const winnerCache = new Map<string, 'MAFIA' | 'TOWN' | null>();
+    for (const row of rows) {
+      if (!row.provider || !row.model) continue;
+      let winner: 'MAFIA' | 'TOWN' | null = null;
+      if (row.winner === 'MAFIA' || row.winner === 'TOWN') {
+        winner = row.winner;
+      } else {
+        if (!winnerCache.has(row.game_id)) {
+          winnerCache.set(
+            row.game_id,
+            getGameWinnerFromEvents(gameRepository, row.game_id),
+          );
+        }
+        winner = winnerCache.get(row.game_id) ?? null;
+      }
+      if (winner !== 'MAFIA' && winner !== 'TOWN') continue;
+      // Player-side win: is_mafia === 1 means the player is on the MAFIA
+      // team, so their side won iff MAFIA won (and vice versa for TOWN).
+      const sideWon =
+        row.is_mafia === 1 ? winner === 'MAFIA' : winner === 'TOWN';
+      if (!sideWon) continue;
+      const norm = normalizeModelKey(row.provider, row.model);
+      const key = `${norm.provider}/${norm.model}`;
+      let set = winGamesByModel.get(key);
+      if (!set) {
+        set = new Set();
+        winGamesByModel.set(key, set);
+      }
+      set.add(row.game_id);
+    }
+  } catch {
+    // players/games unavailable — no side attribution (honest zeros).
+  }
+  return winGamesByModel;
+}
+
+/**
  * Derive honest per-model rows directly from recorded token_usage for
  * ended games that have NO player_model_assignments rows (the default
  * POST /api/v1/games legacy path, MAF-GAP-018). The usage data is real
@@ -308,8 +392,15 @@ function getModelComparisonFromUsage(
  *   3. recorded token_usage for ended games with no assignments (legacy
  *      default path — usage is real, wins unattributable so kept 0).
  * NEVER fabricates a provider/model that did not play — returns [] when
- * no real data exists (MAF-GAP-012). Earlier sources win on key
- * collision.
+ * no real data exists (MAF-GAP-012). On key collision the row with the
+ * most games wins and wins take the max (MAF-GAP-036).
+ *
+ * Wins semantics (MAF-GAP-039): a model's wins are the games its side won,
+ * attributed from REAL per-player rows — players.won = 1 counts, plus
+ * side attribution (players.is_mafia vs the game winner from games.winner
+ * or the GAME_OVER event, the same derivation the summary uses). Rows
+ * without side data (legacy usage-only games, player_id='ALL') keep
+ * wins 0 — that is the documented, honest floor, not a contradiction.
  */
 export function getModelComparison(
   gameRepository: GameRepository,
@@ -393,6 +484,27 @@ export function getModelComparison(
     // with 1 game vs token_usage with 495). addRows' merge-max keeps the
     // most complete row instead of letting the earlier source shadow it.
     addRows(getModelComparisonFromUsage(gameRepository, new Set()));
+
+    // MAF-GAP-039: fold in side-attributed wins from real game-level
+    // winners joined to per-game model participation (players.is_mafia).
+    // This keeps the per-model rows consistent with the summary's winner
+    // derivation without fabricating anything: usage-only rows have no
+    // players rows, so they keep their honest 0 wins.
+    const sideWinGames = getSideAttributedWinGames(gameRepository);
+    if (sideWinGames.size > 0) {
+      for (const [key, row] of merged) {
+        const winSet = sideWinGames.get(key);
+        if (winSet && winSet.size > 0) {
+          row.wins = Math.min(
+            Math.max(row.wins || 0, winSet.size),
+            row.gamesPlayed || 0,
+          );
+          row.winRate =
+            row.gamesPlayed > 0 ? row.wins / row.gamesPlayed : 0;
+        }
+      }
+    }
+
     return Array.from(merged.values()).sort(
       (a, b) => b.gamesPlayed - a.gamesPlayed,
     );

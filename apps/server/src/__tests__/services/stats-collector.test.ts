@@ -678,6 +678,113 @@ describe('StatsCollector', () => {
       expect(row).toBeDefined();
       expect(row.avgLatency).toBeCloseTo(300, 5); // mean(300, 300) — zero dropped
     });
+
+    it('attributes wins from real game winners joined to players.is_mafia (MAF-GAP-039)', () => {
+      // Ended games with winners in the games table. Each player row
+      // records which side its model played on (is_mafia). A model wins a
+      // game when ITS side won — never the opposite side, never a game it
+      // did not play.
+      repo.seedGame({
+        id: 'sw-1', status: 'ENDED', winner: 'MAFIA',
+        players: [
+          { id: 'sw1a', name: 'A1', role: 'MAFIA', joinOrder: 0, isMafia: true,
+            provider: 'OPENAI', model: 'gpt-4', tokens_used: 0 },
+          { id: 'sw1b', name: 'B1', role: 'VILLAGER', joinOrder: 1, isMafia: false,
+            provider: 'ANTHROPIC', model: 'claude-3', tokens_used: 0 },
+        ],
+      });
+      repo.seedGame({
+        id: 'sw-2', status: 'ENDED', winner: 'MAFIA',
+        players: [
+          { id: 'sw2a', name: 'A2', role: 'VILLAGER', joinOrder: 0, isMafia: false,
+            provider: 'OPENAI', model: 'gpt-4', tokens_used: 0 },
+          { id: 'sw2b', name: 'B2', role: 'MAFIA', joinOrder: 1, isMafia: true,
+            provider: 'ANTHROPIC', model: 'claude-3', tokens_used: 0 },
+        ],
+      });
+      repo.seedGame({
+        id: 'sw-3', status: 'ENDED', winner: 'TOWN',
+        players: [
+          { id: 'sw3a', name: 'A3', role: 'VILLAGER', joinOrder: 0, isMafia: false,
+            provider: 'OPENAI', model: 'gpt-4', tokens_used: 0 },
+        ],
+      });
+
+      const cmp = stats.getModelComparison();
+      const a = cmp.find(m => m.provider === 'OPENAI' && m.model === 'gpt-4')!;
+      const b = cmp.find(m => m.provider === 'ANTHROPIC' && m.model === 'claude-3')!;
+      expect(a).toBeDefined();
+      expect(b).toBeDefined();
+      expect(a.gamesPlayed).toBe(3);
+      // sw-1: MAFIA side won; sw-3: TOWN side won; sw-2: MAFIA won while
+      // the model played TOWN — a loss.
+      expect(a.wins).toBe(2);
+      expect(a.winRate).toBeCloseTo(2 / 3, 5);
+      expect(b.gamesPlayed).toBe(2);
+      // sw-2 only: its MAFIA player won; its TOWN player lost sw-1.
+      expect(b.wins).toBe(1);
+      expect(b.winRate).toBeCloseTo(0.5, 5);
+    });
+
+    it('falls back to GAME_OVER event winners when games.winner is NULL (MAF-GAP-039)', () => {
+      // Live-data shape: games.winner is NULL for legacy ended games — the
+      // winner lives in the GAME_OVER-phase event, the same source the
+      // report summary's win totals use.
+      repo.seedGame({
+        id: 'evt-1', status: 'ENDED', winner: null,
+        players: [
+          { id: 'ev1a', name: 'A1', role: 'MAFIA', joinOrder: 0, isMafia: true,
+            provider: 'CUSTOM', model: 'gpt-4o-mini', tokens_used: 0 },
+        ],
+        events: [{ type: 'PHASE_CHANGED', data: { winner: 'MAFIA' }, phase: 'GAME_OVER' }],
+      });
+      repo.seedGame({
+        id: 'evt-2', status: 'ENDED', winner: null,
+        players: [
+          { id: 'ev2a', name: 'A2', role: 'VILLAGER', joinOrder: 0, isMafia: false,
+            provider: 'CUSTOM', model: 'gpt-4o-mini', tokens_used: 0 },
+        ],
+        events: [{ type: 'PHASE_CHANGED', data: { winner: 'TOWN' }, phase: 'GAME_OVER' }],
+      });
+      repo.seedGame({
+        id: 'evt-3', status: 'ENDED', winner: null,
+        players: [
+          { id: 'ev3a', name: 'A3', role: 'VILLAGER', joinOrder: 0, isMafia: false,
+            provider: 'CUSTOM', model: 'gpt-4o-mini', tokens_used: 0 },
+        ],
+        events: [{ type: 'PHASE_CHANGED', data: { winner: 'MAFIA' }, phase: 'GAME_OVER' }],
+      });
+
+      const cmp = stats.getModelComparison();
+      const row = cmp.find(m => m.provider === 'CUSTOM' && m.model === 'gpt-4o-mini')!;
+      expect(row).toBeDefined();
+      expect(row.gamesPlayed).toBe(3);
+      // evt-1 (MAFIA side won) + evt-2 (TOWN side won) = wins; evt-3 the
+      // model's TOWN side lost to MAFIA.
+      expect(row.wins).toBe(2);
+      expect(row.winRate).toBeCloseTo(2 / 3, 5);
+    });
+
+    it('never attributes wins to legacy usage-only rows without players side data (MAF-GAP-039)', () => {
+      // token_usage rows with player_id='ALL' carry no side/role info.
+      // Even though the game has a real winner, that winner must NOT be
+      // attributed to the usage row — that was the MAF-GAP-036 sideWon
+      // fabrication. Wins stay 0 and that is the documented semantics.
+      repo.seedGame({ id: 'uo-1', status: 'ENDED', winner: 'MAFIA' });
+      stats.recordTokenUsage({
+        gameId: 'uo-1', playerId: 'ALL', turnNumber: 0,
+        provider: 'openai', model: 'gpt-4o-mini',
+        promptTokens: 100, completionTokens: 50, totalTokens: 150,
+        cost: 0.001, timestamp: Date.now(),
+      });
+
+      const cmp = stats.getModelComparison();
+      const row = cmp.find(m => m.provider === 'openai' && m.model === 'gpt-4o-mini')!;
+      expect(row).toBeDefined();
+      expect(row.gamesPlayed).toBe(1);
+      expect(row.wins).toBe(0);
+      expect(row.winRate).toBe(0);
+    });
   });
 
   // ==========================================================================
@@ -957,6 +1064,39 @@ describe('StatsCollector', () => {
       expect(summary.totalGames).toBe(1);
       expect(summary.completedGames).toBe(1);
       expect(summary.mafiaWinRate).toBe(1);
+    });
+
+    it('modelPerformance wins agree with the summary winner derivation (MAF-GAP-039)', () => {
+      // The report must not contradict itself: the summary counts real
+      // game winners (mafiaWinRate) and the per-model rows get wins from
+      // those SAME winners via the model's side (players.is_mafia).
+      repo.seedGame({
+        id: 'r1', status: 'ENDED', winner: 'MAFIA', duration: 60_000,
+        players: [
+          { id: 'r1a', name: 'M1', role: 'MAFIA', joinOrder: 0, isMafia: true,
+            provider: 'OPENAI', model: 'gpt-4', tokens_used: 0 },
+          { id: 'r1b', name: 'T1', role: 'VILLAGER', joinOrder: 1, isMafia: false,
+            provider: 'ANTHROPIC', model: 'claude-3', tokens_used: 0 },
+        ],
+      });
+
+      const report = stats.generateReport();
+      const summary = report.summary as any;
+      const modelPerformance = report.modelPerformance as any[];
+      expect(summary.mafiaWinRate).toBe(1);
+
+      const winnerRow = modelPerformance.find(
+        (m) => m.provider === 'OPENAI' && m.model === 'gpt-4',
+      );
+      const loserRow = modelPerformance.find(
+        (m) => m.provider === 'ANTHROPIC' && m.model === 'claude-3',
+      );
+      expect(winnerRow).toBeDefined();
+      expect(winnerRow.wins).toBe(1);
+      expect(winnerRow.winRate).toBe(1);
+      expect(loserRow).toBeDefined();
+      expect(loserRow.wins).toBe(0);
+      expect(loserRow.winRate).toBe(0);
     });
 
     it('generateReport populates agentStats from real recorded usage (MAF-GAP-028)', () => {
