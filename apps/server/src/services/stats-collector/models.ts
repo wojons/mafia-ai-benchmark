@@ -368,11 +368,18 @@ function getModelComparisonFromUsage(
   const out = [];
   for (const row of rows) {
     if (!row.provider || !row.model) continue;
-    const key = `${row.provider}/${row.model}`;
+    // Normalize before keying: the latency map (built above) stores
+    // NORMALIZED keys, so a raw provider-prefixed model string (e.g.
+    // provider='openai', model='openai/gpt-4o-mini') would miss and the
+    // merge-max row would then carry avgLatency 0 despite real api_calls
+    // (observed tick 108: 1297 calls, 0ms shown once the usage group
+    // overtook the dbStats row). Raw key must match the map's key space.
+    const norm = normalizeModelKey(row.provider, row.model);
+    const key = `${norm.provider}/${norm.model}`;
     if (excludeKeys.has(key)) continue;
     out.push({
-      provider: row.provider,
-      model: row.model,
+      provider: norm.provider,
+      model: norm.model,
       gamesPlayed: row.games,
       wins: 0,
       winRate: 0,
