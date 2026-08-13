@@ -5,7 +5,6 @@
  */
 
 import type { GameRepository } from '../../db/repository.js';
-import { getGameWinnerFromEvents } from './wins.js';
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 type AnyRecord = Record<string, any>;
@@ -21,22 +20,6 @@ const TOWN_ROLES = new Set([
   'DETECTIVE',
   'BODYGUARD',
 ]);
-
-/**
- * Whether a role's team won a game with the given winner.
- * MAFIA role wins when winner === 'MAFIA'; town roles win when
- * winner === 'TOWN'. Unknown roles never count as a win — a game can
- * never be attributed to a model that did not play it (MAF-GAP-012).
- */
-function sideWon(
-  role: string | null | undefined,
-  winner: 'MAFIA' | 'TOWN' | null,
-): boolean {
-  if (!role || !winner) return false;
-  if (role === 'MAFIA') return winner === 'MAFIA';
-  if (TOWN_ROLES.has(role)) return winner === 'TOWN';
-  return false;
-}
 
 /**
  * SQL expression selecting the NORMALIZED model string for a table alias
@@ -74,9 +57,10 @@ export function normalizeModelKey(
 
 /**
  * Derive honest per-model rows from real per-game model assignments
- * (player_model_assignments joined to ended games). Wins are games where
- * the model's assigned role side actually won (via game events). Returns
- * [] when no assignments exist — empty is honest, fabricated is not.
+ * (player_model_assignments joined to ended games). Wins come ONLY from
+ * real per-player rows (players.won = 1) — game-level winners are never
+ * attributed to assignments (MAF-GAP-036). Returns [] when no
+ * assignments exist — empty is honest, fabricated is not.
  *
  * avgTokens/avgCost/avgLatency are filled from the real token_usage and
  * api_calls rows the legacy adapter persists at game completion
@@ -117,20 +101,48 @@ function getModelComparisonFromAssignments(
   >();
   for (const row of rows) {
     if (!row.provider || !row.model) continue;
-    const key = `${row.provider}/${row.model}`;
+    const norm = normalizeModelKey(row.provider, row.model);
+    const key = `${norm.provider}/${norm.model}`;
     let entry = byModel.get(key);
     if (!entry) {
       entry = {
-        provider: row.provider,
-        model: row.model,
+        provider: norm.provider,
+        model: norm.model,
         games: new Set(),
         winGames: new Set(),
       };
       byModel.set(key, entry);
     }
     entry.games.add(row.game_id);
-    const winner = getGameWinnerFromEvents(gameRepository, row.game_id);
-    if (sideWon(row.role, winner)) entry.winGames.add(row.game_id);
+  }
+
+  // Wins come ONLY from real per-player rows (players.won = 1) — never
+  // from game-level winners (MAF-GAP-036). The previous sideWon
+  // attribution credited every role-group on the winning side, which
+  // fabricated the 'CUSTOM/openai' 127/127 winRate=1.0 row.
+  try {
+    const pExpr = normalizedModelSql('p');
+    const wonRows = db.prepare(`
+      SELECT p.game_id,
+             p.provider,
+             ${pExpr} as model
+      FROM players p
+      WHERE p.provider IS NOT NULL AND p.model IS NOT NULL
+        AND p.won = 1
+      GROUP BY p.game_id, p.provider, ${pExpr}
+    `).all() as Array<{
+      game_id: string;
+      provider: string;
+      model: string;
+    }>;
+    for (const r of wonRows) {
+      if (!r.provider || !r.model) continue;
+      const norm = normalizeModelKey(r.provider, r.model);
+      const entry = byModel.get(`${norm.provider}/${norm.model}`);
+      if (entry) entry.winGames.add(r.game_id);
+    }
+  } catch {
+    // players table unavailable — wins stay honest zeros.
   }
 
   // Real per-game token/cost totals recorded by the legacy adapter from
@@ -155,7 +167,8 @@ function getModelComparisonFromAssignments(
     }>;
     for (const row of usageRows) {
       if (!row.provider || !row.model) continue;
-      const key = `${row.provider}/${row.model}`;
+      const norm = normalizeModelKey(row.provider, row.model);
+      const key = `${norm.provider}/${norm.model}`;
       let list = usageByModel.get(key);
       if (!list) {
         list = [];
@@ -182,7 +195,8 @@ function getModelComparisonFromAssignments(
     }>;
     for (const row of latencyRows) {
       if (!row.provider || !row.model) continue;
-      latencyByModel.set(`${row.provider}/${row.model}`, row.avg_latency || 0);
+      const norm = normalizeModelKey(row.provider, row.model);
+      latencyByModel.set(`${norm.provider}/${norm.model}`, row.avg_latency || 0);
     }
   } catch {
     // api_calls unavailable — keep honest zeros below.
@@ -260,7 +274,8 @@ function getModelComparisonFromUsage(
     `).all() as Array<{ provider: string; model: string; avg_latency: number }>;
     for (const row of latencyRows) {
       if (!row.provider || !row.model) continue;
-      latencyByModel.set(`${row.provider}/${row.model}`, row.avg_latency || 0);
+      const norm = normalizeModelKey(row.provider, row.model);
+      latencyByModel.set(`${norm.provider}/${norm.model}`, row.avg_latency || 0);
     }
   } catch {
     // api_calls unavailable — keep honest zeros below.
@@ -334,8 +349,16 @@ export function getModelComparison(
     }>,
   ) => {
     for (const row of rows) {
-      const key = `${row.provider}/${row.model}`;
-      if (!merged.has(key)) merged.set(key, row);
+      if (!row.provider || !row.model) continue;
+      const norm = normalizeModelKey(row.provider, row.model);
+      const key = `${norm.provider}/${norm.model}`;
+      // Earlier sources win on key collision (MAF-GAP-012): the players
+      // table and player_model_assignments are authoritative about which
+      // games a model played; token_usage rows for games without
+      // assignments (fake 'ALL' player) must not shadow them (MAF-GAP-036).
+      if (!merged.has(key)) {
+        merged.set(key, { ...row, provider: norm.provider, model: norm.model });
+      }
     }
   };
 
