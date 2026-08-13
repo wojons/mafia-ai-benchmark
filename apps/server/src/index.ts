@@ -87,9 +87,12 @@ async function main(): Promise<void> {
     next();
   });
 
-  app.get('/health', (req, res) => {
+  const healthHandler = (req: express.Request, res: express.Response) => {
     res.json({ status: 'healthy', timestamp: new Date().toISOString(), uptime: process.uptime(), memory: process.memoryUsage() });
-  });
+  };
+
+  app.get('/health', healthHandler);
+  app.get('/api/v1/health', healthHandler);
 
   app.get('/api/v1', (req, res) => {
     res.json({ version: '1.0.0', name: 'Mafia AI Benchmark API', endpoints: '/api/v1/games, /api/v1/players, /api/v1/agents, /api/v1/stats, /api/v1/benchmark' });

@@ -13,4 +13,14 @@ describe('Health endpoint', () => {
     expect(data.timestamp).toBeDefined();
     expect(data.uptime).toBeGreaterThan(0);
   });
+
+  it('exposes /api/v1/health alias with the same payload (MAF-GAP-037)', async () => {
+    const response = await fetch(`${BASE_URL}/api/v1/health`);
+    expect(response.status).toBe(200);
+    const data = await response.json();
+    expect(data.status).toBe('healthy');
+    expect(data.timestamp).toBeDefined();
+    expect(data.uptime).toBeGreaterThan(0);
+    expect(data.memory).toBeDefined();
+  });
 });
