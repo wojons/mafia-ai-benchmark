@@ -39,6 +39,40 @@ function sideWon(
 }
 
 /**
+ * SQL expression selecting the NORMALIZED model string for a table alias
+ * (MAF-GAP-036). Some rows carry the provider prefix inside the model
+ * column (provider='openai', model='openai/gpt-4o-mini') while others do
+ * not (provider='openai', model='gpt-4o-mini'). Both are the same real
+ * model, so the prefix is stripped before aggregation (LIKE is
+ * case-insensitive for ASCII in SQLite, matching normalizeModelKey below).
+ */
+function normalizedModelSql(alias: string): string {
+  return `CASE WHEN ${alias}.model LIKE ${alias}.provider || '/%' THEN substr(${alias}.model, length(${alias}.provider) + 2) ELSE ${alias}.model END`;
+}
+
+/**
+ * Normalize a provider/model pair for aggregation (MAF-GAP-036): strip a
+ * leading '<provider>/' prefix from the model string when present
+ * (case-insensitive), so provider-prefixed and plain model spellings
+ * merge into ONE row instead of producing duplicate/contradictory rows.
+ * The provider is returned unchanged.
+ */
+export function normalizeModelKey(
+  provider: string,
+  model: string,
+): { provider: string; model: string } {
+  if (!provider || !model) return { provider, model };
+  const prefix = `${provider}/`;
+  if (
+    model.length > prefix.length &&
+    model.slice(0, prefix.length).toLowerCase() === prefix.toLowerCase()
+  ) {
+    return { provider, model: model.slice(prefix.length) };
+  }
+  return { provider, model };
+}
+
+/**
  * Derive honest per-model rows from real per-game model assignments
  * (player_model_assignments joined to ended games). Wins are games where
  * the model's assigned role side actually won (via game events). Returns
@@ -329,6 +363,123 @@ export function getModelComparison(
 }
 
 /**
+ * Honest fallback model rows for the benchmark report when the players
+ * table has no role-attributed rows (legacy games, MAF-GAP-036).
+ *
+ * Wins come ONLY from players.won per row; usage-derived rows keep wins
+ * 0 because role/side attribution is unknowable. The assignment path's
+ * game-level-winner attribution (sideWon on ended games) is deliberately
+ * NOT used here — it attributes wins to fake 'ALL' player rows and
+ * fabricated the 'CUSTOM/openai' 126/126 winRate=1.0 row. All keys use
+ * the normalized model string so provider-prefixed rows merge into a
+ * single row.
+ */
+function getHonestReportFallbackModels(
+  gameRepository: GameRepository,
+): Array<{
+  provider: string;
+  model: string;
+  gamesPlayed: number;
+  wins: number;
+  winRate: number;
+  avgTokens: number;
+  avgCost: number;
+  avgLatency: number;
+}> {
+  const db = gameRepository.getDatabase();
+  const rows: Array<{
+    provider: string;
+    model: string;
+    gamesPlayed: number;
+    wins: number;
+    winRate: number;
+    avgTokens: number;
+    avgCost: number;
+    avgLatency: number;
+  }> = [];
+  const covered = new Set<string>();
+  const pExpr = normalizedModelSql('p');
+
+  // 1. players-table rows (any role) — wins from players.won per row.
+  try {
+    const playerRows = db.prepare(`
+      SELECT p.provider,
+             ${pExpr} as model,
+             COUNT(DISTINCT p.game_id) as games_played,
+             SUM(CASE WHEN p.won = 1 THEN 1 ELSE 0 END) as wins,
+             COALESCE(AVG(p.tokens_used), 0) as avg_tokens
+      FROM players p
+      WHERE p.provider IS NOT NULL AND p.model IS NOT NULL
+      GROUP BY p.provider, ${pExpr}
+    `).all() as Array<{
+      provider: string;
+      model: string;
+      games_played: number;
+      wins: number;
+      avg_tokens: number;
+    }>;
+    for (const r of playerRows) {
+      if (!r.provider || !r.model) continue;
+      covered.add(`${r.provider}/${r.model}`);
+      rows.push({
+        provider: r.provider,
+        model: r.model,
+        gamesPlayed: r.games_played,
+        wins: r.wins,
+        winRate: r.games_played > 0 ? r.wins / r.games_played : 0,
+        avgTokens: r.avg_tokens || 0,
+        avgCost: 0,
+        avgLatency: 0,
+      });
+    }
+  } catch {
+    // players table unavailable — usage-derived rows below still work.
+  }
+
+  // 2. real recorded usage for ended games (wins stay 0 — unattributable).
+  try {
+    const tuExpr = normalizedModelSql('tu');
+    const usageRows = db.prepare(`
+      SELECT tu.provider,
+             ${tuExpr} as model,
+             COUNT(DISTINCT tu.game_id) as games_played,
+             SUM(tu.total_tokens) as tokens,
+             COALESCE(SUM(tu.cost), 0) as cost
+      FROM token_usage tu
+      JOIN games g ON g.id = tu.game_id
+      WHERE g.status = 'ENDED'
+        AND tu.provider IS NOT NULL AND tu.model IS NOT NULL
+      GROUP BY tu.provider, ${tuExpr}
+    `).all() as Array<{
+      provider: string;
+      model: string;
+      games_played: number;
+      tokens: number;
+      cost: number;
+    }>;
+    for (const r of usageRows) {
+      if (!r.provider || !r.model) continue;
+      const key = `${r.provider}/${r.model}`;
+      if (covered.has(key)) continue;
+      rows.push({
+        provider: r.provider,
+        model: r.model,
+        gamesPlayed: r.games_played,
+        wins: 0,
+        winRate: 0,
+        avgTokens: r.games_played > 0 ? r.tokens / r.games_played : 0,
+        avgCost: r.games_played > 0 ? r.cost / r.games_played : 0,
+        avgLatency: 0,
+      });
+    }
+  } catch {
+    // token_usage unavailable — players-derived rows only.
+  }
+
+  return rows.sort((a, b) => b.gamesPlayed - a.gamesPlayed);
+}
+
+/**
  * Get comprehensive model comparison report.
  * When the players/token_usage tables are empty (legacy games), derives
  * model and trend data from game events.
@@ -382,10 +533,14 @@ export function getCompareReport(
     modelFilter && modelFilter.length > 0 ? modelFilter : null;
 
   // ===== Per-model aggregate stats =====
+  // MAF-GAP-036: aggregate on the NORMALIZED model string — rows that carry
+  // the provider prefix inside the model column and rows that don't are the
+  // same real model and must merge into ONE row.
+  const modelExpr = normalizedModelSql('p');
   let modelQuery = `
       SELECT 
         p.provider,
-        p.model,
+        ${modelExpr} as model,
         COUNT(DISTINCT p.game_id) as games_played,
         SUM(CASE WHEN p.won = 1 THEN 1 ELSE 0 END) as wins,
         COALESCE(AVG(p.tokens_used), 0) as avg_tokens,
@@ -398,11 +553,11 @@ export function getCompareReport(
 
   if (modelList) {
     const placeholders = modelList.map(() => '?').join(',');
-    modelQuery += ` AND p.model IN (${placeholders})`;
-    modelParams.push(...modelList);
+    modelQuery += ` AND (p.model IN (${placeholders}) OR ${modelExpr} IN (${placeholders}))`;
+    modelParams.push(...modelList, ...modelList);
   }
 
-  modelQuery += ` GROUP BY p.provider, p.model ORDER BY games_played DESC`;
+  modelQuery += ` GROUP BY p.provider, ${modelExpr} ORDER BY games_played DESC`;
 
   const modelRows = db
     .prepare(modelQuery)
@@ -411,7 +566,7 @@ export function getCompareReport(
   // ===== Per-model role-specific performance =====
   let roleQueryBody = `
         p.provider,
-        p.model,
+        ${modelExpr} as model,
         p.role,
         COUNT(DISTINCT p.game_id) as games_played,
         SUM(CASE WHEN p.won = 1 THEN 1 ELSE 0 END) as wins
@@ -423,11 +578,11 @@ export function getCompareReport(
 
   if (modelList) {
     const placeholders = modelList.map(() => '?').join(',');
-    roleQueryBody += ` AND p.model IN (${placeholders})`;
-    roleParams.push(...modelList);
+    roleQueryBody += ` AND (p.model IN (${placeholders}) OR ${modelExpr} IN (${placeholders}))`;
+    roleParams.push(...modelList, ...modelList);
   }
 
-  const roleQuery = `SELECT ${roleQueryBody} GROUP BY p.provider, p.model, p.role`;
+  const roleQuery = `SELECT ${roleQueryBody} GROUP BY p.provider, ${modelExpr}, p.role`;
   const roleRows = db
     .prepare(roleQuery)
     .all(...roleParams) as Record<string, unknown>[];
@@ -450,38 +605,43 @@ export function getCompareReport(
     };
   }
 
-  // ===== Avg cost per model =====
+  // ===== Avg cost per model (normalized key, MAF-GAP-036) =====
+  const tuModelExpr = normalizedModelSql('tu');
   let costQuery = `
       SELECT 
         tu.provider,
-        tu.model,
+        tu.model_n,
         COALESCE(AVG(cost_sum), 0) as avg_cost_per_game
       FROM (
-        SELECT provider, model, game_id, SUM(cost) as cost_sum
-        FROM token_usage
-        WHERE provider IS NOT NULL AND model IS NOT NULL
+        SELECT tu.provider,
+               ${tuModelExpr} as model_n,
+               tu.game_id,
+               SUM(tu.cost) as cost_sum
+        FROM token_usage tu
+        WHERE tu.provider IS NOT NULL AND tu.model IS NOT NULL
     `;
   const costParams: string[] = [];
   if (modelList) {
     const placeholders = modelList.map(() => '?').join(',');
-    costQuery += ` AND model IN (${placeholders})`;
-    costParams.push(...modelList);
+    costQuery += ` AND (tu.model IN (${placeholders}) OR ${tuModelExpr} IN (${placeholders}))`;
+    costParams.push(...modelList, ...modelList);
   }
-  costQuery += ` GROUP BY provider, model, game_id) tu GROUP BY tu.provider, tu.model`;
+  costQuery += ` GROUP BY tu.provider, model_n, tu.game_id) tu GROUP BY tu.provider, tu.model_n`;
   const costRows = db
     .prepare(costQuery)
     .all(...costParams) as Record<string, unknown>[];
 
   const costMap = new Map<string, number>();
   for (const row of costRows) {
-    costMap.set(`${row.provider}/${row.model}`, row.avg_cost_per_game as number);
+    costMap.set(`${row.provider}/${row.model_n}`, row.avg_cost_per_game as number);
   }
 
-  // ===== Avg latency per model =====
+  // ===== Avg latency per model (normalized key, MAF-GAP-036) =====
+  const acModelExpr = normalizedModelSql('ac');
   let latencyQuery = `
       SELECT 
         ac.provider,
-        ac.model,
+        ${acModelExpr} as model,
         COALESCE(AVG(ac.latency), 0) as avg_latency
       FROM api_calls ac
       WHERE ac.provider IS NOT NULL AND ac.model IS NOT NULL
@@ -490,10 +650,10 @@ export function getCompareReport(
   const latencyParams: string[] = [];
   if (modelList) {
     const placeholders = modelList.map(() => '?').join(',');
-    latencyQuery += ` AND ac.model IN (${placeholders})`;
-    latencyParams.push(...modelList);
+    latencyQuery += ` AND (ac.model IN (${placeholders}) OR ${acModelExpr} IN (${placeholders}))`;
+    latencyParams.push(...modelList, ...modelList);
   }
-  latencyQuery += ` GROUP BY ac.provider, ac.model`;
+  latencyQuery += ` GROUP BY ac.provider, ${acModelExpr}`;
   const latencyRows = db
     .prepare(latencyQuery)
     .all(...latencyParams) as Record<string, unknown>[];
@@ -550,7 +710,7 @@ export function getCompareReport(
   let trendQuery = `
       SELECT 
         p.provider,
-        p.model,
+        ${modelExpr} as model,
         p.game_id,
         p.role,
         p.won,
@@ -564,23 +724,26 @@ export function getCompareReport(
   const trendParams: string[] = [];
   if (modelList) {
     const placeholders = modelList.map(() => '?').join(',');
-    trendQuery += ` AND p.model IN (${placeholders})`;
-    trendParams.push(...modelList);
+    trendQuery += ` AND (p.model IN (${placeholders}) OR ${modelExpr} IN (${placeholders}))`;
+    trendParams.push(...modelList, ...modelList);
   }
-  trendQuery += ` ORDER BY p.model, g.created_at ASC`;
+  trendQuery += ` ORDER BY ${modelExpr}, g.created_at ASC`;
 
   const trendRows = db
     .prepare(trendQuery)
     .all(...trendParams) as Record<string, unknown>[];
 
-  // Fallback: if no player-level trend data, derive honest per-model
-  // trends from real per-game model assignments (legacy path). A game is
-  // only counted for a model that actually played it, and only as a win
-  // when that model's assigned role side won (MAF-GAP-012). No real
-  // assignments -> empty trends/models, never fabricated entries.
+  // Fallback: if no player-level trend data (legacy games — players carry
+  // role 'UNASSIGNED'), derive honest per-model rows from the players table
+  // and real recorded usage only (MAF-GAP-036). Wins may ONLY come from
+  // players.won per row (or stay 0 when unattributable) — the previous
+  // assignment-derived, game-level-winner attribution (sideWon on ended
+  // games) fabricated wins for fake 'ALL' player rows and must not be used.
   if (trendRows.length === 0) {
     const fallbackModels: AnyRecord[] =
-      models.length > 0 ? (models as AnyRecord[]) : getModelComparison(gameRepository);
+      models.length > 0
+        ? (models as AnyRecord[])
+        : getHonestReportFallbackModels(gameRepository);
 
     const t: AnyRecord[] = [];
     for (const m of fallbackModels) {
@@ -601,7 +764,39 @@ export function getCompareReport(
       cumulativeWinRate: number[];
     }> = [];
 
-    // Per-model game entries derived from real assignments + game events.
+    // Per-game, per-model wins from real players.won rows only — the report
+    // must never attribute a win from the game-level winner to a fake
+    // 'ALL' player (MAF-GAP-036).
+    const wonByGameModel = new Map<string, boolean>();
+    try {
+      const wonRows = db.prepare(`
+        SELECT p.game_id,
+               p.provider,
+               ${modelExpr} as model,
+               SUM(CASE WHEN p.won = 1 THEN 1 ELSE 0 END) as wins
+        FROM players p
+        WHERE p.provider IS NOT NULL AND p.model IS NOT NULL
+          AND p.won = 1
+        GROUP BY p.game_id, p.provider, ${modelExpr}
+      `).all() as Array<{
+        game_id: string;
+        provider: string;
+        model: string;
+        wins: number;
+      }>;
+      for (const r of wonRows) {
+        wonByGameModel.set(
+          `${r.game_id}|${r.provider}/${r.model}`,
+          (r.wins || 0) > 0,
+        );
+      }
+    } catch {
+      // players table unavailable — every fallback entry stays a loss
+      // (honest: no fabricated wins).
+    }
+
+    // Per-model game entries derived from real assignments; the won flag
+    // comes from players.won per row, never from game-level winners.
     const assignmentRows = db.prepare(`
       SELECT pma.provider, pma.model, pma.game_id, pma.role, g.created_at
       FROM player_model_assignments pma
@@ -620,12 +815,12 @@ export function getCompareReport(
     >();
     for (const row of assignmentRows) {
       if (!row.provider || !row.model) continue;
-      const key = `${row.provider}/${row.model}`;
+      const norm = normalizeModelKey(row.provider, row.model);
+      const key = `${norm.provider}/${norm.model}`;
       if (!entriesByModel.has(key)) entriesByModel.set(key, []);
-      const winner = getGameWinnerFromEvents(gameRepository, row.game_id);
       entriesByModel.get(key)!.push({
         gameId: row.game_id,
-        won: sideWon(row.role, winner),
+        won: wonByGameModel.get(`${row.game_id}|${key}`) === true,
         role: row.role || 'UNASSIGNED',
         tokensUsed: 0,
         createdAt: new Date(row.created_at).toISOString(),
@@ -652,18 +847,21 @@ export function getCompareReport(
       });
     }
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const normalizedModels: any = fallbackModels2.map((m: AnyRecord) => ({
-      provider: m.provider,
-      model: m.model,
-      gamesPlayed: m.gamesPlayed,
-      wins: m.wins,
-      winRate: m.winRate,
-      avgTokensPerGame: m.avgTokensPerGame ?? m.avgTokens ?? 0,
-      avgCostPerGame: m.avgCostPerGame ?? m.avgCost ?? 0,
-      avgLatency: m.avgLatency ?? 0,
-      avgRolePerformance: m.avgRolePerformance ?? 0,
-      rolePerformance: m.rolePerformance ?? {},
-    }));
+    const normalizedModels: any = fallbackModels2.map((m: AnyRecord) => {
+      const key = `${m.provider}/${m.model}`;
+      return {
+        provider: m.provider,
+        model: m.model,
+        gamesPlayed: m.gamesPlayed,
+        wins: m.wins,
+        winRate: m.winRate,
+        avgTokensPerGame: m.avgTokensPerGame ?? m.avgTokens ?? 0,
+        avgCostPerGame: m.avgCostPerGame ?? m.avgCost ?? costMap.get(key) ?? 0,
+        avgLatency: m.avgLatency ?? latencyMap.get(key) ?? 0,
+        avgRolePerformance: m.avgRolePerformance ?? 0,
+        rolePerformance: m.rolePerformance ?? {},
+      };
+    });
     return {
       models: normalizedModels,
       headToHead,

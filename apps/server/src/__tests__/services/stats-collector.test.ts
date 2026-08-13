@@ -827,6 +827,117 @@ describe('StatsCollector', () => {
   });
 
   // ==========================================================================
+  // getCompareReport (benchmark report — MAF-GAP-036)
+  // ==========================================================================
+
+  describe('getCompareReport()', () => {
+    it('merges provider-prefixed model spellings into ONE row (MAF-GAP-036)', () => {
+      // Live-data shape: some players rows carry the provider inside the
+      // model column (openai/openai/gpt-4o-mini), others do not
+      // (openai/gpt-4o-mini). Both are the same real model and must
+      // aggregate into a single row.
+      repo.seedGame({
+        id: 'r1', status: 'ENDED',
+        players: [
+          { id: 'r1p1', name: 'R1P1', role: 'MAFIA', joinOrder: 0, isMafia: true,
+            provider: 'openai', model: 'openai/gpt-4o-mini', won: 1, tokens_used: 100 },
+        ],
+      });
+      repo.seedGame({
+        id: 'r2', status: 'ENDED',
+        players: [
+          { id: 'r2p1', name: 'R2P1', role: 'VILLAGER', joinOrder: 0,
+            provider: 'openai', model: 'gpt-4o-mini', won: 0, tokens_used: 200 },
+        ],
+      });
+
+      const report = stats.getCompareReport();
+      const rows = report.models.filter(
+        (m) => m.provider === 'openai' &&
+          (m.model === 'gpt-4o-mini' || m.model === 'openai/gpt-4o-mini'),
+      );
+      expect(rows).toHaveLength(1);
+      expect(rows[0].provider).toBe('openai');
+      expect(rows[0].model).toBe('gpt-4o-mini');
+      expect(rows[0].gamesPlayed).toBe(2);
+      expect(rows[0].wins).toBe(1);
+    });
+
+    it('counts wins from players.won per row — game-level winner never fabricates wins', () => {
+      // All three games are won by MAFIA at the game level, but only ONE
+      // player row carries won=1. Wins must come from players.won per
+      // player-model row, not from the game-level winner.
+      repo.seedGame({
+        id: 'w1', status: 'ENDED',
+        events: [{ type: 'PHASE_CHANGED', data: { winner: 'MAFIA' }, phase: 'GAME_OVER' }],
+        players: [
+          { id: 'w1p1', name: 'W1P1', role: 'TOWN', joinOrder: 0,
+            provider: 'openai', model: 'gpt-4o-mini', won: 1 },
+        ],
+      });
+      repo.seedGame({
+        id: 'w2', status: 'ENDED',
+        events: [{ type: 'PHASE_CHANGED', data: { winner: 'MAFIA' }, phase: 'GAME_OVER' }],
+        players: [
+          { id: 'w2p1', name: 'W2P1', role: 'TOWN', joinOrder: 0,
+            provider: 'openai', model: 'gpt-4o-mini', won: 0 },
+        ],
+      });
+      repo.seedGame({
+        id: 'w3', status: 'ENDED',
+        events: [{ type: 'PHASE_CHANGED', data: { winner: 'MAFIA' }, phase: 'GAME_OVER' }],
+        players: [
+          { id: 'w3p1', name: 'W3P1', role: 'TOWN', joinOrder: 0,
+            provider: 'openai', model: 'gpt-4o-mini', won: 0 },
+        ],
+      });
+
+      const report = stats.getCompareReport();
+      const row = report.models.find(
+        (m) => m.provider === 'openai' && m.model === 'gpt-4o-mini',
+      );
+      expect(row).toBeDefined();
+      expect(row!.gamesPlayed).toBe(3);
+      expect(row!.wins).toBe(1);
+      expect(row!.winRate).toBeCloseTo(1 / 3, 5);
+    });
+
+    it('mixed-outcome multi-game aggregates have winRate strictly between 0 and 1', () => {
+      repo.seedGame({
+        id: 'm1', status: 'ENDED',
+        players: [
+          { id: 'm1p1', name: 'M1P1', role: 'MAFIA', joinOrder: 0, isMafia: true,
+            provider: 'openai', model: 'openai/gpt-4o-mini', won: 1 },
+        ],
+      });
+      repo.seedGame({
+        id: 'm2', status: 'ENDED',
+        players: [
+          { id: 'm2p1', name: 'M2P1', role: 'MAFIA', joinOrder: 0, isMafia: true,
+            provider: 'openai', model: 'gpt-4o-mini', won: 0 },
+        ],
+      });
+      repo.seedGame({
+        id: 'm3', status: 'ENDED',
+        players: [
+          { id: 'm3p1', name: 'M3P1', role: 'MAFIA', joinOrder: 0, isMafia: true,
+            provider: 'openai', model: 'gpt-4o-mini', won: 0 },
+        ],
+      });
+
+      const report = stats.getCompareReport();
+      const row = report.models.find(
+        (m) => m.provider === 'openai' && m.model === 'gpt-4o-mini',
+      );
+      expect(row).toBeDefined();
+      expect(row!.gamesPlayed).toBe(3);
+      expect(row!.wins).toBe(1);
+      expect(row!.winRate).toBeGreaterThan(0);
+      expect(row!.winRate).toBeLessThan(1);
+    });
+  });
+
+  // ==========================================================================
   // Report generation
   // ==========================================================================
 
