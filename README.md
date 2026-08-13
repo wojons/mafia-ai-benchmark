@@ -74,6 +74,7 @@ pnpm --filter @mafia/cli benchmark
 | **[POSTER.md](POSTER.md)**                                     | Visual system overview             |
 | **[specs/correct-night-flow.md](specs/correct-night-flow.md)** | Game flow specification            |
 | **[specs/persona-system.md](specs/persona-system.md)**         | Persona system documentation       |
+| **[docs/api-reference.md](docs/api-reference.md)**             | API reference & integration guide  |
 
 ## 🎭 Persona System
 
