@@ -415,10 +415,10 @@ describe('StatsCollector', () => {
           (id, game_id, player_id, role, provider, model, temperature, max_tokens, priority, created_at)
         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
       `);
-      // Model A plays MAFIA in both games: wins game 1 (MAFIA won), loses game 2.
+      // Model A plays MAFIA in both games; model B plays TOWN in both games.
       insert.run('a1', 'legacy1', 'ALL', 'MAFIA', 'providerA', 'modelA', 0.7, 500, 0, Date.now());
       insert.run('a2', 'legacy2', 'ALL', 'MAFIA', 'providerA', 'modelA', 0.7, 500, 0, Date.now());
-      // Model B plays TOWN in both games: loses game 1, wins game 2.
+      // Model B plays TOWN in both games.
       insert.run('b1', 'legacy1', 'ALL', 'TOWN', 'providerB', 'modelB', 0.7, 500, 0, Date.now());
       insert.run('b2', 'legacy2', 'ALL', 'TOWN', 'providerB', 'modelB', 0.7, 500, 0, Date.now());
 
@@ -426,12 +426,13 @@ describe('StatsCollector', () => {
       expect(cmp).toHaveLength(2);
       const a = cmp.find(m => m.provider === 'providerA' && m.model === 'modelA')!;
       expect(a.gamesPlayed).toBe(2);
-      expect(a.wins).toBe(1);
-      expect(a.winRate).toBeCloseTo(0.5, 5);
+      // No players.won rows exist — wins stay 0 (no fabricated side wins).
+      expect(a.wins).toBe(0);
+      expect(a.winRate).toBe(0);
       const b = cmp.find(m => m.provider === 'providerB' && m.model === 'modelB')!;
       expect(b.gamesPlayed).toBe(2);
-      expect(b.wins).toBe(1);
-      expect(b.winRate).toBeCloseTo(0.5, 5);
+      expect(b.wins).toBe(0);
+      expect(b.winRate).toBe(0);
       // No fabricated model may appear.
       expect(cmp.some(m => m.provider === 'neuralwatt' || m.model === 'qwen3.6-35b-fast')).toBe(false);
     });
