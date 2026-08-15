@@ -27,9 +27,11 @@ cd mafia-ai-benchmark
 # 1. Install dependencies
 pnpm install
 
-# 2. Add your API key to .env (required!)
+# 2. Copy the sample env and add your API key (required!)
+cp .env.sample .env
 nano .env
 # OPENAI_API_KEY=sk-or-v1-YOUR-KEY-HERE
+# OPENAI_BASE_URL and MODEL are also required — see .env.sample for all options
 
 # 3. Build all packages
 pnpm build
