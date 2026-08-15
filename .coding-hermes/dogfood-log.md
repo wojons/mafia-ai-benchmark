@@ -24,3 +24,50 @@
 **Artifacts left:** docs/dogfood/2026-08-06-integration.md, docs/dogfood/diagnostics.md, .opencode/skills/mafia-usage/SKILL.md.
 
 **Foreman:** already at CooldownS=900, Enabled=true — no wake-up needed.
+
+| 2026-08-15 | 🟡 PROMISING-BUT-ROUGH | "Benchmark AI models' Mafia-playing ability via `mafiactl run-game`/`mafiactl benchmark`, HTTP API :3004, or web :5174, with per-model win/cost stats" | (1) per-model wins structurally 0 after 1083 games (players.won never populated — MAF-GAP-043); (2) eliminations invisible — lynched mafia has isAlive:true, no death event (MAF-GAP-044); (3) benchmark 10p game degenerated at Day 6 (empty/canned SAYS, JSON-parse retry crawl, ~2 min zero events; completed after ~9.5 min — MAF-GAP-042); (4) model keys fragmented (gpt-4o-mini/openai/openai/gpt-4o-mini) + CLI display warts (MAF-GAP-045/046/047) | CLI: ~1 min (run-game → game created; ENDED in 98 s). API: <30 s. |
+
+## 2026-08-15 — Second full dogfood run (cron)
+
+**Promise statement (null hypothesis):** A user can benchmark AI models'
+Mafia-playing ability by running `mafiactl run-game` / `mafiactl benchmark`
+against the local server (or the HTTP API / web dashboard at :3004/:5174),
+and get real games with split-pane THINK/SAYS plus per-model win/cost
+statistics.
+
+**What was done (real use, not tests):**
+- `mafiactl run-game --players 5 --yes` (live server :3004): game created,
+  auto-played with real LLM calls, ENDED in ~98 s. Verified: roles
+  (MAFIA/DOCTOR/SHERIFF/VILLAGER x2), per-player tokensUsed 6.0-11.4k,
+  winner TOWN in config.winner, 26 events, rich persona SAYS. MAF-GAP-009
+  (silent no-op CLI) is genuinely fixed.
+- `mafiactl watch-game <gid>`: WS connect + stream works; prints
+  "Phase: undefined" (MAF-GAP-046).
+- `mafiactl benchmark --games 1 --models openai/gpt-4o-mini,openai/gpt-4o`:
+  POSTs real run (bd6b1df3), server plays a 10p game (110 events, winner
+  MAFIA), run COMPLETED. MAF-GAP-010/015 (fake benchmark) genuinely fixed.
+  BUT: zero stdout for the whole ~9.5 min (MAF-GAP-047) and a Day-6
+  degenerate-output crawl in server logs (MAF-GAP-042).
+- HTTP API verified: /api/v1/health, games?limit=2 (honored), game detail
+  (roles + per-player model/tokens), events + SSE, /api/v1/stats
+  (avgDuration 197 s sane), /api/v1/benchmark/runs (COMPLETED rows).
+- Report: summary real (1083 completed, mafiaWinRate 0.141, avgTokens
+  46.9k/$0.0096 per gpt-4o-mini game) but EVERY modelPerformance row
+  wins:0/winRate:0 and 3 spellings of the same model (MAF-GAP-043/045).
+- Web dashboard :5174 serves; nginx proxy to API confirmed; no
+  localhost:3000 hardcodes in the bundle.
+- Friction count: 10. Time-to-first-success: ~1 min.
+
+**Tasks written:** MAF-GAP-042 (P1 degenerate benchmark output),
+MAF-GAP-043 (P1 wins structurally 0), MAF-GAP-044 (P1 eliminations
+invisible), MAF-GAP-045 (P2 model key fragmentation), MAF-GAP-046 (P2 CLI
+display undefineds), MAF-GAP-047 (P2 benchmark CLI UX). See
+.coding-hermes/board/tasks.jsonl.
+
+**Artifacts left:** docs/dogfood/2026-08-15-integration.md (new),
+docs/dogfood/diagnostics.md (appended), .opencode/skills/mafia-usage/
+SKILL.md (refreshed — was stale re: CLI).
+
+**Foreman:** NOT woken — cooldown 21600 s is an operator pin in fleet.toml
+(fleet convention: stand-in cycles skip G5 for this project); foreman
+ticked PRODUCTIVE today at 13:18 and will pick the tasks up next tick.

@@ -135,3 +135,58 @@ broken, and its statistics layer actively fabricates data. It is
 PROMISING-BUT-ROUGH: real value underneath, usability and honesty are the
 blockers. MAF-GAP-009 is the P0 — a user following QUICK_START today gets
 nothing.
+
+---
+
+# 2026-08-15 — Second dogfood run: what changed, what broke, the right way
+
+## How the system is actually built (verified by use, not by reading)
+
+- **Game loop**: `POST /api/v1/games` creates a game that auto-starts on the
+  **legacy engine** (`game-engine.js`, ~5,300 lines, run as a child process).
+  The `LegacyAdapter` bridges the engine's stdout to persisted events
+  (AGENT_SAYS_BROADCASTED, NIGHT_ACTION_SUBMITTED, MORNING_REVEAL,
+  VOTE_CAST, PHASE_CHANGED, GAME_ENDED...). Real LLM calls happen inside the
+  engine via the configured provider (`openai/gpt-4o-mini` default).
+- **CLI**: `mafiactl run-game` only CREATES the game (exits immediately;
+  watch with `mafiactl watch-game`). `mafiactl benchmark` POSTs a run
+  (`/api/v1/benchmark`) and polls `/api/v1/benchmark/runs` until COMPLETED.
+- **Stats/report**: `GET /api/v1/benchmark/report` aggregates real
+  token/cost rows (works now) and derives `wins` from `players.won` — a
+  field the write path never populates, so wins are structurally 0
+  (MAF-GAP-043). Summary `mafiaWinRate` comes from `games.winner` and IS real.
+
+## Errors hit today and their causes
+
+| Error / symptom | Cause | Right way |
+|---|---|---|
+| `Night: undefineds` in run-game | CLI reads `nightDuration` from the create-game response; API never returns it (run-game.ts:64-66) | Read `config` fields that exist, or drop the line (MAF-GAP-046) |
+| `Phase: undefined` in watch-game | initial WS state payload has no `phase` at the path read (watch-game.ts:117) | Map `currentState.phase` or omit (MAF-GAP-046) |
+| `Benchmark requires at least 2 models, got 1.` | benchmark command validates pairwise runs; error gives no hint | State the pairwise design in the error/help (MAF-GAP-047) |
+| 0 stdout for ~9.5 min during benchmark | CLI only prints at completion; no progress lines | Poll + print run status periodically (MAF-GAP-047) |
+| `JSON parse failed for <player>, retrying (1..3/3)...` + `Unknown message type: undefined` (server log spam), empty SAYS `""`, canned `I think we should target someone suspicious.` | LLM output degenerates in long games (Day 6, compressed context); the bridge's parse retry crawls per player; the MAF-GAP-004 quality gate does not cover this path | Sanitize non-JSON output (skip player message after N retries), apply the SAYS gate in the bridge, cap retry storms (MAF-GAP-042) |
+| `players.won` = null on every player of ENDED games | write path never records side/winner per player | Persist won at game end; wins then become real (MAF-GAP-043) |
+| Lynched player `isAlive:true`, `eliminatedPlayers:[]`, no death event | adapter maps no elimination event; detail/currentState not updated post-game | Emit elimination events; derive isAlive/eliminated from them (MAF-GAP-044) |
+| Report: `gpt-4o-mini` / `openai` / `openai/gpt-4o-mini` / `openai/gpt-4o` rows for the same models | aggregation keys on the raw model string; provider-only and provider-prefixed spellings never merged | Normalize keys; fix the api-specs.md claim (MAF-GAP-045) |
+
+## The right way to verify a fix (from this session)
+
+1. Create a game: `mafiactl run-game --players 5 --yes` (or curl POST).
+2. Poll `GET /api/v1/games/:id` until `status=ENDED`; check
+   `config.winner` and per-player `tokensUsed` (real usage ⇒ LLM path worked).
+3. Check `GET /api/v1/games/:id/events` — expect 20+ events incl.
+   AGENT_SAYS_BROADCASTED with non-empty `says`.
+4. Run one benchmark pairing (≥2 models) and poll `/api/v1/benchmark/runs`
+   — a 10p game takes ~7-10 min; verify run → COMPLETED and the game ENDED.
+5. Snapshot `/api/v1/benchmark/report` before/after — rows must gain
+   games and tokens; wins should become non-zero after MAF-GAP-043 lands.
+
+## Bottom line (2026-08-15)
+
+The CLI and benchmark paths — completely broken on 2026-08-06 — now work
+end-to-end: real games, real personas, real tokens/cost, real run tracking.
+What still blocks honest benchmarking: per-model win rates are structurally
+0 (MAF-GAP-043), eliminations are invisible (MAF-GAP-044), and long
+benchmark games can degenerate into empty-SAYS crawls (MAF-GAP-042).
+Verdict stays **PROMISING-BUT-ROUGH** — the value is real and much closer
+to the door, but the headline benchmark output is still not trustworthy.
