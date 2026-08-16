@@ -486,12 +486,28 @@ export class GameRepository {
     // inside AVG() — invalid SQLite syntax that threw at runtime and
     // masked real data. Use a LEFT JOIN with a correlated subquery so
     // avg_cost is the mean per-player cost from token_usage.
+    //
+    // MAF-GAP-048: games_played and wins count DISTINCT games, not player
+    // rows — a game with 4 town winners of the same model previously
+    // inflated wins to 4 (SUM over won player rows) and games_played to
+    // the player-row count. Documented semantics (api-specs.md,
+    // MAF-GAP-036/039): one win per game per model.
+    //
+    // The model key is normalized before grouping (same expression as
+    // normalizedModelSql in stats-collector/models.ts, MAF-GAP-036) so
+    // provider-prefixed spellings (provider='openai', model='openai/gpt-4o-mini'
+    // vs model='gpt-4o-mini') merge into ONE row instead of producing
+    // duplicate/contradictory entries. The returned model string is the
+    // normalized spelling, matching what getModelComparison keys on.
+    const pExpr =
+      `CASE WHEN p.model LIKE p.provider || '/%' ` +
+      `THEN substr(p.model, length(p.provider) + 2) ELSE p.model END`;
     const rows = this.db.prepare(`
       SELECT 
         p.provider,
-        p.model,
-        COUNT(*) as games_played,
-        SUM(CASE WHEN p.won = 1 THEN 1 ELSE 0 END) as wins,
+        ${pExpr} as model,
+        COUNT(DISTINCT p.game_id) as games_played,
+        COUNT(DISTINCT CASE WHEN p.won = 1 THEN p.game_id END) as wins,
         AVG(p.tokens_used) as avg_tokens,
         COALESCE(AVG((
           SELECT AVG(tu.cost) FROM token_usage tu
@@ -504,7 +520,7 @@ export class GameRepository {
         )), 0) as avg_latency
       FROM players p
       WHERE p.provider IS NOT NULL
-      GROUP BY p.provider, p.model
+      GROUP BY p.provider, ${pExpr}
       ORDER BY games_played DESC
     `).all() as Record<string, unknown>[];
     

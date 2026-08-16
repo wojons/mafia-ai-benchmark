@@ -981,6 +981,71 @@ describe('StatsCollector', () => {
       // Sub-50ms rows dropped: mean(700, 800) = 750.
       expect(rows[0].avgLatency).toBeCloseTo(750, 5);
     });
+
+    it('counts one win per game per model, not one per winning player row (MAF-GAP-048)', () => {
+      // A game with 4 town winners of the SAME model is ONE win for that
+      // model — the old SUM(CASE WHEN p.won = 1) inflated wins to 4 and
+      // COUNT(*) inflated games_played to the player-row count. Live
+      // symptom: openai/gpt-4o-mini showed wins=6 with only 2 distinct
+      // won games.
+      repo.seedGame({
+        id: 'g048a',
+        players: [
+          { id: 'w1', name: 'W1', role: 'TOWN', joinOrder: 0, isMafia: false,
+            provider: 'openai', model: 'gpt-4o-mini', won: 1, tokens_used: 100 },
+          { id: 'w2', name: 'W2', role: 'TOWN', joinOrder: 1, isMafia: false,
+            provider: 'openai', model: 'gpt-4o-mini', won: 1, tokens_used: 90 },
+          { id: 'w3', name: 'W3', role: 'TOWN', joinOrder: 2, isMafia: false,
+            provider: 'openai', model: 'gpt-4o-mini', won: 1, tokens_used: 80 },
+          { id: 'w4', name: 'W4', role: 'TOWN', joinOrder: 3, isMafia: false,
+            provider: 'openai', model: 'gpt-4o-mini', won: 1, tokens_used: 70 },
+        ],
+      });
+      repo.seedGame({
+        id: 'g048b',
+        players: [
+          { id: 'l1', name: 'L1', role: 'MAFIA', joinOrder: 0, isMafia: true,
+            provider: 'openai', model: 'gpt-4o-mini', won: 0, tokens_used: 50 },
+        ],
+      });
+
+      const rows = repo.getModelStats();
+      expect(rows).toHaveLength(1);
+      expect(rows[0].provider).toBe('openai');
+      expect(rows[0].model).toBe('gpt-4o-mini');
+      expect(rows[0].gamesPlayed).toBe(2); // distinct games, not 5 player rows
+      expect(rows[0].wins).toBe(1); // 4 winners in ONE game = 1 win
+      expect(rows[0].winRate).toBeCloseTo(0.5, 5);
+    });
+
+    it('merges provider-prefixed model spellings into one row (MAF-GAP-048 normalized key)', () => {
+      // provider='openai' with model='openai/gpt-4o-mini' and model='gpt-4o-mini'
+      // are the same real model. The raw GROUP BY split them into two
+      // rows; the normalized key (MAF-GAP-036 expression) merges them so
+      // the report shows one row with distinct-game totals.
+      repo.seedGame({
+        id: 'g048c',
+        players: [
+          { id: 'n1', name: 'N1', role: 'TOWN', joinOrder: 0, isMafia: false,
+            provider: 'openai', model: 'openai/gpt-4o-mini', won: 1, tokens_used: 100 },
+        ],
+      });
+      repo.seedGame({
+        id: 'g048d',
+        players: [
+          { id: 'n2', name: 'N2', role: 'TOWN', joinOrder: 0, isMafia: false,
+            provider: 'openai', model: 'gpt-4o-mini', won: 1, tokens_used: 90 },
+        ],
+      });
+
+      const rows = repo.getModelStats();
+      expect(rows).toHaveLength(1);
+      expect(rows[0].provider).toBe('openai');
+      expect(rows[0].model).toBe('gpt-4o-mini');
+      expect(rows[0].gamesPlayed).toBe(2);
+      expect(rows[0].wins).toBe(2);
+      expect(rows[0].winRate).toBeCloseTo(1, 5);
+    });
   });
 
   // ==========================================================================
