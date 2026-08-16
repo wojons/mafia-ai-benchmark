@@ -235,6 +235,55 @@ export class GameRepository {
       joinOrder: row.join_order as number,
     }));
   }
+
+  /**
+   * Insert or replace a player row with a KNOWN id (MAF-GAP-043B).
+   *
+   * The legacy bridge persists players from the ROLES_ASSIGNED roster,
+   * where the row id MUST match the id used in the event stream (actorId)
+   * so event-derived players and table rows stay consistent. addPlayer()
+   * cannot be used for that: it generates its own id and cannot set
+   * role/is_mafia/join_order. won is left untouched (NULL) — setPlayersWon
+   * fills it at game end.
+   */
+  upsertPlayer(gameId: string, player: {
+    id: string;
+    name: string;
+    role: string;
+    isMafia: boolean;
+    joinOrder: number;
+    provider?: string;
+    model?: string;
+  }): void {
+    this.db.prepare(`
+      INSERT OR REPLACE INTO players
+        (id, game_id, name, role, is_alive, is_mafia, join_order, agent_id, provider, model)
+      VALUES (?, ?, ?, ?, 1, ?, ?, NULL, ?, ?)
+    `).run(
+      player.id,
+      gameId,
+      player.name,
+      player.role,
+      player.isMafia ? 1 : 0,
+      player.joinOrder,
+      player.provider ?? null,
+      player.model ?? null,
+    );
+  }
+
+  /**
+   * Backfill provider/model on a player row ONLY when they are NULL
+   * (MAF-GAP-043B). Used at game end to attach the real engine-tracked
+   * per-player model (bridge usageByPlayer) to rows the request config
+   * could not name. Config-derived attribution is never overwritten.
+   */
+  backfillPlayerModel(playerId: string, provider: string, model: string): void {
+    this.db.prepare(`
+      UPDATE players
+      SET provider = COALESCE(provider, ?), model = COALESCE(model, ?)
+      WHERE id = ?
+    `).run(provider, model, playerId);
+  }
   
   /**
    * Update player role

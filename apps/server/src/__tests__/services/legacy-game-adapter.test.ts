@@ -1047,4 +1047,329 @@ describe('LegacyGameAdapter', () => {
       expect(ac.endpoint).toBe('legacy-engine');
     });
   });
+
+  // ==========================================================================
+  // persistPlayers — players rows from ROLES_ASSIGNED (MAF-GAP-043B)
+  // ==========================================================================
+
+  describe('persistPlayers() from ROLES_ASSIGNED', () => {
+    function rolesAssignedEvent(content: Record<string, unknown>) {
+      return {
+        eventType: 'ROLES_ASSIGNED',
+        playerId: null,
+        playerName: null,
+        visibility: 'ADMIN_ONLY',
+        phase: 'GAME_OVER',
+        content,
+        round: 0,
+        timestamp: new Date().toISOString(),
+      };
+    }
+
+    it('persists one players row per assignment with role/is_mafia/provider/model', () => {
+      const sqliteRepo = createSqliteBackedRepository();
+      sqliteRepo.seedGame({ id: 'g-roster', status: 'IN_PROGRESS' });
+      const sqliteAdapter = new LegacyGameAdapter(eventBus, sqliteRepo as any);
+      // The benchmark runner's per-role split: model A for MAFIA, model B
+      // for the town core (keyed 'TOWN' — the legacy engine resolves town
+      // players via VILLAGER_MODEL).
+      (sqliteAdapter as any).gameConfigs.set('g-roster', {
+        numPlayers: 3,
+        roleModels: {
+          MAFIA: 'openai/gpt-4o-mini',
+          TOWN: 'anthropic/claude-3',
+        },
+      });
+
+      (sqliteAdapter as any).translateAndPublishEvent(
+        'g-roster',
+        rolesAssignedEvent({
+          assignments: [
+            { playerId: 'p1', name: 'Alice', role: 'MAFIA', isMafia: true },
+            { playerId: 'p2', name: 'Bob', role: 'SHERIFF', isMafia: false },
+            { playerId: 'p3', name: 'Carol', role: 'VILLAGER', isMafia: false },
+          ],
+        }),
+        61,
+      );
+
+      const rows = sqliteRepo.db.prepare(
+        'SELECT * FROM players WHERE game_id = ? ORDER BY join_order'
+      ).all('g-roster') as Array<Record<string, unknown>>;
+      expect(rows).toHaveLength(3);
+      // Row ids match the assignment ids (the event stream's actorIds) so
+      // event-derived players and table rows stay consistent.
+      expect(rows[0]).toMatchObject({
+        id: 'p1', name: 'Alice', role: 'MAFIA', is_mafia: 1, join_order: 0,
+        provider: 'openai', model: 'gpt-4o-mini', is_alive: 1,
+      });
+      // SHERIFF has no roleModels entry: model comes from the TOWN spec
+      // only for VILLAGER-role players; SHERIFF stays NULL (honest — the
+      // runner maps SHERIFF to model A, but a bare TOWN-keyed config does
+      // not name it; the done-time usage backfill covers the real model).
+      expect(rows[1]).toMatchObject({
+        id: 'p2', name: 'Bob', role: 'SHERIFF', is_mafia: 0, join_order: 1,
+        provider: null, model: null,
+      });
+      // VILLAGER assignment matches the TOWN config key (TOWN<->VILLAGER).
+      expect(rows[2]).toMatchObject({
+        id: 'p3', name: 'Carol', role: 'VILLAGER', is_mafia: 0, join_order: 2,
+        provider: 'anthropic', model: 'claude-3',
+      });
+      // won stays NULL at creation — setPlayersWon fills it at game end.
+      expect(rows.every(r => r.won === null)).toBe(true);
+    });
+
+    it('falls back to role/mafiaTeam for is_mafia when assignments lack the boolean', () => {
+      const sqliteRepo = createSqliteBackedRepository();
+      sqliteRepo.seedGame({ id: 'g-roster2', status: 'IN_PROGRESS' });
+      const sqliteAdapter = new LegacyGameAdapter(eventBus, sqliteRepo as any);
+      (sqliteAdapter as any).gameConfigs.set('g-roster2', { numPlayers: 3 });
+
+      // Engine-native shape: no isMafia on assignments, mafia ids in
+      // mafiaTeam (the extractPlayersFromEvents contract).
+      (sqliteAdapter as any).translateAndPublishEvent(
+        'g-roster2',
+        rolesAssignedEvent({
+          assignments: [
+            { playerId: 'p1', role: 'MAFIA' },
+            { playerId: 'p2', role: 'DOCTOR' },
+            { playerId: 'p3', role: 'VILLAGER' },
+          ],
+          mafiaTeam: ['p1', 'p2'],
+        }),
+        1,
+      );
+
+      const rows = sqliteRepo.db.prepare(
+        'SELECT id, role, is_mafia FROM players WHERE game_id = ? ORDER BY join_order'
+      ).all('g-roster2') as Array<Record<string, unknown>>;
+      expect(rows).toHaveLength(3);
+      // p1: role === 'MAFIA'. p2: mafiaTeam membership wins over a non-mafia
+      // display role (multi-role mafia-doctor). p3: neither.
+      expect(rows[0]).toMatchObject({ id: 'p1', is_mafia: 1 });
+      expect(rows[1]).toMatchObject({ id: 'p2', is_mafia: 1 });
+      expect(rows[2]).toMatchObject({ id: 'p3', is_mafia: 0 });
+    });
+
+    it('uses gameConfig llmProvider/llmModel for single-model CLI games', () => {
+      const sqliteRepo = createSqliteBackedRepository();
+      sqliteRepo.seedGame({ id: 'g-cli', status: 'IN_PROGRESS' });
+      const sqliteAdapter = new LegacyGameAdapter(eventBus, sqliteRepo as any);
+      // CLI run-game posts { config, numPlayers } — no roleModels; the
+      // GameConfig carries the one model the whole game runs on.
+      (sqliteAdapter as any).gameConfigs.set('g-cli', {
+        numPlayers: 2,
+        gameConfig: {
+          numPlayers: 2,
+          llmProvider: 'openai',
+          llmModel: 'openai/gpt-4o-mini',
+          roles: [],
+        },
+      });
+
+      (sqliteAdapter as any).translateAndPublishEvent(
+        'g-cli',
+        rolesAssignedEvent({
+          assignments: [
+            { playerId: 'p1', name: 'Alice', role: 'MAFIA', isMafia: true },
+            { playerId: 'p2', name: 'Bob', role: 'VILLAGER', isMafia: false },
+          ],
+        }),
+        1,
+      );
+
+      const rows = sqliteRepo.db.prepare(
+        'SELECT id, provider, model FROM players WHERE game_id = ? ORDER BY join_order'
+      ).all('g-cli') as Array<Record<string, unknown>>;
+      expect(rows).toHaveLength(2);
+      for (const row of rows) {
+        expect(row.provider).toBe('openai');
+        expect(row.model).toBe('gpt-4o-mini');
+      }
+    });
+
+    it('is a no-op for events without assignments and never breaks the event flow', () => {
+      const sqliteRepo = createSqliteBackedRepository();
+      sqliteRepo.seedGame({ id: 'g-noroster', status: 'IN_PROGRESS' });
+      const sqliteAdapter = new LegacyGameAdapter(eventBus, sqliteRepo as any);
+
+      expect(() => {
+        (sqliteAdapter as any).translateAndPublishEvent(
+          'g-noroster',
+          rolesAssignedEvent({ assignments: [] }),
+          1,
+        );
+        (sqliteAdapter as any).translateAndPublishEvent(
+          'g-noroster',
+          { eventType: 'STATE_CHANGE', playerId: 'system', playerName: 'System', visibility: 'PUBLIC', phase: 'SETUP', content: { status: 'IN_PROGRESS' }, round: 0, timestamp: new Date().toISOString() },
+          2,
+        );
+      }).not.toThrow();
+
+      const count = sqliteRepo.db.prepare(
+        'SELECT COUNT(*) as c FROM players WHERE game_id = ?'
+      ).get('g-noroster') as { c: number };
+      expect(count.c).toBe(0);
+      // The ROLES_ASSIGNED event itself is still persisted as an event.
+      const evCount = sqliteRepo.db.prepare(
+        'SELECT COUNT(*) as c FROM events WHERE game_id = ?'
+      ).get('g-noroster') as { c: number };
+      expect(evCount.c).toBe(2);
+    });
+
+    it('persists players and attributes won end-to-end through the done handler (MAF-GAP-043B)', () => {
+      const sqliteRepo = createSqliteBackedRepository();
+      sqliteRepo.seedGame({ id: 'g-e2e', status: 'IN_PROGRESS' });
+      const sqliteAdapter = new LegacyGameAdapter(eventBus, sqliteRepo as any);
+      (sqliteAdapter as any).gameConfigs.set('g-e2e', {
+        numPlayers: 4,
+        roleModels: {
+          MAFIA: 'openai/gpt-4o-mini',
+          TOWN: 'anthropic/claude-3',
+        },
+      });
+      (sqliteAdapter as any).activeGames.set('g-e2e', {
+        gameId: 'g-e2e',
+        process: null,
+        eventCount: 1,
+        status: 'RUNNING',
+        startedAt: new Date(Date.now() - 5000),
+      });
+
+      // Game start -> ROLES_ASSIGNED roster -> done(winner=TOWN).
+      (sqliteAdapter as any).translateAndPublishEvent(
+        'g-e2e',
+        rolesAssignedEvent({
+          assignments: [
+            { playerId: 'p1', name: 'Maf', role: 'MAFIA', isMafia: true },
+            { playerId: 'p2', name: 'Doc', role: 'DOCTOR', isMafia: false },
+            { playerId: 'p3', name: 'She', role: 'SHERIFF', isMafia: false },
+            { playerId: 'p4', name: 'Vil', role: 'VILLAGER', isMafia: false },
+          ],
+        }),
+        1,
+      );
+      (sqliteAdapter as any).handleBridgeMessage('g-e2e', {
+        type: 'done',
+        winner: 'TOWN',
+        totalEvents: 1,
+        dayCount: 1,
+        usage: [],
+      });
+
+      const rows = sqliteRepo.db.prepare(
+        'SELECT id, is_mafia, provider, model, won FROM players WHERE game_id = ? ORDER BY join_order'
+      ).all('g-e2e') as Array<Record<string, unknown>>;
+      expect(rows).toHaveLength(4);
+      // MAFIA side lost: won=0. Town side won: won=1.
+      expect(rows[0]).toMatchObject({ id: 'p1', is_mafia: 1, won: 0, provider: 'openai', model: 'gpt-4o-mini' });
+      for (const row of rows.slice(1)) {
+        expect(row.won).toBe(1);
+        // DOCTOR/SHERIFF have no roleModels entry here (only MAFIA+TOWN);
+        // VILLAGER resolves through the TOWN key.
+        if (row.id === 'p4') {
+          expect(row.provider).toBe('anthropic');
+          expect(row.model).toBe('claude-3');
+        }
+      }
+    });
+
+    it('backfills provider/model from the engine real per-player usage at done', () => {
+      const sqliteRepo = createSqliteBackedRepository();
+      sqliteRepo.seedGame({ id: 'g-backfill', status: 'IN_PROGRESS' });
+      const sqliteAdapter = new LegacyGameAdapter(eventBus, sqliteRepo as any);
+      // Bare POST /api/v1/games: no roleModels, no llmModel — the engine
+      // picks its own model, only observable in usageByPlayer at done.
+      (sqliteAdapter as any).gameConfigs.set('g-backfill', { numPlayers: 2 });
+      (sqliteAdapter as any).activeGames.set('g-backfill', {
+        gameId: 'g-backfill',
+        process: null,
+        eventCount: 1,
+        status: 'RUNNING',
+        startedAt: new Date(Date.now() - 5000),
+      });
+
+      (sqliteAdapter as any).translateAndPublishEvent(
+        'g-backfill',
+        rolesAssignedEvent({
+          assignments: [
+            { playerId: 'p1', name: 'Alice', role: 'MAFIA', isMafia: true },
+            { playerId: 'p2', name: 'Bob', role: 'VILLAGER', isMafia: false },
+          ],
+        }),
+        1,
+      );
+      // Before done: rows exist with NULL provider/model.
+      const before = sqliteRepo.db.prepare(
+        'SELECT provider, model FROM players WHERE game_id = ?'
+      ).all('g-backfill') as Array<Record<string, unknown>>;
+      expect(before.every(r => r.provider === null && r.model === null)).toBe(true);
+
+      (sqliteAdapter as any).handleBridgeMessage('g-backfill', {
+        type: 'done',
+        winner: 'TOWN',
+        totalEvents: 1,
+        dayCount: 1,
+        usage: [],
+        usageByPlayer: [
+          { playerId: 'p1', provider: 'deepseek', model: 'deepseek-v4-flash', promptTokens: 1, completionTokens: 1, totalTokens: 2, cost: 0, apiCalls: 1, latencyMs: 100 },
+          { playerId: 'p2', provider: 'deepseek', model: 'deepseek-v4-flash', promptTokens: 1, completionTokens: 1, totalTokens: 2, cost: 0, apiCalls: 1, latencyMs: 100 },
+        ],
+      });
+
+      const after = sqliteRepo.db.prepare(
+        'SELECT provider, model, won FROM players WHERE game_id = ? ORDER BY join_order'
+      ).all('g-backfill') as Array<Record<string, unknown>>;
+      for (const row of after) {
+        expect(row.provider).toBe('deepseek');
+        expect(row.model).toBe('deepseek-v4-flash');
+      }
+      // TOWN won: mafia lost (0), villager won (1).
+      expect(after[0].won).toBe(0);
+      expect(after[1].won).toBe(1);
+    });
+
+    it('does not overwrite config-derived provider/model with usageByPlayer', () => {
+      const sqliteRepo = createSqliteBackedRepository();
+      sqliteRepo.seedGame({ id: 'g-noclobber', status: 'IN_PROGRESS' });
+      const sqliteAdapter = new LegacyGameAdapter(eventBus, sqliteRepo as any);
+      (sqliteAdapter as any).gameConfigs.set('g-noclobber', {
+        numPlayers: 1,
+        roleModels: { MAFIA: 'openai/gpt-4o-mini' },
+      });
+      (sqliteAdapter as any).activeGames.set('g-noclobber', {
+        gameId: 'g-noclobber',
+        process: null,
+        eventCount: 1,
+        status: 'RUNNING',
+        startedAt: new Date(Date.now() - 5000),
+      });
+
+      (sqliteAdapter as any).translateAndPublishEvent(
+        'g-noclobber',
+        rolesAssignedEvent({
+          assignments: [{ playerId: 'p1', name: 'Alice', role: 'MAFIA', isMafia: true }],
+        }),
+        1,
+      );
+      (sqliteAdapter as any).handleBridgeMessage('g-noclobber', {
+        type: 'done',
+        winner: 'MAFIA',
+        totalEvents: 1,
+        dayCount: 1,
+        usage: [],
+        usageByPlayer: [
+          { playerId: 'p1', provider: 'other', model: 'other-model', promptTokens: 1, completionTokens: 1, totalTokens: 2, cost: 0, apiCalls: 1, latencyMs: 100 },
+        ],
+      });
+
+      const row = sqliteRepo.db.prepare(
+        'SELECT provider, model, won FROM players WHERE game_id = ?'
+      ).get('g-noclobber') as Record<string, unknown>;
+      expect(row.provider).toBe('openai');
+      expect(row.model).toBe('gpt-4o-mini');
+      expect(row.won).toBe(1);
+    });
+  });
 });

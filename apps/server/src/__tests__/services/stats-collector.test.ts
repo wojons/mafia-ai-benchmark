@@ -1,6 +1,7 @@
 import { describe, it, expect, beforeEach } from 'vitest';
 import { StatsCollector } from '../../services/stats-collector.js';
-import { createSqliteBackedRepository } from './mocks.js';
+import { LegacyGameAdapter } from '../../services/legacy-game-adapter.js';
+import { createSqliteBackedRepository, createFakeEventBus } from './mocks.js';
 
 // Type alias matching the return shape of createSqliteBackedRepository().
 type FakeRepo = ReturnType<typeof createSqliteBackedRepository>;
@@ -837,6 +838,65 @@ describe('StatsCollector', () => {
       expect(row.gamesPlayed).toBe(1);
       expect(row.wins).toBe(0);
       expect(row.winRate).toBe(0);
+    });
+
+    it('attributes wins to models whose players rows went through the legacy adapter path (MAF-GAP-043B)', () => {
+      // Full write path: ROLES_ASSIGNED roster -> players rows with
+      // role/is_mafia/provider/model, then done(winner) -> setPlayersWon.
+      // The report must read real winRate from those rows — this is the
+      // game-creation flow POST /api/v1/games and benchmark runs use.
+      repo.seedGame({ id: 'adapter-1', status: 'IN_PROGRESS' });
+      const adapter = new LegacyGameAdapter(createFakeEventBus(), repo as any);
+      (adapter as any).gameConfigs.set('adapter-1', {
+        numPlayers: 2,
+        roleModels: {
+          MAFIA: 'openai/gpt-4o-mini',
+          TOWN: 'anthropic/claude-3',
+        },
+      });
+      (adapter as any).activeGames.set('adapter-1', {
+        gameId: 'adapter-1',
+        process: null,
+        eventCount: 1,
+        status: 'RUNNING',
+        startedAt: new Date(Date.now() - 5000),
+      });
+
+      (adapter as any).translateAndPublishEvent('adapter-1', {
+        eventType: 'ROLES_ASSIGNED',
+        playerId: null,
+        playerName: null,
+        visibility: 'ADMIN_ONLY',
+        phase: 'GAME_OVER',
+        content: {
+          assignments: [
+            { playerId: 'p1', name: 'Maf', role: 'MAFIA', isMafia: true },
+            { playerId: 'p2', name: 'Vil', role: 'VILLAGER', isMafia: false },
+          ],
+        },
+        round: 0,
+        timestamp: new Date().toISOString(),
+      }, 1);
+      (adapter as any).handleBridgeMessage('adapter-1', {
+        type: 'done',
+        winner: 'TOWN',
+        totalEvents: 1,
+        dayCount: 1,
+        usage: [],
+      });
+
+      const cmp = stats.getModelComparison();
+      const mafiaModel = cmp.find(m => m.provider === 'openai' && m.model === 'gpt-4o-mini')!;
+      expect(mafiaModel).toBeDefined();
+      expect(mafiaModel.gamesPlayed).toBe(1);
+      expect(mafiaModel.wins).toBe(0); // mafia side lost
+      expect(mafiaModel.winRate).toBe(0);
+
+      const townModel = cmp.find(m => m.provider === 'anthropic' && m.model === 'claude-3')!;
+      expect(townModel).toBeDefined();
+      expect(townModel.gamesPlayed).toBe(1);
+      expect(townModel.wins).toBe(1); // town side won
+      expect(townModel.winRate).toBe(1);
     });
   });
 

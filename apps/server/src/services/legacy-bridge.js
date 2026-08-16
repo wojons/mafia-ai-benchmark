@@ -146,6 +146,7 @@ async function main() {
             content: {
               assignments: game.players.map((p) => ({
                 playerId: p.id,
+                name: p.name,
                 role: p.role || p.persona?.gameRole || 'UNASSIGNED',
                 isMafia: !!p.isMafia,
               })),

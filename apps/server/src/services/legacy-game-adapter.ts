@@ -92,6 +92,12 @@ export class LegacyGameAdapter extends EventEmitter {
   private gameRepository: GameRepository;
   private activeGames: Map<string, LegacyGameState>;
   private bridgeScriptPath: string;
+  /**
+   * Game configs by adapter game id, kept so the ROLES_ASSIGNED handler
+   * can resolve per-player provider/model from the request the game was
+   * started with (MAF-GAP-043B). Same lifetime as activeGames entries.
+   */
+  private gameConfigs: Map<string, LegacyGameConfig>;
   
   private static instance: LegacyGameAdapter | null = null;
   
@@ -100,6 +106,7 @@ export class LegacyGameAdapter extends EventEmitter {
     this.eventBus = eventBus;
     this.gameRepository = gameRepository;
     this.activeGames = new Map();
+    this.gameConfigs = new Map();
     this.bridgeScriptPath = path.resolve(__dirname, 'legacy-bridge.js');
   }
   
@@ -115,6 +122,7 @@ export class LegacyGameAdapter extends EventEmitter {
    */
   startGame(config: LegacyGameConfig = {}): LegacyGameState {
     const gameId = uuidv4();
+    this.gameConfigs.set(gameId, config);
     const args: string[] = [];
     
     if (config.numPlayers) {
@@ -337,6 +345,21 @@ export class LegacyGameAdapter extends EventEmitter {
             // (legacy usage-only games) are a no-op.
             if (winner === 'MAFIA' || winner === 'TOWN') {
               this.gameRepository.setPlayersWon(gameId, winner);
+            }
+            // MAF-GAP-043B: attach the engine's REAL per-player models
+            // (bridge usageByPlayer) to any players row the request config
+            // could not name (bare POST /api/v1/games without roleModels /
+            // llmModel). Config-derived attribution is never overwritten
+            // (COALESCE in backfillPlayerModel).
+            if (Array.isArray(message.usageByPlayer)) {
+              for (const u of message.usageByPlayer as PlayerUsageAggregate[]) {
+                if (!u || !u.playerId || !u.provider || !u.model) continue;
+                try {
+                  this.gameRepository.backfillPlayerModel(u.playerId, u.provider, u.model);
+                } catch (e: any) {
+                  console.error(`[LegacyAdapter] Failed to backfill player model for ${u.playerId}: ${e?.message || e}`);
+                }
+              }
             }
             console.log(`[LegacyAdapter:${gameId}] Database updated: winner=${winner}, duration=${duration}ms`);
           }
@@ -562,6 +585,128 @@ export class LegacyGameAdapter extends EventEmitter {
           : ''),
     );
   }
+
+  /**
+   * Persist one players row per player from a ROLES_ASSIGNED bridge event
+   * (MAF-GAP-043B).
+   *
+   * The row id is the assignment's playerId — the SAME id the event stream
+   * uses as actorId, so DB rows and event-derived players stay consistent
+   * (extractPlayersFromEvents consumes the same assignments/mafiaTeam
+   * shape). name comes from the assignment when the bridge carries it
+   * (MAF-GAP-013 synthetic roster includes it), falling back to the
+   * extractor's `Player <id-prefix>` convention. isMafia prefers the
+   * assignment's explicit boolean (the engine's real value, correct for
+   * multi-role mafia players whose primary display role is DOCTOR/etc.),
+   * then role === 'MAFIA', then mafiaTeam membership. provider/model come
+   * from the request config via resolvePlayerModel; won stays NULL until
+   * setPlayersWon at game end.
+   *
+   * All writes are best-effort: a failure logs and never breaks the event
+   * flow. INSERT OR REPLACE keeps the row idempotent if the roster event
+   * arrives more than once.
+   */
+  private persistPlayers(gameId: string, content: Record<string, unknown>): void {
+    const assignments = Array.isArray(content.assignments)
+      ? (content.assignments as Array<Record<string, unknown>>)
+      : [];
+    if (assignments.length === 0) return;
+
+    const mafiaTeam = new Set<string>();
+    if (Array.isArray(content.mafiaTeam)) {
+      for (const id of content.mafiaTeam as unknown[]) {
+        if (typeof id === 'string') mafiaTeam.add(id);
+      }
+    }
+    const config = this.gameConfigs.get(gameId);
+    let persisted = 0;
+
+    assignments.forEach((assignment, index) => {
+      const playerId = typeof assignment.playerId === 'string' ? assignment.playerId : '';
+      const role = typeof assignment.role === 'string' && assignment.role ? assignment.role : 'UNASSIGNED';
+      if (!playerId) return;
+
+      const isMafia = typeof assignment.isMafia === 'boolean'
+        ? assignment.isMafia
+        : role === 'MAFIA' || mafiaTeam.has(playerId);
+      const name = typeof assignment.name === 'string' && assignment.name
+        ? assignment.name
+        : `Player ${playerId.substring(0, 8)}`;
+      const model = this.resolvePlayerModel(config, role);
+
+      try {
+        this.gameRepository.upsertPlayer(gameId, {
+          id: playerId,
+          name,
+          role,
+          isMafia,
+          joinOrder: index,
+          provider: model?.provider,
+          model: model?.model,
+        });
+        persisted += 1;
+      } catch (e: any) {
+        console.error(`[LegacyAdapter] Failed to persist player ${playerId}: ${e?.message || e}`);
+      }
+    });
+
+    console.log(`[LegacyAdapter:${gameId}] Persisted ${persisted} player row(s) from ROLES_ASSIGNED`);
+  }
+
+  /**
+   * Resolve the (provider, model) a player should carry from the game
+   * config the adapter holds (MAF-GAP-043B):
+   *   1. roleModels[role] — the benchmark runner's per-role split
+   *      ('provider/model' specs; the town core is keyed 'TOWN' but the
+   *      legacy engine resolves those via VILLAGER_MODEL, so TOWN and
+   *      VILLAGER keys match each other, case-insensitively).
+   *   2. gameConfig.llmProvider/llmModel — the CLI run-game single-model
+   *      request (llmModel is 'provider/model').
+   * Returns undefined when the config names no model; the done handler
+   * then backfills from the engine's real per-player usage.
+   */
+  private resolvePlayerModel(
+    config: LegacyGameConfig | undefined,
+    role: string,
+  ): { provider: string; model: string } | undefined {
+    const roleModels = config?.roleModels;
+    if (roleModels && role) {
+      const upper = role.toUpperCase();
+      for (const [key, spec] of Object.entries(roleModels)) {
+        if (typeof spec !== 'string' || !spec) continue;
+        const keyUpper = key.toUpperCase();
+        const matches = keyUpper === upper ||
+          (keyUpper === 'TOWN' && upper === 'VILLAGER') ||
+          (keyUpper === 'VILLAGER' && upper === 'TOWN');
+        if (!matches) continue;
+        const slash = spec.indexOf('/');
+        if (slash > 0) {
+          const provider = spec.slice(0, slash);
+          const model = spec.slice(slash + 1);
+          if (provider && model) return { provider, model };
+        }
+      }
+    }
+
+    const gameConfig = config?.gameConfig;
+    if (gameConfig && typeof gameConfig === 'object') {
+      const cfg = gameConfig as Record<string, unknown>;
+      const llmModel = cfg.llmModel;
+      if (typeof llmModel === 'string' && llmModel) {
+        const slash = llmModel.indexOf('/');
+        if (slash > 0) {
+          const provider = llmModel.slice(0, slash);
+          const model = llmModel.slice(slash + 1);
+          if (provider && model) return { provider, model };
+        }
+        const llmProvider = cfg.llmProvider;
+        if (typeof llmProvider === 'string' && llmProvider) {
+          return { provider: llmProvider, model: llmModel };
+        }
+      }
+    }
+    return undefined;
+  }
   
   /**
    * Translate legacy event to server GameEvent format and publish
@@ -689,6 +834,14 @@ export class LegacyGameAdapter extends EventEmitter {
       this.gameRepository.addEvent(gameId, eventData as any);
     } catch (e: any) {
       console.error(`[LegacyAdapter] Failed to store event: ${e?.message || e}`);
+    }
+
+    // MAF-GAP-043B: persist one players row per player from the bridge's
+    // full ROLES_ASSIGNED roster (the legacy engine emits it only via the
+    // bridge, right before 'done'), so setPlayersWon at game end has rows
+    // to update and the benchmark report can attribute wins to models.
+    if (serverType === 'ROLES_ASSIGNED') {
+      this.persistPlayers(gameId, legacyContent);
     }
     
     // Try to persist through game repository if we have one

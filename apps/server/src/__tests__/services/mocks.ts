@@ -286,6 +286,43 @@ export function createFakeGameRepository(options: FakeRepositoryOptions = {}): G
       if (g) g.players = [...g.players, player];
       return player;
     },
+    upsertPlayer(
+      gameId: string,
+      player: {
+        id: string;
+        name: string;
+        role: string;
+        isMafia: boolean;
+        joinOrder: number;
+        provider?: string;
+        model?: string;
+      }
+    ): void {
+      const existing = players.get(player.id);
+      const merged: any = {
+        ...(existing ?? { id: player.id, name: player.name, gameId }),
+        id: player.id,
+        name: player.name,
+        role: player.role,
+        isMafia: player.isMafia,
+        joinOrder: player.joinOrder,
+        provider: player.provider,
+        model: player.model,
+      };
+      players.set(player.id, merged);
+      const g = games.get(gameId);
+      if (g) {
+        const idx = g.players.findIndex(p => p.id === player.id);
+        if (idx >= 0) g.players[idx] = merged;
+        else g.players = [...g.players, merged];
+      }
+    },
+    backfillPlayerModel(playerId: string, provider: string, model: string) {
+      const p = players.get(playerId) as any;
+      if (!p) return;
+      if (!p.provider) p.provider = provider;
+      if (!p.model) p.model = model;
+    },
     getPlayers(gameId: string): Player[] {
       const g = games.get(gameId);
       return g ? [...g.players] : [];
