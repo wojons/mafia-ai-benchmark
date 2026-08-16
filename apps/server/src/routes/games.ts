@@ -8,10 +8,17 @@ import { Router, Request, Response } from 'express';
 import { ServerContext } from '../index.js';
 import { LegacyGameAdapter } from '../services/legacy-game-adapter.js';
 import { enrichPlayersWithAttribution } from '../services/player-attribution.js';
-import type { Player } from '@mafia/shared/types';
+import type { Player, GameStatus } from '@mafia/shared/types';
 
 // Store for SSE connections per game (shared across game routes)
 const gameSSESubscriptions: Map<string, Set<Response>> = new Map();
+
+/**
+ * Canonical game-status vocabulary (MAF-GAP-049). Single source of truth is
+ * GameStatus in packages/shared/src/types/index.ts — kept in sync there;
+ * this list backs query-param validation for GET /api/v1/games.
+ */
+const VALID_GAME_STATUSES: readonly string[] = ['SETUP', 'IN_PROGRESS', 'PAUSED', 'ENDED', 'CANCELLED'];
 
 /**
  * Normalize a player extracted from the event stream into the API player
@@ -204,8 +211,24 @@ export function createGamesRouter(
   // List games
   router.get('/api/v1/games', (req: Request, res: Response) => {
     try {
+      // MAF-GAP-049: the status query param is validated against the
+      // canonical vocabulary (packages/shared GameStatus) instead of being
+      // cast blindly — any other value is a 400, never a silent pass-through.
+      const rawStatus = req.query.status;
+      let status: GameStatus | undefined;
+      if (rawStatus !== undefined) {
+        if (typeof rawStatus !== 'string' || !VALID_GAME_STATUSES.includes(rawStatus)) {
+          res.status(400).json({
+            success: false,
+            error: `Invalid status filter "${String(rawStatus)}". Valid values: ${VALID_GAME_STATUSES.join(', ')}`,
+          });
+          return;
+        }
+        status = rawStatus as GameStatus;
+      }
+
       const filters = {
-        status: req.query.status as 'SETUP' | 'IN_PROGRESS' | 'ENDED' | undefined,
+        status,
         limit: req.query.limit ? parseInt(req.query.limit as string) : 50,
         offset: req.query.offset ? parseInt(req.query.offset as string) : 0,
       };
@@ -218,6 +241,14 @@ export function createGamesRouter(
         for (const gameId of legacyAdapter.getActiveGames()) {
           const state = legacyAdapter.getGameState(gameId);
           if (state) {
+            // MAF-GAP-049: legacy games only know RUNNING/ENDED; map into the
+            // canonical vocabulary, then apply the requested status filter so
+            // non-matching legacy rows are excluded from the merged result.
+            const legacyStatus: GameStatus =
+              state.status === 'RUNNING' ? 'IN_PROGRESS' : 'ENDED';
+            if (status && legacyStatus !== status) {
+              continue;
+            }
             const events = gameRepository.getEvents(gameId);
             const playerSet = new Set<string>();
             for (const event of events) {
@@ -225,7 +256,7 @@ export function createGamesRouter(
             }
             legacyGames.push({
               id: gameId,
-              status: state.status === 'RUNNING' ? 'IN_PROGRESS' : 'ENDED',
+              status: legacyStatus,
               players: playerSet.size,
               createdAt: state.startedAt.toISOString(),
               config: { engineType: 'legacy' },

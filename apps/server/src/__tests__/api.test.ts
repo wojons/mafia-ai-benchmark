@@ -144,6 +144,32 @@ describe.skipIf(!SERVER_PROBE.available)('Games API', () => {
       expect(typeof body.count).toBe('number');
       expect(body.count).toBe(body.data.length);
     });
+
+    // MAF-GAP-049: the status filter is validated against the canonical
+    // vocabulary and applies to legacy games too (previously an unvalidated
+    // cast passed any string through, and legacy rows were appended
+    // unfiltered — ?status=bogus returned 200 with every active legacy game).
+    it('returns only IN_PROGRESS rows when ?status=IN_PROGRESS', async () => {
+      const response = await fetch(`${BASE_URL}/api/v1/games?status=IN_PROGRESS`);
+      expect(response.status).toBe(200);
+
+      const body = await response.json();
+      expect(body.success).toBe(true);
+      expect(Array.isArray(body.data)).toBe(true);
+      // Every row in the merged (DB + legacy) response must match the filter.
+      for (const game of body.data) {
+        expect(game.status).toBe('IN_PROGRESS');
+      }
+    });
+
+    it('returns 400 with success:false for an invalid ?status value', async () => {
+      const response = await fetch(`${BASE_URL}/api/v1/games?status=bogus`);
+      expect(response.status).toBe(400);
+
+      const body = await response.json();
+      expect(body.success).toBe(false);
+      expect(body.error).toContain('Invalid status filter');
+    });
   });
 
   // --------------------------------------------------------------------------

@@ -56,7 +56,7 @@ ws://localhost:3004/ws
 ```json
 {
   "gameId": "game-123",
-  "status": "CREATED",
+  "status": "SETUP",
   "config": {
     "players": 10,
     "mafia": 3,
@@ -121,7 +121,7 @@ ws://localhost:3004/ws
 ```json
 {
   "id": "game-123",
-  "status": "RUNNING",
+  "status": "IN_PROGRESS",
   "phase": "DAY_VOTING",
   "dayNumber": 2,
   "roundNumber": 4,
@@ -148,7 +148,7 @@ ws://localhost:3004/ws
 }
 ```
 
-**Status values:** "CREATED", "RUNNING", "PAUSED", "FINISHED", "CANCELLED"
+**Status values:** "SETUP", "IN_PROGRESS", "PAUSED", "ENDED", "CANCELLED"
 
 **Phase values:** "SETUP", "NIGHT_ACTIONS", "MORNING_REVEAL", "DAY_DISCUSSION", "DAY_VOTING", "RESOLUTION", "END"
 
@@ -162,7 +162,7 @@ ws://localhost:3004/ws
 
 - `limit`: Number of games to return (default: 50, max: 100)
 - `offset`: Offset for pagination (default: 0)
-- `status`: Filter by status (optional)
+- `status`: Filter by status (optional; one of "SETUP", "IN_PROGRESS", "PAUSED", "ENDED", "CANCELLED"; any other value → 400)
 
 **Response (200 OK):**
 
@@ -171,7 +171,7 @@ ws://localhost:3004/ws
   "games": [
     {
       "id": "game-123",
-      "status": "RUNNING",
+      "status": "IN_PROGRESS",
       "phase": "DAY_DISCUSSION",
       "dayNumber": 2,
       "aliveCount": 6,
@@ -199,7 +199,7 @@ ws://localhost:3004/ws
 ```json
 {
   "id": "game-123",
-  "status": "RUNNING",
+  "status": "IN_PROGRESS",
   "phase": "NIGHT_ACTIONS",
   "dayNumber": 0,
   "startedAt": 1703774401000
@@ -241,7 +241,7 @@ ws://localhost:3004/ws
 ```json
 {
   "id": "game-123",
-  "status": "RUNNING",
+  "status": "IN_PROGRESS",
   "phase": "DAY_VOTING",
   "resumedAt": 1703774501000
 }
