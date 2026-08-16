@@ -244,6 +244,31 @@ export class GameRepository {
       UPDATE players SET role = ?, is_mafia = ? WHERE id = ?
     `).run(role, isMafia ? 1 : 0, playerId);
   }
+
+  /**
+   * Set won (1/0) for every player of a game based on the game's winner
+   * (MAF-GAP-043).
+   *
+   * The insert path never writes the won column (defaults NULL), so
+   * per-model win rates were always 0 — the report's players-table branch
+   * reads SUM(CASE WHEN p.won = 1 ...) and side attribution also depends
+   * on non-null won. Both sides are written EXPLICITLY: the winning side
+   * gets 1 and the losing side 0, so ENDED games never carry NULL won.
+   *
+   * Only called at game end (never for IN_PROGRESS games). Games with no
+   * players rows (legacy usage-only games) are a graceful no-op.
+   */
+  setPlayersWon(gameId: string, winner: 'MAFIA' | 'TOWN'): void {
+    const mafiaWon = winner === 'MAFIA' ? 1 : 0;
+    const townWon = winner === 'MAFIA' ? 0 : 1;
+    this.db.prepare(`
+      UPDATE players SET won = CASE
+        WHEN is_mafia = 1 THEN ?
+        ELSE ?
+      END
+      WHERE game_id = ?
+    `).run(mafiaWon, townWon, gameId);
+  }
   
   /**
    * Eliminate player

@@ -331,6 +331,13 @@ export class LegacyGameAdapter extends EventEmitter {
               : 0;
             db.prepare(`UPDATE games SET status = 'ENDED', ended_at = ?, duration = ?, config = json_set(config, '$.winner', ?) WHERE id = ?`)
               .run(Date.now(), duration, winner, gameId);
+            // MAF-GAP-043: persist per-player won (1 winning side / 0
+            // losing side) so model win rates read real data. Only when the
+            // bridge reported a real winner; games without players rows
+            // (legacy usage-only games) are a no-op.
+            if (winner === 'MAFIA' || winner === 'TOWN') {
+              this.gameRepository.setPlayersWon(gameId, winner);
+            }
             console.log(`[LegacyAdapter:${gameId}] Database updated: winner=${winner}, duration=${duration}ms`);
           }
         } catch (e: any) {

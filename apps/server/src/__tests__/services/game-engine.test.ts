@@ -411,6 +411,38 @@ describe('GameEngine', () => {
       expect((winnerEvent?.data as any).winner).toBe('MAFIA');
     });
 
+    it('persists won=1 for the winning side and won=0 for the losing side (MAF-GAP-043)', () => {
+      const game = makeTestGame({
+        id: 'g-won',
+        status: 'IN_PROGRESS',
+        players: [
+          makeTestPlayer({ id: 'maf', name: 'Maf', role: 'MAFIA', isMafia: true }),
+          makeTestPlayer({ id: 'town1', name: 'T1', role: 'VILLAGER' }),
+          makeTestPlayer({ id: 'town2', name: 'T2', role: 'DOCTOR' }),
+        ],
+        startedAt: new Date(Date.now() - 5000),
+        currentState: {
+          phase: 'DAY_DISCUSSION',
+          dayNumber: 2,
+          turnNumber: 5,
+          timeRemaining: 30,
+          activePlayers: ['maf', 'town1', 'town2'],
+          eliminatedPlayers: [],
+          votes: [],
+          nightActions: [],
+        },
+      });
+      repo.seedGame(game);
+
+      engine.endGame('g-won', 'MAFIA');
+
+      const fetched = repo.getGame('g-won')!;
+      expect(fetched.players.find(p => p.id === 'maf')).toMatchObject({ isMafia: true });
+      expect((fetched.players.find(p => p.id === 'maf') as any).won).toBe(1);
+      expect((fetched.players.find(p => p.id === 'town1') as any).won).toBe(0);
+      expect((fetched.players.find(p => p.id === 'town2') as any).won).toBe(0);
+    });
+
     it('is a no-op when the game does not exist', () => {
       // Should not throw.
       engine.endGame('does-not-exist', 'TOWN');

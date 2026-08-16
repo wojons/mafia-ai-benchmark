@@ -841,6 +841,75 @@ describe('LegacyGameAdapter', () => {
       expect(state.status).toBe('COMPLETED');
     });
 
+    it('persists players.won (1 winning side / 0 losing side) when the done message carries a winner (MAF-GAP-043)', () => {
+      const sqliteRepo = createSqliteBackedRepository();
+      sqliteRepo.seedGame({
+        id: 'g-done-won',
+        status: 'IN_PROGRESS',
+        players: [
+          { id: 'p-maf', name: 'Maf', role: 'MAFIA', isMafia: true, joinOrder: 0, provider: 'openai', model: 'gpt-4o-mini' },
+          { id: 'p-town', name: 'Town', role: 'VILLAGER', isMafia: false, joinOrder: 1, provider: 'openai', model: 'gpt-4o' },
+        ],
+      });
+      const sqliteAdapter = new LegacyGameAdapter(eventBus, sqliteRepo as any);
+      (sqliteAdapter as any).activeGames.set('g-done-won', {
+        gameId: 'g-done-won',
+        process: null,
+        eventCount: 2,
+        status: 'RUNNING',
+        startedAt: new Date(Date.now() - 5000),
+      });
+
+      (sqliteAdapter as any).handleBridgeMessage('g-done-won', {
+        type: 'done',
+        winner: 'TOWN',
+        totalEvents: 2,
+        dayCount: 1,
+        usage: [],
+      });
+
+      const rows = sqliteRepo.db.prepare(
+        'SELECT id, is_mafia, won FROM players WHERE game_id = ? ORDER BY join_order'
+      ).all('g-done-won') as Array<Record<string, unknown>>;
+      expect(rows).toHaveLength(2);
+      // TOWN won: the town player's side won (1), the mafia player lost (0).
+      expect(rows[0]).toMatchObject({ id: 'p-maf', is_mafia: 1, won: 0 });
+      expect(rows[1]).toMatchObject({ id: 'p-town', is_mafia: 0, won: 1 });
+    });
+
+    it('does not touch players.won when the done message has no real winner (MAF-GAP-043)', () => {
+      const sqliteRepo = createSqliteBackedRepository();
+      sqliteRepo.seedGame({
+        id: 'g-done-nowin',
+        status: 'IN_PROGRESS',
+        players: [
+          { id: 'p1', name: 'P1', role: 'MAFIA', isMafia: true, joinOrder: 0 },
+          { id: 'p2', name: 'P2', role: 'VILLAGER', isMafia: false, joinOrder: 1 },
+        ],
+      });
+      const sqliteAdapter = new LegacyGameAdapter(eventBus, sqliteRepo as any);
+      (sqliteAdapter as any).activeGames.set('g-done-nowin', {
+        gameId: 'g-done-nowin',
+        process: null,
+        eventCount: 1,
+        status: 'RUNNING',
+        startedAt: new Date(Date.now() - 5000),
+      });
+
+      (sqliteAdapter as any).handleBridgeMessage('g-done-nowin', {
+        type: 'done',
+        winner: null,
+        totalEvents: 1,
+        dayCount: 1,
+        usage: [],
+      });
+
+      const rows = sqliteRepo.db.prepare(
+        'SELECT won FROM players WHERE game_id = ? ORDER BY join_order'
+      ).all('g-done-nowin') as Array<{ won: number | null }>;
+      expect(rows.map(r => r.won)).toEqual([null, null]);
+    });
+
     it('persists per-player token_usage/api_calls rows with real player_id AND keeps the ALL rows (MAF-GAP-029)', () => {
       const sqliteRepo = createSqliteBackedRepository();
       sqliteRepo.seedGame({ id: 'g-perplayer', status: 'IN_PROGRESS' });

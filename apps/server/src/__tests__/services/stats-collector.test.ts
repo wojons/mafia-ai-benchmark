@@ -765,6 +765,59 @@ describe('StatsCollector', () => {
       expect(row.winRate).toBeCloseTo(2 / 3, 5);
     });
 
+    it('persists won=1/0 per player at game end so model wins read real data (MAF-GAP-043)', () => {
+      // Write path: an ENDED game's players start with won NULL (the insert
+      // never writes the column). setPlayersWon is the game-end hook — it
+      // must set 1 for the winning side AND 0 for the losing side so no
+      // ENDED-game player row is left NULL.
+      repo.seedGame({
+        id: 'won-1', status: 'IN_PROGRESS',
+        players: [
+          { id: 'w1a', name: 'A1', role: 'MAFIA', joinOrder: 0, isMafia: true,
+            provider: 'OPENAI', model: 'gpt-4', tokens_used: 0 },
+          { id: 'w1b', name: 'B1', role: 'VILLAGER', joinOrder: 1, isMafia: false,
+            provider: 'ANTHROPIC', model: 'claude-3', tokens_used: 0 },
+        ],
+      });
+      // A second game with players that must NOT be touched.
+      repo.seedGame({
+        id: 'won-2', status: 'IN_PROGRESS',
+        players: [
+          { id: 'w2a', name: 'A2', role: 'VILLAGER', joinOrder: 0, isMafia: false,
+            provider: 'OPENAI', model: 'gpt-4', tokens_used: 0 },
+        ],
+      });
+      // A legacy usage-only game with no players rows — graceful no-op.
+      repo.seedGame({ id: 'won-3', status: 'IN_PROGRESS' });
+
+      repo.setPlayersWon('won-1', 'MAFIA');
+      repo.setPlayersWon('won-3', 'TOWN'); // must not throw
+
+      const rows = repo.db.prepare(
+        'SELECT game_id, is_mafia, won FROM players ORDER BY game_id, join_order'
+      ).all() as Array<{ game_id: string; is_mafia: number; won: number | null }>;
+      // won-1: MAFIA side won -> 1; TOWN side lost -> 0. Both explicit.
+      expect(rows).toEqual([
+        { game_id: 'won-1', is_mafia: 1, won: 1 },
+        { game_id: 'won-1', is_mafia: 0, won: 0 },
+        { game_id: 'won-2', is_mafia: 0, won: null }, // untouched
+      ]);
+
+      // The report now attributes the win to the model on the winning side.
+      const cmp = stats.getModelComparison();
+      const a = cmp.find(m => m.provider === 'OPENAI' && m.model === 'gpt-4')!;
+      expect(a).toBeDefined();
+      expect(a.wins).toBe(1);
+      // gpt-4 also has a player row in won-2 (IN_PROGRESS, untouched), so
+      // its gamesPlayed includes that row — wins come only from won=1.
+      expect(a.gamesPlayed).toBe(2);
+      expect(a.winRate).toBeCloseTo(0.5, 5);
+      const b = cmp.find(m => m.provider === 'ANTHROPIC' && m.model === 'claude-3')!;
+      expect(b).toBeDefined();
+      expect(b.wins).toBe(0);
+      expect(b.winRate).toBe(0);
+    });
+
     it('never attributes wins to legacy usage-only rows without players side data (MAF-GAP-039)', () => {
       // token_usage rows with player_id='ALL' carry no side/role info.
       // Even though the game has a real winner, that winner must NOT be

@@ -258,6 +258,13 @@ export function createFakeGameRepository(options: FakeRepositoryOptions = {}): G
         (g as any).totalCost = stats.totalCost;
       }
     },
+    setPlayersWon(gameId: string, winner: 'MAFIA' | 'TOWN') {
+      const g = games.get(gameId);
+      if (!g) return;
+      for (const p of g.players) {
+        (p as any).won = (winner === 'MAFIA') === p.isMafia ? 1 : 0;
+      }
+    },
     addPlayer(
       gameId: string,
       name: string,

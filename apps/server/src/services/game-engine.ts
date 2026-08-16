@@ -500,6 +500,11 @@ export class GameEngine {
       totalCost: this.statsCollector.getTotalCost(gameId),
     });
     
+    // MAF-GAP-043: persist per-player won (1 winning side / 0 losing side)
+    // so model win rates read real data instead of NULL. Games without
+    // players rows are a no-op.
+    this.gameRepository.setPlayersWon(gameId, winner);
+    
     // Update game status
     this.gameRepository.updateGameStatus(gameId, 'ENDED');
     
