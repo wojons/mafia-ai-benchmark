@@ -4540,6 +4540,23 @@ class MafiaGame {
           maxVoteCount +
           " votes!",
       );
+
+      // MAF-GAP-044: emit a per-death elimination event so the API can
+      // reflect isAlive=false for lynched players. Mirrors the
+      // MORNING_REVEAL deaths payload (full player objects); the adapter
+      // maps PLAYER_LYNCHED and extractPlayersFromEvents marks the actor
+      // dead. Night kills keep flowing through MORNING_REVEAL.
+      this.gameEvents.push(
+        createGameEvent(
+          gameId,
+          this.round,
+          "VOTING",
+          null,
+          "PLAYER_LYNCHED",
+          "PUBLIC",
+          { deaths: [eliminated] },
+        ),
+      );
     } else if (tiedIds.length === 1 && maxVoteCount === 1) {
       console.log("\n" + E.TIE + " No majority (only 1 vote). No elimination!");
     } else if (tiedIds.length > 1) {

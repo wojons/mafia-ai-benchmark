@@ -70,6 +70,30 @@ export class GameRepository {
   }
   
   /**
+   * Derive the ids of every eliminated player from the game's event
+   * stream (MAF-GAP-044). Death events (MORNING_REVEAL night deaths and
+   * per-death elimination events PLAYER_LYNCHED / PLAYER_ELIMINATED /
+   * PLAYER_KILLED) carry full player objects in data.deaths; each death's
+   * id is eliminated. Order follows the event stream (insertion order).
+   */
+  private deriveEliminatedPlayerIds(events: GameEvent[]): string[] {
+    const eliminated = new Set<string>();
+    for (const event of events) {
+      const isDeathEvent = event.type === 'MORNING_REVEAL'
+        || event.type === 'PLAYER_LYNCHED'
+        || event.type === 'PLAYER_ELIMINATED'
+        || event.type === 'PLAYER_KILLED';
+      if (!isDeathEvent) continue;
+      const data = event.data as Record<string, unknown> | undefined;
+      if (!data || !Array.isArray(data.deaths)) continue;
+      for (const death of data.deaths as Array<Record<string, unknown>>) {
+        if (typeof death.id === 'string') eliminated.add(death.id);
+      }
+    }
+    return Array.from(eliminated);
+  }
+
+  /**
    * Get game by ID
    */
   getGame(gameId: string): Game | null {
@@ -77,8 +101,20 @@ export class GameRepository {
     
     if (!row) return null;
     
-    const players = this.getPlayers(gameId);
     const events = this.getEvents(gameId);
+    const players = this.getPlayers(gameId);
+
+    // MAF-GAP-044: eliminated players come from the event stream (death
+    // events), never from the hardcoded empty list. The players table
+    // rows are persisted at ROLES_ASSIGNED time (is_alive = 1 for all),
+    // so the event-derived dead set is overlaid onto the returned players
+    // and activePlayers — otherwise eliminations stay invisible in the
+    // detail endpoint.
+    const eliminatedPlayers = this.deriveEliminatedPlayerIds(events);
+    const deadSet = new Set(eliminatedPlayers);
+    const playersWithDeaths = players.map(p =>
+      deadSet.has(p.id) ? { ...p, isAlive: false } : p,
+    );
     
     return {
       id: row.id as string,
@@ -86,15 +122,16 @@ export class GameRepository {
       startedAt: row.started_at ? new Date(row.started_at as number) : undefined,
       endedAt: row.ended_at ? new Date(row.ended_at as number) : undefined,
       status: row.status as Game['status'],
-      players,
+      players: playersWithDeaths,
       config: JSON.parse(row.config as string),
       currentState: {
-        phase: 'SETUP',
+        // MAF-GAP-044: an ENDED game's phase is GAME_OVER, never SETUP.
+        phase: row.status === 'ENDED' ? 'GAME_OVER' : 'SETUP',
         dayNumber: 1,
         turnNumber: 1,
         timeRemaining: 0,
-        activePlayers: players.filter(p => p.isAlive).map(p => p.id),
-        eliminatedPlayers: [],
+        activePlayers: playersWithDeaths.filter(p => p.isAlive).map(p => p.id),
+        eliminatedPlayers,
         votes: [],
         nightActions: [],
       },

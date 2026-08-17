@@ -201,3 +201,195 @@ describe('GET /api/v1/games status filter', () => {
     }
   });
 });
+
+/**
+ * MAF-GAP-044: eliminations must be visible in the API. The detail route
+ * previously served hardcoded currentState (phase SETUP, eliminatedPlayers
+ * []) and players-table rows persisted at ROLES_ASSIGNED time (is_alive = 1
+ * for everyone), so lynched/night-killed players looked alive.
+ *
+ * Seeds an ENDED game with a full death-event stream (2 mafia + 4 town;
+ * night kills via MORNING_REVEAL, a lynch via PLAYER_LYNCHED) and proves
+ * the detail endpoint now derives: GAME_OVER phase on ENDED, per-death
+ * elimination events matching GAME_ENDED mafiaAlive/townAlive, and
+ * isAlive=false + eliminatedPlayers for every dead player.
+ */
+describe('GET /api/v1/games/:gameId elimination state (MAF-GAP-044)', () => {
+  let repo: FakeRepo;
+  let server: Server;
+  let baseUrl: string;
+
+  beforeEach(async () => {
+    repo = createSqliteBackedRepository() as unknown as FakeRepo;
+    // p2 (mafia) killed night 1, p4 (sheriff) lynched day 2, p1 (mafia)
+    // killed night 3 → TOWN wins with 0 mafia alive, 4 town alive.
+    repo.seedGame({
+      id: 'g-elim',
+      status: 'ENDED',
+      winner: 'TOWN',
+      players: [
+        { id: 'p1', name: 'Alice', role: 'MAFIA', isMafia: true, joinOrder: 0 },
+        { id: 'p2', name: 'Bob', role: 'MAFIA', isMafia: true, joinOrder: 1 },
+        { id: 'p3', name: 'Cara', role: 'DOCTOR', isMafia: false, joinOrder: 2 },
+        { id: 'p4', name: 'Dana', role: 'SHERIFF', isMafia: false, joinOrder: 3 },
+        { id: 'p5', name: 'Eli', role: 'VILLAGER', isMafia: false, joinOrder: 4 },
+        { id: 'p6', name: 'Fay', role: 'VILLAGER', isMafia: false, joinOrder: 5 },
+      ],
+      events: [
+        {
+          type: 'ROLES_ASSIGNED',
+          data: {
+            assignments: [
+              { playerId: 'p1', role: 'MAFIA', name: 'Alice' },
+              { playerId: 'p2', role: 'MAFIA', name: 'Bob' },
+              { playerId: 'p3', role: 'DOCTOR', name: 'Cara' },
+              { playerId: 'p4', role: 'SHERIFF', name: 'Dana' },
+              { playerId: 'p5', role: 'VILLAGER', name: 'Eli' },
+              { playerId: 'p6', role: 'VILLAGER', name: 'Fay' },
+            ],
+          },
+          phase: 'SETUP',
+        },
+        {
+          type: 'MORNING_REVEAL',
+          data: {
+            legacyType: 'REVEAL',
+            deaths: [{ id: 'p2', name: 'Bob', role: 'MAFIA', isMafia: true, isAlive: false }],
+          },
+          phase: 'MORNING_REVEAL',
+          dayNumber: 2,
+        },
+        {
+          type: 'PLAYER_LYNCHED',
+          data: {
+            legacyType: 'PLAYER_LYNCHED',
+            deaths: [{ id: 'p4', name: 'Dana', role: 'SHERIFF', isMafia: false, isAlive: false }],
+          },
+          phase: 'DAY_VOTING',
+          dayNumber: 2,
+        },
+        {
+          type: 'MORNING_REVEAL',
+          data: {
+            legacyType: 'REVEAL',
+            deaths: [{ id: 'p1', name: 'Alice', role: 'MAFIA', isMafia: true, isAlive: false }],
+          },
+          phase: 'MORNING_REVEAL',
+          dayNumber: 3,
+        },
+        {
+          type: 'GAME_ENDED',
+          data: { legacyType: 'STATE_CHANGE', winner: 'TOWN', mafiaAlive: 0, townAlive: 3 },
+          phase: 'GAME_OVER',
+        },
+      ],
+    });
+
+    const app = express();
+    app.use(express.json());
+    app.use(
+      '/',
+      createGamesRouter(
+        { gameEngine: {}, gameRepository: repo, eventBus: createFakeEventBus() } as any,
+        null,
+      ),
+    );
+
+    await new Promise<void>((resolve) => {
+      server = app.listen(0, '127.0.0.1', () => resolve());
+    });
+    const address = server.address() as { port: number };
+    baseUrl = `http://127.0.0.1:${address.port}`;
+  });
+
+  afterEach(async () => {
+    await new Promise<void>((resolve, reject) => {
+      server.close((err) => (err ? reject(err) : resolve()));
+    });
+  });
+
+  it('derives GAME_OVER phase, eliminatedPlayers, and isAlive=false for every death', async () => {
+    const response = await fetch(`${baseUrl}/api/v1/games/g-elim`);
+    expect(response.status).toBe(200);
+    const body = await response.json();
+    expect(body.success).toBe(true);
+    const game = body.data;
+
+    expect(game.status).toBe('ENDED');
+    expect(game.currentState.phase).toBe('GAME_OVER');
+    // Event order: p2 (night 1), p4 (lynch), p1 (night 3)
+    expect(game.currentState.eliminatedPlayers).toEqual(['p2', 'p4', 'p1']);
+    expect(game.currentState.activePlayers).toEqual(['p3', 'p5', 'p6']);
+
+    const byId = new Map(game.players.map((p: { id: string; isAlive: boolean }) => [p.id, p]));
+    expect(byId.get('p1')!.isAlive).toBe(false); // mafia, night kill
+    expect(byId.get('p2')!.isAlive).toBe(false); // mafia, night kill
+    expect(byId.get('p4')!.isAlive).toBe(false); // lynched town sheriff
+    expect(byId.get('p3')!.isAlive).toBe(true);
+    expect(byId.get('p5')!.isAlive).toBe(true);
+    expect(byId.get('p6')!.isAlive).toBe(true);
+  });
+
+  it('includes one elimination event per death, matching GAME_ENDED mafiaAlive/townAlive', async () => {
+    const response = await fetch(`${baseUrl}/api/v1/games/g-elim`);
+    expect(response.status).toBe(200);
+    const body = await response.json();
+    const game = body.data;
+
+    const deathEvents = game.events.filter((e: { type: string }) =>
+      e.type === 'MORNING_REVEAL' ||
+      e.type === 'PLAYER_LYNCHED' ||
+      e.type === 'PLAYER_ELIMINATED' ||
+      e.type === 'PLAYER_KILLED');
+    const deaths = deathEvents.flatMap((e: { data: { deaths?: unknown[] } }) => e.data?.deaths ?? []);
+
+    // Every death has its own elimination event, in stream order
+    expect(deathEvents).toHaveLength(3);
+    expect(deaths).toHaveLength(3);
+    expect(deathEvents.map((e: { type: string }) => e.type)).toEqual([
+      'MORNING_REVEAL',
+      'PLAYER_LYNCHED',
+      'MORNING_REVEAL',
+    ]);
+
+    const ended = game.events.find((e: { type: string }) => e.type === 'GAME_ENDED');
+    expect(ended).toBeDefined();
+    const mafiaDeaths = deaths.filter((d: any) => d.isMafia === true).length;
+    const townDeaths = deaths.filter((d: any) => d.isMafia === false).length;
+    // 2 mafia started, 4 town started — GAME_ENDED counts what survived
+    expect(ended.data.mafiaAlive).toBe(2 - mafiaDeaths);
+    expect(ended.data.townAlive).toBe(4 - townDeaths);
+  });
+
+  it('does not mark anyone dead for an IN_PROGRESS game without death events', async () => {
+    repo.seedGame({
+      id: 'g-live',
+      status: 'IN_PROGRESS',
+      players: [
+        { id: 'p1', name: 'Alice', role: 'MAFIA', isMafia: true, joinOrder: 0 },
+        { id: 'p2', name: 'Bob', role: 'VILLAGER', isMafia: false, joinOrder: 1 },
+      ],
+      events: [
+        {
+          type: 'ROLES_ASSIGNED',
+          data: {
+            assignments: [
+              { playerId: 'p1', role: 'MAFIA' },
+              { playerId: 'p2', role: 'VILLAGER' },
+            ],
+          },
+          phase: 'SETUP',
+        },
+      ],
+    });
+
+    const response = await fetch(`${baseUrl}/api/v1/games/g-live`);
+    expect(response.status).toBe(200);
+    const body = await response.json();
+    const game = body.data;
+
+    expect(game.currentState.phase).toBe('SETUP');
+    expect(game.currentState.eliminatedPlayers).toEqual([]);
+    expect(game.players.every((p: { isAlive: boolean }) => p.isAlive)).toBe(true);
+  });
+});

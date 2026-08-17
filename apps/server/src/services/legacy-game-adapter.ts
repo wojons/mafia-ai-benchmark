@@ -931,8 +931,11 @@ export class LegacyGameAdapter extends EventEmitter {
    *
    * Role sources (applied in event order; first known value wins per player):
    *  - ROLES_ASSIGNED: data.assignments[] ({playerId, role}) + data.mafiaTeam[]
-   *  - MORNING_REVEAL: data.deaths[] — each death carries the full player
-   *    object ({id, role, isMafia, isAlive}), revealing the victim's role.
+   *  - Death events: MORNING_REVEAL (night deaths) and per-death
+   *    elimination events (PLAYER_LYNCHED / PLAYER_ELIMINATED /
+   *    PLAYER_KILLED) — data.deaths[] carries the full player object
+   *    ({id, role, isMafia, isAlive}), revealing the victim's role and
+   *    marking them dead (MAF-GAP-044).
    *  - Sheriff investigations: data.targetRoles[] (+ data.targetId) reveals
    *    the target's role(s); the acting player (event.actorId) is the SHERIFF.
    *  - Doctor protections: data.reason + data.targetId — the actor is DOCTOR.
@@ -1001,8 +1004,16 @@ export class LegacyGameAdapter extends EventEmitter {
         }
       }
 
-      // 2. MORNING_REVEAL deaths — full player objects with role/isMafia/isAlive
-      if (event.type === 'MORNING_REVEAL' && Array.isArray(data.deaths)) {
+      // 2. Death reveals — night deaths (MORNING_REVEAL) plus per-death
+      //    elimination events (PLAYER_LYNCHED / PLAYER_ELIMINATED /
+      //    PLAYER_KILLED, MAF-GAP-044). All carry full player objects
+      //    with role/isMafia/isAlive in data.deaths; every death marks
+      //    the actor dead so detail isAlive becomes false.
+      const isDeathEvent = event.type === 'MORNING_REVEAL'
+        || event.type === 'PLAYER_LYNCHED'
+        || event.type === 'PLAYER_ELIMINATED'
+        || event.type === 'PLAYER_KILLED';
+      if (isDeathEvent && Array.isArray(data.deaths)) {
         for (const death of data.deaths as Array<Record<string, unknown>>) {
           if (typeof death.id !== 'string') continue;
           actorIds.add(death.id);

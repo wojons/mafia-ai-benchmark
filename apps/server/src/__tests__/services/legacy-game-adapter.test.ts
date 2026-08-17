@@ -230,6 +230,58 @@ describe('LegacyGameAdapter', () => {
   });
 
   // ==========================================================================
+  // translateAndPublishEvent — per-death elimination events (MAF-GAP-044)
+  // ==========================================================================
+
+  describe('translateAndPublishEvent() PLAYER_LYNCHED death events', () => {
+    it('maps legacy PLAYER_LYNCHED events to PLAYER_LYNCHED with deaths preserved', () => {
+      eventBus.reset();
+      (adapter as any).translateAndPublishEvent('g1', {
+        eventType: 'PLAYER_LYNCHED',
+        playerId: null,
+        playerName: null,
+        visibility: 'PUBLIC',
+        phase: 'VOTING',
+        content: {
+          deaths: [
+            { id: 'p4', name: 'Dana', role: 'SHERIFF', isMafia: false, isAlive: false },
+          ],
+        },
+        round: 2,
+        timestamp: new Date().toISOString(),
+      }, 8);
+
+      const published = eventBus.published.find(e => e.type === 'PLAYER_LYNCHED');
+      expect(published).toBeDefined();
+      expect(published!.metadata.phase).toBe('DAY_VOTING');
+      expect((published!.data as any).legacyType).toBe('PLAYER_LYNCHED');
+      expect((published!.data as any).deaths).toHaveLength(1);
+      expect((published!.data as any).deaths[0]).toMatchObject({
+        id: 'p4',
+        role: 'SHERIFF',
+        isAlive: false,
+      });
+    });
+
+    it('does not remap PLAYER_LYNCHED events to GAME_ENDED when they carry a winner field', () => {
+      eventBus.reset();
+      (adapter as any).translateAndPublishEvent('g1', {
+        eventType: 'PLAYER_LYNCHED',
+        playerId: null,
+        playerName: null,
+        visibility: 'PUBLIC',
+        phase: 'VOTING',
+        content: { deaths: [], winner: 'TOWN' },
+        round: 2,
+        timestamp: new Date().toISOString(),
+      }, 9);
+
+      expect(eventBus.published.find(e => e.type === 'PLAYER_LYNCHED')).toBeDefined();
+      expect(eventBus.published.find(e => e.type === 'GAME_ENDED')).toBeUndefined();
+    });
+  });
+
+  // ==========================================================================
   // extractPlayersFromEvents (static)
   // ==========================================================================
 
@@ -372,6 +424,81 @@ describe('LegacyGameAdapter', () => {
       expect(bob.role).toBe('DOCTOR');
       expect(bob.isMafia).toBe(false);
       expect(bob.isAlive).toBe(false);
+    });
+
+    it('marks PLAYER_LYNCHED deaths dead (MAF-GAP-044)', () => {
+      const events: GameEvent[] = [
+        {
+          id: 'e1',
+          gameId: 'g1',
+          type: 'ROLES_ASSIGNED',
+          timestamp: new Date(),
+          visibility: 'PUBLIC',
+          data: {
+            assignments: [
+              { playerId: 'p1', role: 'MAFIA' },
+              { playerId: 'p2', role: 'DOCTOR' },
+            ],
+          },
+          metadata: { turnNumber: 0, dayNumber: 0, phase: 'SETUP', sequence: 0 },
+        },
+        {
+          id: 'e2',
+          gameId: 'g1',
+          type: 'PLAYER_LYNCHED',
+          timestamp: new Date(),
+          visibility: 'PUBLIC',
+          data: {
+            legacyType: 'PLAYER_LYNCHED',
+            deaths: [
+              { id: 'p2', name: 'Bob', role: 'DOCTOR', isMafia: false, isAlive: false },
+            ],
+          },
+          metadata: { turnNumber: 3, dayNumber: 2, phase: 'DAY_VOTING', sequence: 3 },
+        },
+      ];
+
+      const players = LegacyGameAdapter.extractPlayersFromEvents(events);
+      expect(players).toHaveLength(2);
+      const lynched = players.find(p => p.id === 'p2')!;
+      expect(lynched.role).toBe('DOCTOR');
+      expect(lynched.isAlive).toBe(false);
+      expect(lynched.name).toBe('Bob');
+      // The surviving player is unaffected
+      expect(players.find(p => p.id === 'p1')!.isAlive).toBe(true);
+    });
+
+    it('marks PLAYER_ELIMINATED and PLAYER_KILLED deaths dead (MAF-GAP-044)', () => {
+      const events: GameEvent[] = [
+        {
+          id: 'e1',
+          gameId: 'g1',
+          type: 'PLAYER_ELIMINATED',
+          timestamp: new Date(),
+          visibility: 'PUBLIC',
+          data: {
+            deaths: [{ id: 'p1', name: 'Alice', role: 'VILLAGER', isMafia: false, isAlive: false }],
+          },
+          metadata: { turnNumber: 1, dayNumber: 1, phase: 'RESOLUTION', sequence: 1 },
+        },
+        {
+          id: 'e2',
+          gameId: 'g1',
+          type: 'PLAYER_KILLED',
+          timestamp: new Date(),
+          visibility: 'PUBLIC',
+          data: {
+            deaths: [{ id: 'p2', name: 'Bob', role: 'MAFIA', isMafia: true, isAlive: false }],
+          },
+          metadata: { turnNumber: 2, dayNumber: 1, phase: 'MORNING_REVEAL', sequence: 2 },
+        },
+      ];
+
+      const players = LegacyGameAdapter.extractPlayersFromEvents(events);
+      expect(players.find(p => p.id === 'p1')!.isAlive).toBe(false);
+      expect(players.find(p => p.id === 'p1')!.role).toBe('VILLAGER');
+      expect(players.find(p => p.id === 'p2')!.isAlive).toBe(false);
+      expect(players.find(p => p.id === 'p2')!.role).toBe('MAFIA');
     });
 
     it('maps target roles from sheriff investigation events', () => {
