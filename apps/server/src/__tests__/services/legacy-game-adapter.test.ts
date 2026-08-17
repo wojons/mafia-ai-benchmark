@@ -1499,4 +1499,58 @@ describe('LegacyGameAdapter', () => {
       expect(row.won).toBe(1);
     });
   });
+
+  // ==========================================================================
+  // handleBridgeMessage — non-string .type defense (MAF-GAP-042)
+  // ==========================================================================
+
+  describe('handleBridgeMessage() non-string .type defense', () => {
+    it('skips parsed stdout lines without a string .type (no event count, no spam)', () => {
+      (adapter as any).activeGames.set('g-noise', {
+        gameId: 'g-noise',
+        process: null,
+        eventCount: 0,
+        status: 'RUNNING',
+        startedAt: new Date(),
+      });
+
+      // pino JSON lines / engine chatter that slips onto stdout parse as
+      // JSON but carry no string .type — each used to hit the default case
+      // ("Unknown message type: undefined" spam). None may crash or count.
+      (adapter as any).handleBridgeMessage('g-noise', { level: 30, msg: 'banner' });
+      (adapter as any).handleBridgeMessage('g-noise', {});
+      (adapter as any).handleBridgeMessage('g-noise', { type: undefined });
+      (adapter as any).handleBridgeMessage('g-noise', { type: 42 });
+
+      const state = (adapter as any).activeGames.get('g-noise');
+      expect(state.eventCount).toBe(0); // never treated as an 'event'
+      expect(state.status).toBe('RUNNING'); // never treated as 'done'
+    });
+
+    it('still processes messages with a valid string .type after a noise line', () => {
+      (adapter as any).activeGames.set('g-clean', {
+        gameId: 'g-clean',
+        process: null,
+        eventCount: 0,
+        status: 'RUNNING',
+        startedAt: new Date(),
+      });
+
+      (adapter as any).handleBridgeMessage('g-clean', { level: 30, msg: 'chatter' });
+      (adapter as any).handleBridgeMessage('g-clean', {
+        type: 'event',
+        eventType: 'MESSAGE',
+        round: 1,
+        phase: 'DAY_DISCUSSION',
+        playerId: 'p1',
+        playerName: 'Alice',
+        timestamp: new Date().toISOString(),
+        content: { message: 'hi' },
+        visibility: 'PUBLIC',
+      });
+
+      const state = (adapter as any).activeGames.get('g-clean');
+      expect(state.eventCount).toBe(1);
+    });
+  });
 });

@@ -30,6 +30,18 @@ if (typeof console.setGameContext !== 'function') {
   console.setGameContext = function(ctx) { /* no-op in bridge mode */ };
 }
 
+// MAF-GAP-042: keep the JSON event stream parseable. The legacy engine logs
+// banners/turn lines via console.log and, when pino is present, its
+// structured-logging IIFE emits pino JSON — BOTH write to stdout, which the
+// adapter treats as the JSON event stream ("Non-JSON output from bridge" /
+// "Unknown message type: undefined" noise). Before loading the engine:
+//  1. force LOG_STRUCTURED=false so the pino JSON path never activates, and
+//  2. redirect console.log to stderr so raw engine chatter never reaches
+//     stdout. emit() writes directly via process.stdout.write, so the event
+//     stream is unaffected. console.warn/error already go to stderr.
+process.env.LOG_STRUCTURED = 'false';
+console.log = console.error.bind(console);
+
 // Load the legacy game engine
 // The game engine is at the project root: games/legacy/game-engine.js
 const gameEnginePath = path.resolve(__dirname, '..', '..', '..', '..', 'game-engine.js');

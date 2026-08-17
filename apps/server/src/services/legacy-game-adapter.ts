@@ -311,7 +311,14 @@ export class LegacyGameAdapter extends EventEmitter {
   private handleBridgeMessage(gameId: string, message: Record<string, unknown>): void {
     const state = this.activeGames.get(gameId);
     if (!state) return;
-    
+
+    // MAF-GAP-042: defensive — the bridge only ever emits messages with a
+    // string .type. A parsed stdout line without one (e.g. engine chatter
+    // that survives the bridge's stdout hygiene, or a pino JSON line) is
+    // noise: skip it instead of hitting the "Unknown message type: undefined"
+    // spam in the default case.
+    if (typeof message.type !== 'string' || !message.type) return;
+
     switch (message.type) {
       case 'info':
         console.log(`[LegacyAdapter:${gameId}]`, message.message);

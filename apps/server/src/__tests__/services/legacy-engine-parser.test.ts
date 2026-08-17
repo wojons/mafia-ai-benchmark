@@ -301,4 +301,62 @@ describe('MafiaGame.getAIResponse (dry harness, stubbed fetch — no real API)',
     expect(broadcast).toHaveLength(1);
     expect(broadcast[0]).toBe(mockSay);
   });
+
+  it('caps parse-failure retries at ONE regardless of maxRetries (no retry storm)', async () => {
+    const engine = newEngine({ maxRetries: 3, retryDelay: 1 });
+    const garbled = 'completely garbled output, no structure';
+    const bodies = stubFetch(() => ({ ok: true, status: 200, content: garbled }));
+
+    const resp = await engine.getAIResponse(makePlayer(), makeGameState(), 0, false);
+
+    // Exactly one retry — NOT maxRetries (3). The degenerate-output crawl
+    // (3 retries x retryDelay x N players per turn, zero persisted events)
+    // cannot happen.
+    expect(bodies).toHaveLength(2);
+    // After the single retry fails, the output is salvaged, not mock filler.
+    expect(resp.says).toBe(garbled);
+    expect(resp.degraded).toBe(true);
+  });
+
+  it('keeps network-error retries at maxRetries (only parse failures are capped)', async () => {
+    const engine = newEngine({ maxRetries: 3, retryDelay: 1 });
+    let calls = 0;
+    globalThis.fetch = (async () => {
+      calls += 1;
+      throw new Error('ECONNRESET: network down');
+    }) as any;
+
+    const resp = await engine.getAIResponse(makePlayer(), makeGameState(), 0, false);
+
+    // 1 initial attempt + 3 network retries = 4 calls, then mock fallback.
+    expect(calls).toBe(4);
+    expect(resp.says).toBe('I think we should target someone suspicious.');
+    expect(resp.suppressed).toBe(false);
+  });
+
+  it('suppresses the same canned phrase across 4 different players (game-wide cap)', () => {
+    const engine = newEngine({ maxRetries: 0 });
+    const canned = 'I think we should target someone suspicious.';
+    const players = [
+      makePlayer('p1', 'Alice'),
+      makePlayer('p2', 'Bob'),
+      makePlayer('p3', 'Carol'),
+      makePlayer('p4', 'Dan'),
+    ];
+
+    const out = players.map((p) =>
+      engine.finalizeAgentResponse(p, {
+        valid: false,
+        think: '[Parse failed]',
+        says: canned,
+        action: null,
+      }),
+    );
+
+    // Each player's per-player gate is fresh, so the per-player 2x cap does
+    // NOT fire — the game-wide 3x cap is what drops the 4th broadcast
+    // (the MAF-GAP-042 "4 canned duplicate SAYS across players" scenario).
+    expect(out.map((o) => o.suppressed)).toEqual([false, false, false, true]);
+    expect(out[3].says).toBe('');
+  });
 });

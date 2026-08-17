@@ -697,6 +697,13 @@ const {
   createSayQualityGate,
 } = require("./packages/shared/src/agents/response-parser");
 
+// MAF-GAP-042: cap parse-failure retries at ONE. A model that emits
+// unparseable output once will almost certainly do it again; looping
+// maxRetries (default 3) times per player per turn is what turned a
+// degenerate episode into a multi-minute stall. Network-error and
+// response_format-rejection retries still use this.config.maxRetries.
+const MAX_PARSE_RETRIES = 1;
+
 /**
  * Compose a provider/model id for the API request body.
  *
@@ -4923,10 +4930,15 @@ class MafiaGame {
         }
       }
 
-      // If parsing failed and we have retries left, retry instead of falling back to mock
-      if (!parsed.valid && retryCount < this.config.maxRetries) {
+      // If parsing failed, retry at most ONCE (MAF-GAP-042): a degenerate
+      // model episode must not turn into a retry storm (3 retries x 1s x N
+      // players = multi-minute stall with zero persisted events). After the
+      // single retry fails, fall through to salvage/mock. The cap respects
+      // config.maxRetries (0 = retries explicitly disabled). Network-error
+      // and response_format-rejection retries above still use maxRetries.
+      if (!parsed.valid && retryCount < Math.min(MAX_PARSE_RETRIES, this.config.maxRetries)) {
         console.warn(
-          `[WARN] JSON parse failed for ${player.name}, retrying (${retryCount + 1}/${this.config.maxRetries})...`,
+          `[WARN] JSON parse failed for ${player.name}, retrying (${retryCount + 1}/${MAX_PARSE_RETRIES})...`,
         );
         await new Promise((r) => setTimeout(r, this.config.retryDelay));
         return this.getAIResponse(player, gameState, retryCount + 1, skipResponseFormat);

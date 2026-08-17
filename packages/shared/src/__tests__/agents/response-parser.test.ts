@@ -172,6 +172,35 @@ describe('createSayQualityGate', () => {
     expect(gate.check('p1', phrase)).toBeNull(); // p1 consecutive repeat
   });
 
+  it('suppresses the 4th+ exact repeat of a phrase across the WHOLE game (cross-player cap)', () => {
+    const gate = createSayQualityGate();
+    const canned = 'I think we should target someone suspicious.';
+
+    // 3 different players may each broadcast the identical canned phrase once...
+    expect(gate.check('p1', canned)).toBe(canned);
+    expect(gate.check('p2', canned)).toBe(canned);
+    expect(gate.check('p3', canned)).toBe(canned);
+    // ...but the 4th player's identical phrase is dropped game-wide. This is
+    // the MAF-GAP-042 degenerate scenario: 4 canned duplicate SAYS across
+    // players in a 10p game collapse to 3.
+    expect(gate.check('p4', canned)).toBeNull();
+
+    // A fresh phrase from the same 4th player still passes.
+    expect(gate.check('p4', 'I have new information.')).toBe('I have new information.');
+  });
+
+  it('allows a phrase at most 3 times game-wide even across distinct players', () => {
+    const gate = createSayQualityGate();
+    const phrase = 'I support targeting Bob.';
+    expect(gate.check('p1', phrase)).toBe(phrase);
+    expect(gate.check('p2', phrase)).toBe(phrase);
+    expect(gate.check('p3', phrase)).toBe(phrase);
+    // 4th occurrence game-wide: dropped, even though p4 never said it before.
+    expect(gate.check('p4', phrase)).toBeNull();
+    // The per-player cap still holds too (p1 is at 1, but game-wide is spent).
+    expect(gate.check('p1', phrase)).toBeNull();
+  });
+
   it('reset() clears per-player state between games', () => {
     const gate = createSayQualityGate();
     const phrase = 'Vote Alice out.';
@@ -182,6 +211,18 @@ describe('createSayQualityGate', () => {
 
     gate.reset();
     expect(gate.check('p1', phrase)).toBe(phrase); // fresh game: allowed again
+  });
+
+  it('reset() clears game-wide repeat state too', () => {
+    const gate = createSayQualityGate();
+    const phrase = 'Vote Alice out.';
+    gate.check('p1', phrase);
+    gate.check('p2', phrase);
+    gate.check('p3', phrase);
+    expect(gate.check('p4', phrase)).toBeNull(); // game-wide cap reached
+
+    gate.reset();
+    expect(gate.check('p4', phrase)).toBe(phrase); // fresh game: allowed again
   });
 
   it('reproduces the sampled-game scenario: 5x repeated mock phrase collapses to 2 broadcasts', () => {

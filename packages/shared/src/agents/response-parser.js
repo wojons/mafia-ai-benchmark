@@ -23,6 +23,10 @@
  *   - dedupes CONSECUTIVE exact repeats per player
  *   - drops the 3rd+ exact repeat of the same phrase per player per game
  *     (a phrase may be broadcast at most twice, never back-to-back)
+ *   - drops the 4th+ exact repeat of the same phrase across the WHOLE game
+ *     (any player) so a canned mock fallback cannot be broadcast by 4+
+ *     different players (MAF-GAP-042 degenerate-output crawl: 4 canned
+ *     duplicate SAYS across players in a 10p game)
  *
  * ESM (packages/shared is "type": "module"). game-engine.js loads it with
  * require() (Node >= 22.12 require(esm)); run-real-game.ts and tests import
@@ -171,12 +175,15 @@ export function parseAgentResponse(text) {
 export function createSayQualityGate() {
   const lastSays = new Map(); // playerId -> last broadcast phrase
   const phraseCounts = new Map(); // playerId -> Map<phrase, count>
-  const MAX_REPEAT = 2; // a phrase may be broadcast at most twice per game
+  const gamePhraseCounts = new Map(); // phrase -> count across ALL players
+  const MAX_REPEAT = 2; // a phrase may be broadcast at most twice per player per game
+  const MAX_GAME_REPEAT = 3; // ...and at most 3 times across the whole game
 
   /**
    * Validate and record a player's statement.
    * @returns {string|null} the statement to broadcast, or null when it must
-   *   be dropped (empty, placeholder, consecutive duplicate, or 3rd+ repeat).
+   *   be dropped (empty, placeholder, consecutive duplicate, per-player
+   *   3rd+ repeat, or game-wide 4th+ repeat).
    */
   function check(playerId, says) {
     const text = clean(says);
@@ -193,9 +200,16 @@ export function createSayQualityGate() {
       phraseCounts.set(playerId, counts);
     }
     const count = counts.get(text) || 0;
-    if (count >= MAX_REPEAT) return null; // 3rd+ exact repeat in this game
+    if (count >= MAX_REPEAT) return null; // 3rd+ exact repeat for this player
+
+    // Game-wide cap: a canned/mock fallback phrase may be broadcast at most
+    // 3 times across the WHOLE game regardless of player, so a degenerate
+    // episode cannot surface 4+ identical canned SAYS from different players.
+    const gameCount = gamePhraseCounts.get(text) || 0;
+    if (gameCount >= MAX_GAME_REPEAT) return null;
 
     counts.set(text, count + 1);
+    gamePhraseCounts.set(text, gameCount + 1);
     lastSays.set(playerId, text);
     return text;
   }
@@ -203,6 +217,7 @@ export function createSayQualityGate() {
   function reset() {
     lastSays.clear();
     phraseCounts.clear();
+    gamePhraseCounts.clear();
   }
 
   return { check, reset };
