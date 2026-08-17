@@ -364,6 +364,8 @@ For `json` format:
     "totalGames": 1058,
     "activeGames": 76,
     "completedGames": 982,
+    "failedGames": 0,
+    "failedGameIds": [],
     "mafiaWinRate": 0.1802,
     "avgDuration": 197
   },
@@ -399,6 +401,8 @@ For `json` format:
 ```
 
 **`summary` semantics:** `mafiaWinRate` is the mafia win count over completed games. The winner is derived from the game's `GAME_OVER`-phase event (`data.winner`), falling back to the `games.winner` column.
+
+**`summary.failedGames` / `failedGameIds` semantics (MAF-GAP-050):** `failedGames` counts games whose status is neither `IN_PROGRESS` nor `ENDED` (the `SETUP`, `PAUSED`, `CANCELLED` statuses from the shared `GameStatus` union, or any unknown status) — i.e. games that never reached a terminal outcome. The bucket is defined by exclusion so the summary always reconciles: `totalGames === activeGames + completedGames + failedGames`. `failedGameIds` lists those games for auditing — one object per failed game with `id`, `status`, `createdAt` (ISO 8601), and `endedAt` (ISO 8601 or `null` when the game never recorded an end time). It is `[]` when no failed games exist.
 
 **`modelPerformance[].wins` / `winRate` semantics (MAF-GAP-039):**
 

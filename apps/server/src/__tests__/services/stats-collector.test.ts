@@ -330,10 +330,45 @@ describe('StatsCollector', () => {
         totalGames: 0,
         activeGames: 0,
         completedGames: 0,
+        failedGames: 0,
         avgDuration: 0,
         mafiaWins: 0,
         townWins: 0,
       });
+    });
+
+    it('counts non-terminal statuses as failedGames and balances the total (MAF-GAP-050)', () => {
+      repo.seedGame({ id: 'ok1', status: 'ENDED', winner: 'MAFIA', duration: 60_000 });
+      repo.seedGame({ id: 'ok2', status: 'IN_PROGRESS' });
+      repo.seedGame({ id: 'stuck1', status: 'CANCELLED' });
+      repo.seedGame({ id: 'stuck2', status: 'SETUP' });
+      repo.seedGame({ id: 'stuck3', status: 'PAUSED' });
+
+      const s = stats.getGameStats();
+      expect(s.totalGames).toBe(5);
+      expect(s.activeGames).toBe(1);
+      expect(s.completedGames).toBe(1);
+      expect(s.failedGames).toBe(3);
+      // MAF-GAP-050 acceptance: the reconciliation identity must hold —
+      // every game lands in exactly one bucket.
+      expect(s.totalGames).toBe(s.activeGames + s.completedGames + s.failedGames);
+    });
+
+    it('lists failed game ids with status and timestamps via getFailedGames (MAF-GAP-050)', () => {
+      repo.seedGame({
+        id: 'stuck1', status: 'CANCELLED',
+        startedAt: 1_700_000_000_000, endedAt: 1_700_000_100_000,
+      });
+      repo.seedGame({ id: 'stuck2', status: 'SETUP' });
+      repo.seedGame({ id: 'done', status: 'ENDED', winner: 'TOWN', duration: 30_000 });
+
+      const failed = (repo as any).getFailedGames();
+      expect(failed).toHaveLength(2);
+      expect(failed[0].id).toBe('stuck1');
+      expect(failed[0].status).toBe('CANCELLED');
+      expect(failed[0].createdAt).toBeInstanceOf(Date);
+      expect(failed[0].endedAt).toEqual(new Date(1_700_000_100_000));
+      expect(failed[1]).toMatchObject({ id: 'stuck2', status: 'SETUP', endedAt: null });
     });
   });
 
@@ -1316,6 +1351,45 @@ describe('StatsCollector', () => {
       expect(gameSection.players[0].name).toBe('P1');
     });
 
+    it('generateReport exposes failedGames and stuck-game ids in the summary (MAF-GAP-050)', () => {
+      repo.seedGame({
+        id: 'stuck1', status: 'CANCELLED', endedAt: 1_700_000_100_000,
+      });
+      repo.seedGame({ id: 'stuck2', status: 'SETUP' });
+      repo.seedGame({ id: 'done', status: 'ENDED', winner: 'TOWN', duration: 30_000 });
+      repo.seedGame({ id: 'running', status: 'IN_PROGRESS' });
+
+      const report = stats.generateReport();
+      const summary = report.summary as any;
+      expect(summary.failedGames).toBe(2);
+      expect(summary.failedGameIds).toHaveLength(2);
+      expect(summary.failedGameIds[0]).toMatchObject({
+        id: 'stuck1',
+        status: 'CANCELLED',
+        endedAt: '2023-11-14T22:15:00.000Z',
+      });
+      expect(typeof summary.failedGameIds[0].createdAt).toBe('string');
+      expect(summary.failedGameIds[1]).toMatchObject({
+        id: 'stuck2',
+        status: 'SETUP',
+        endedAt: null,
+      });
+      // MAF-GAP-050 acceptance: the summary reconciles on live data.
+      expect(summary.totalGames).toBe(
+        summary.activeGames + summary.completedGames + summary.failedGames,
+      );
+    });
+
+    it('generateReport returns an empty failedGameIds list when every game reached a bucket', () => {
+      repo.seedGame({ id: 'g1', status: 'ENDED', winner: 'TOWN', duration: 30_000 });
+      repo.seedGame({ id: 'g2', status: 'IN_PROGRESS' });
+
+      const report = stats.generateReport();
+      const summary = report.summary as any;
+      expect(summary.failedGames).toBe(0);
+      expect(summary.failedGameIds).toEqual([]);
+    });
+
     it('generateReport catches errors and returns a fallback object', () => {
       // Drop the games table to force an error path.
       repo.db.exec('DROP TABLE games');
@@ -1346,6 +1420,13 @@ describe('StatsCollector', () => {
       const lines = csv.split('\n');
       expect(lines[0]).toBe('Metric,Value');
       expect(lines).toContain('Total Games,0');
+    });
+
+    it('exportCSV includes the failed games bucket (MAF-GAP-050)', () => {
+      repo.seedGame({ id: 'stuck', status: 'CANCELLED' });
+      const csv = stats.exportCSV();
+      const lines = csv.split('\n');
+      expect(lines).toContain('Failed Games,1');
     });
   });
 

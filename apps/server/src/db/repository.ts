@@ -483,6 +483,7 @@ export class GameRepository {
     totalGames: number;
     activeGames: number;
     completedGames: number;
+    failedGames: number;
     avgDuration: number;
     mafiaWins: number;
     townWins: number;
@@ -490,6 +491,12 @@ export class GameRepository {
     const total = this.db.prepare('SELECT COUNT(*) as count FROM games').get() as { count: number };
     const active = this.db.prepare("SELECT COUNT(*) as count FROM games WHERE status = 'IN_PROGRESS'").get() as { count: number };
     const completed = this.db.prepare("SELECT COUNT(*) as count FROM games WHERE status = 'ENDED'").get() as { count: number };
+    // MAF-GAP-050: any status that is neither IN_PROGRESS nor ENDED
+    // (SETUP, PAUSED, CANCELLED, or anything unexpected) is a "failed"
+    // game — it never reached a terminal outcome. Counting by exclusion
+    // keeps totalGames == activeGames + completedGames + failedGames true
+    // by construction, so the summary always reconciles.
+    const failed = this.db.prepare("SELECT COUNT(*) as count FROM games WHERE status NOT IN ('IN_PROGRESS','ENDED')").get() as { count: number };
     const avgDuration = this.db.prepare("SELECT AVG(duration) as avg FROM games WHERE status = 'ENDED' AND duration IS NOT NULL").get() as { avg: number | null };
     const mafiaWins = this.db.prepare("SELECT COUNT(*) as count FROM games WHERE winner = 'MAFIA'").get() as { count: number };
     const townWins = this.db.prepare("SELECT COUNT(*) as count FROM games WHERE winner = 'TOWN'").get() as { count: number };
@@ -498,12 +505,41 @@ export class GameRepository {
       totalGames: total.count,
       activeGames: active.count,
       completedGames: completed.count,
+      failedGames: failed.count,
       // games.duration is stored in milliseconds; the API contract exposes
       // avgDuration in SECONDS (MAF-GAP-026). Round to the nearest second.
       avgDuration: Math.round((avgDuration.avg || 0) / 1000),
       mafiaWins: mafiaWins.count,
       townWins: townWins.count,
     };
+  }
+
+  /**
+   * List games that never reached a terminal outcome (MAF-GAP-050) —
+   * statuses other than IN_PROGRESS/ENDED (SETUP, PAUSED, CANCELLED, or
+   * unknown). Exposed so stuck / no-winner games are auditable instead of
+   * being invisible inside the totalGames count. Ordered by creation time.
+   */
+  getFailedGames(): Array<{
+    id: string;
+    status: string;
+    createdAt: Date;
+    endedAt: Date | null;
+  }> {
+    const rows = this.db.prepare(
+      `SELECT id, status, created_at, ended_at FROM games
+       WHERE status NOT IN ('IN_PROGRESS','ENDED')
+       ORDER BY created_at, id`
+    ).all() as Record<string, unknown>[];
+    
+    return rows.map(row => ({
+      id: row.id as string,
+      status: row.status as string,
+      createdAt: new Date(row.created_at as number),
+      endedAt: row.ended_at === null || row.ended_at === undefined
+        ? null
+        : new Date(row.ended_at as number),
+    }));
   }
   
   /**

@@ -77,6 +77,7 @@ export interface GameStats {
   totalGames: number;
   activeGames: number;
   completedGames: number;
+  failedGames: number;
   avgDuration: number;
   mafiaWins: number;
   townWins: number;
@@ -119,6 +120,8 @@ function createEmptyReport(): Record<string, unknown> {
       totalGames: 0,
       activeGames: 0,
       completedGames: 0,
+      failedGames: 0,
+      failedGameIds: [],
       mafiaWinRate: 0,
       avgDuration: 0,
     },
@@ -419,6 +422,7 @@ export class StatsCollector {
       totalGames: stats.totalGames,
       activeGames: stats.activeGames,
       completedGames: stats.completedGames,
+      failedGames: stats.failedGames,
       avgDuration: stats.avgDuration,
       mafiaWins: stats.mafiaWins > 0 ? stats.mafiaWins : wins.mafiaWins,
       townWins: stats.townWins > 0 ? stats.townWins : wins.townWins,
@@ -516,6 +520,18 @@ export class StatsCollector {
           totalGames: gameStats.totalGames,
           activeGames: gameStats.activeGames,
           completedGames: gameStats.completedGames,
+          // MAF-GAP-050: games that never reached a terminal outcome
+          // (SETUP / PAUSED / CANCELLED / unknown status). totalGames is
+          // the sum of active + completed + failed by construction, so the
+          // report always reconciles; failedGameIds makes stuck games
+          // auditable instead of invisible.
+          failedGames: gameStats.failedGames,
+          failedGameIds: this.gameRepository.getFailedGames().map(g => ({
+            id: g.id,
+            status: g.status,
+            createdAt: g.createdAt.toISOString(),
+            endedAt: g.endedAt ? g.endedAt.toISOString() : null,
+          })),
           mafiaWinRate: gameStats.completedGames > 0 
             ? gameStats.mafiaWins / gameStats.completedGames 
             : 0,
@@ -586,6 +602,7 @@ export class StatsCollector {
     rows.push(`Total Games,${stats.totalGames}`);
     rows.push(`Active Games,${stats.activeGames}`);
     rows.push(`Completed Games,${stats.completedGames}`);
+    rows.push(`Failed Games,${stats.failedGames}`);
     rows.push(`Mafia Wins,${stats.mafiaWins}`);
     rows.push(`Town Wins,${stats.townWins}`);
     rows.push(`Avg Duration (s),${stats.avgDuration.toFixed(0)}`);
@@ -604,6 +621,7 @@ export class StatsCollector {
       totalGames: number;
       activeGames: number;
       completedGames: number;
+      failedGames: number;
       mafiaWins: number;
       townWins: number;
       avgDuration: number;
@@ -829,6 +847,7 @@ export class StatsCollector {
         totalGames: gameStats.totalGames,
         activeGames: gameStats.activeGames,
         completedGames: gameStats.completedGames,
+        failedGames: gameStats.failedGames,
         mafiaWins: gameStats.mafiaWins,
         townWins: gameStats.townWins,
         avgDuration: gameStats.avgDuration,
@@ -852,6 +871,7 @@ export class StatsCollector {
     lines.push(`Total Games,${report.summary.totalGames}`);
     lines.push(`Active Games,${report.summary.activeGames}`);
     lines.push(`Completed Games,${report.summary.completedGames}`);
+    lines.push(`Failed Games,${report.summary.failedGames}`);
     lines.push(`Mafia Wins,${report.summary.mafiaWins}`);
     lines.push(`Town Wins,${report.summary.townWins}`);
     lines.push(`Avg Duration (ms),${report.summary.avgDuration.toFixed(0)}`);
