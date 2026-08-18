@@ -112,17 +112,26 @@ export class WatchGameCommand extends Command {
     }
   }
   
-  private displayGameState(state: Record<string, unknown>): void {
+  private displayGameState(payload: Record<string, unknown>): void {
+    // The server wraps the state under payload.state (apps/server/src/websocket);
+    // accept a bare state object too for robustness (MAF-GAP-046).
+    const state = (payload.state as Record<string, unknown> | undefined) ?? payload;
+
+    const phase = state.phase as string | undefined;
+    const dayNumber = state.dayNumber as number | undefined;
+    const turnNumber = state.turnNumber as number | undefined;
+    const timeRemaining = state.timeRemaining as number | undefined;
+    const activePlayers = state.activePlayers as string[] | undefined;
+
     console.log(chalk.white('\n📊 Game State:'));
-    console.log(`  Phase:     ${chalk.cyan(state.phase as string)}`);
-    console.log(`  Day:       ${chalk.yellow((state.dayNumber as number).toString())}`);
-    console.log(`  Turn:      ${chalk.yellow((state.turnNumber as number).toString())}`);
-    console.log(`  Time:      ${chalk.yellow((state.timeRemaining as number).toString())}s`);
-    console.log(`  Alive:     ${chalk.green((state.activePlayers as string[]).length.toString())}`);
-    
-    const players = state.activePlayers as string[];
-    if (players && players.length > 0) {
-      console.log(chalk.gray('  Players: ') + players.join(', '));
+    console.log(`  Phase:     ${chalk.cyan(phase ?? '—')}`);
+    console.log(`  Day:       ${chalk.yellow(dayNumber !== undefined ? dayNumber.toString() : '—')}`);
+    console.log(`  Turn:      ${chalk.yellow(turnNumber !== undefined ? turnNumber.toString() : '—')}`);
+    console.log(`  Time:      ${chalk.yellow(timeRemaining !== undefined ? timeRemaining.toString() : '—')}s`);
+    console.log(`  Alive:     ${chalk.green(activePlayers !== undefined ? activePlayers.length.toString() : '—')}`);
+
+    if (activePlayers && activePlayers.length > 0) {
+      console.log(chalk.gray('  Players: ') + activePlayers.join(', '));
     }
   }
   

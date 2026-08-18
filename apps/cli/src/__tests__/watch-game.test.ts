@@ -98,4 +98,45 @@ describe('WatchGameCommand', () => {
     cmd['displayGameState'](state);
     expect(console.log).toHaveBeenCalled();
   });
+
+  // MAF-GAP-046: the server sends GAME_STATE as payload: { state } while the
+  // CLI used to read fields straight off the payload, printing
+  // "Phase: undefined" and crashing on the next .toString(). These tests pin
+  // the unwrap + defensive display.
+  it('displayGameState unwraps the server { state } payload wrapper', () => {
+    const state = {
+      phase: 'NIGHT',
+      dayNumber: 2,
+      turnNumber: 5,
+      timeRemaining: 30,
+      activePlayers: ['Alice', 'Bob', 'Charlie'],
+    };
+    cmd['displayMessage']({ type: 'GAME_STATE', payload: { state } });
+    const logged = (console.log as any).mock.calls.map((c: unknown[]) => c.join(' ')).join('\n');
+    expect(logged).toContain('Phase:     NIGHT');
+    expect(logged).toContain('Day:       2');
+    expect(logged).toContain('Turn:      5');
+    expect(logged).toContain('Time:      30s');
+    expect(logged).toContain('Alive:     3');
+    expect(logged).toContain('Players: Alice, Bob, Charlie');
+    expect(logged).not.toContain('undefined');
+  });
+
+  it('displayGameState never prints "undefined" for missing fields', () => {
+    cmd['displayGameState']({});
+    const logged = (console.log as any).mock.calls.map((c: unknown[]) => c.join(' ')).join('\n');
+    expect(logged).not.toContain('undefined');
+    expect(logged).toContain('Phase:     —');
+    expect(logged).toContain('Alive:     —');
+  });
+
+  it('displayMessage handles GAME_STATE with wrapped payload via live path', () => {
+    cmd['displayMessage']({
+      type: 'GAME_STATE',
+      payload: { state: { phase: 'DAY_DISCUSSION', dayNumber: 1, turnNumber: 1, timeRemaining: 120, activePlayers: [] } },
+    });
+    const logged = (console.log as any).mock.calls.map((c: unknown[]) => c.join(' ')).join('\n');
+    expect(logged).toContain('Phase:     DAY_DISCUSSION');
+    expect(logged).not.toContain('undefined');
+  });
 });

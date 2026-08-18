@@ -111,12 +111,35 @@ export class RunGameCommand extends Command {
     try {
       if (fs.existsSync(configPath)) {
         const config = fs.readFileSync(configPath, 'utf-8');
-        return JSON.parse(config) as GameConfig;
+        return this.normalizeConfig(JSON.parse(config) as Record<string, unknown>);
       }
     } catch {
       // Ignore errors
     }
     return null;
+  }
+
+  /**
+   * Accepts both config shapes and always yields concrete values:
+   * - flat:   { numPlayers, llmProvider, llmModel, nightDuration, dayDuration, votingDuration, roles }
+   * - nested (mafiactl init): { game: { numPlayers, roles, nightPhaseDuration, dayPhaseDuration, votingDuration }, llm: { provider, model } }
+   * Missing keys fall back to defaults so the printed configuration never
+   * contains "undefined" (MAF-GAP-046).
+   */
+  private normalizeConfig(raw: Record<string, unknown>): GameConfig {
+    const game = (raw.game ?? {}) as Record<string, unknown>;
+    const llm = (raw.llm ?? {}) as Record<string, unknown>;
+    const defaults = this.getDefaultGameConfig();
+
+    return {
+      numPlayers: (game.numPlayers as number) ?? (raw.numPlayers as number) ?? defaults.numPlayers,
+      llmProvider: (llm.provider as string) ?? (raw.llmProvider as string) ?? defaults.llmProvider,
+      llmModel: (llm.model as string) ?? (raw.llmModel as string) ?? defaults.llmModel,
+      nightDuration: (game.nightPhaseDuration as number) ?? (raw.nightDuration as number) ?? defaults.nightDuration,
+      dayDuration: (game.dayPhaseDuration as number) ?? (raw.dayDuration as number) ?? defaults.dayDuration,
+      votingDuration: (game.votingDuration as number) ?? (raw.votingDuration as number) ?? defaults.votingDuration,
+      roles: (game.roles as Array<{ role: string; count: number }>) ?? (raw.roles as Array<{ role: string; count: number }>) ?? defaults.roles,
+    };
   }
 
   private getDefaultGameConfig(): GameConfig {
