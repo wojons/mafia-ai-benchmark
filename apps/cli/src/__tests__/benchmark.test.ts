@@ -7,13 +7,14 @@
  * spawn the actual CLI (`node tsx-cli src/index.ts ...`) with process.argv-like
  * arguments, matching parse.test.ts (MAF-GAP-009).
  */
-import { describe, it, expect, afterEach } from 'vitest';
+import { describe, it, expect, afterEach, vi } from 'vitest';
 import { execFile, execFileSync } from 'child_process';
 import { promisify } from 'util';
 import { mkdtempSync, existsSync, rmSync, readFileSync } from 'fs';
 import { tmpdir } from 'os';
 import * as path from 'path';
 import { createRequire } from 'module';
+import { BenchmarkCommand } from '../commands/benchmark';
 
 const execFileAsync = promisify(execFile);
 const nodeRequire = createRequire(__filename);
@@ -218,5 +219,131 @@ describe('benchmark (unreachable server)', () => {
       expect(stdout).not.toContain('Testing model');
     },
     90000
+  );
+});
+
+// --- MAF-GAP-047: pairwise error message + progress heartbeat (mocked fetch, no live server) ---
+
+/** Minimal fetch Response stand-in for mocked endpoints. */
+function jsonResponse(body: unknown, status = 200): Response {
+  return {
+    ok: status >= 200 && status < 300,
+    status,
+    statusText: status === 200 ? 'OK' : 'ERROR',
+    json: async () => body,
+    text: async () => JSON.stringify(body),
+  } as unknown as Response;
+}
+
+type RunBenchmarkOpts = { games?: string; models?: string; json?: boolean };
+type RunBenchmarkFn = (serverUrl: string, opts: RunBenchmarkOpts) => Promise<unknown>;
+
+/** Access the private runBenchmark method (unit-test seam; it throws/rejects
+ *  instead of catching + process.exit like the public run()). */
+function runBenchmarkOf(cmd: BenchmarkCommand): RunBenchmarkFn {
+  return (cmd as unknown as { runBenchmark: RunBenchmarkFn }).runBenchmark.bind(cmd);
+}
+
+/** A status-poll body: RUNNING (or any status) with the given completedGames. */
+function statusBody(status: string, completedGames: number): Record<string, unknown> {
+  return {
+    success: true,
+    data: {
+      status,
+      progress: {
+        runId: 'run-heartbeat-1',
+        status,
+        totalGames: 2,
+        completedGames,
+        validGames: completedGames,
+        failedGames: 0,
+        pairings: [],
+      },
+    },
+  };
+}
+
+const START_BODY = {
+  success: true,
+  data: {
+    runId: 'run-heartbeat-1',
+    totalGames: 2,
+    pairings: [{ id: 'p1', modelA: 'openai/gpt-4o-mini', modelB: 'openai/gpt-4o', games: 1 }],
+  },
+};
+
+const REPORT_BODY = {
+  summary: { totalGames: 2, completedGames: 2 },
+  modelPerformance: [],
+  recommendations: [],
+};
+
+describe('benchmark single-model guard (MAF-GAP-047)', () => {
+  it(
+    'rejects with a pairwise (head-to-head) explanation when only 1 model is given',
+    async () => {
+      const cmd = new BenchmarkCommand();
+      await expect(
+        runBenchmarkOf(cmd)('http://localhost:3004', { games: '1', models: 'openai/gpt-4o-mini' })
+      ).rejects.toThrow(/pairwise/);
+    },
+    10000
+  );
+});
+
+describe('benchmark progress heartbeat (MAF-GAP-047)', () => {
+  afterEach(() => {
+    vi.restoreAllMocks();
+    vi.useRealTimers();
+  });
+
+  it(
+    'prints a heartbeat line while completedGames is stuck at 0, without per-poll spam',
+    async () => {
+      const logSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
+
+      // 1 POST + 9 RUNNING polls (completedGames stuck at 0) + 1 COMPLETED poll + 1 report fetch.
+      // Heartbeat interval is 15s; with 2s polls the heartbeat fires on poll 9 (elapsed 18s),
+      // BEFORE any completedGames advance.
+      const fetchMock = vi.fn()
+        .mockResolvedValueOnce(jsonResponse(START_BODY))
+        .mockResolvedValueOnce(jsonResponse(statusBody('RUNNING', 0)))
+        .mockResolvedValueOnce(jsonResponse(statusBody('RUNNING', 0)))
+        .mockResolvedValueOnce(jsonResponse(statusBody('RUNNING', 0)))
+        .mockResolvedValueOnce(jsonResponse(statusBody('RUNNING', 0)))
+        .mockResolvedValueOnce(jsonResponse(statusBody('RUNNING', 0)))
+        .mockResolvedValueOnce(jsonResponse(statusBody('RUNNING', 0)))
+        .mockResolvedValueOnce(jsonResponse(statusBody('RUNNING', 0)))
+        .mockResolvedValueOnce(jsonResponse(statusBody('RUNNING', 0)))
+        .mockResolvedValueOnce(jsonResponse(statusBody('RUNNING', 0)))
+        .mockResolvedValueOnce(jsonResponse(statusBody('COMPLETED', 2)))
+        .mockResolvedValueOnce(jsonResponse(REPORT_BODY));
+      vi.stubGlobal('fetch', fetchMock);
+      vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout', 'Date'] });
+
+      const cmd = new BenchmarkCommand();
+      const runPromise = runBenchmarkOf(cmd)('http://localhost:3004', {
+        games: '1',
+        models: 'openai/gpt-4o-mini,openai/gpt-4o',
+      });
+
+      // Advance fake time in 2s poll steps: 10 polls ≈ 20s, plus slack for the report fetch.
+      for (let i = 0; i < 12; i++) {
+        await vi.advanceTimersByTimeAsync(2000);
+      }
+      await runPromise;
+
+      const printed = logSpy.mock.calls.map((args) => args.join(' ')).join('\n');
+
+      // The heartbeat line appears while completedGames never advanced past 0:
+      // poll 9 at elapsed 18s is still RUNNING 0/2.
+      expect(printed).toContain('⏳ [RUNNING] 0/2 games completed (elapsed 18s)');
+      // Elapsed seconds are included on progress lines.
+      expect(printed).toContain('(elapsed ');
+      // Exactly 3 progress lines across 10 polls (advance @ poll 1, heartbeat @ poll 9,
+      // advance @ poll 10) — NOT one line per poll.
+      expect(printed.match(/games completed/g)).toHaveLength(3);
+    },
+    10000
   );
 });

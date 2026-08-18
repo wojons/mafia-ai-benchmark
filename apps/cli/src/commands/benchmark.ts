@@ -31,6 +31,8 @@ const TERMINAL: ReadonlySet<RunStatus> = new Set(['COMPLETED', 'CANCELLED', 'FAI
 const RUN_TIMEOUT_MS = 10 * 60 * 1000;
 /** Poll interval, in ms. */
 const POLL_INTERVAL_MS = 2000;
+/** Print a heartbeat status line when progress is stuck this long, in ms (~15s, 7-8 polls). */
+const HEARTBEAT_INTERVAL_MS = 15 * 1000;
 /** HTTP timeout for individual API calls, in ms. */
 const REQUEST_TIMEOUT_MS = 30000;
 
@@ -173,7 +175,7 @@ export class BenchmarkCommand extends Command {
       : [...DEFAULT_MODELS];
 
     if (modelList.length < 2) {
-      throw new Error(`Benchmark requires at least 2 models, got ${modelList.length}. Use --models provider/model,provider/model.`);
+      throw new Error(`Benchmark requires at least 2 models, got ${modelList.length}. Benchmarks compare models pairwise (head-to-head), so at least 2 models are required. Use --models provider/model,provider/model (e.g. --models openai/gpt-4o-mini,openai/gpt-4o).`);
     }
 
     const gamesPerPairing = opts.games !== undefined
@@ -217,7 +219,9 @@ export class BenchmarkCommand extends Command {
     // Poll the run status.
     const statusUrl = `${serverUrl}/api/v1/benchmark/runs/${runId}`;
     const deadline = Date.now() + RUN_TIMEOUT_MS;
+    const runStartedAt = Date.now();
     let lastCompleted = -1;
+    let lastHeartbeatAt = 0;
     let progress: RunProgress | null = null;
 
     while (Date.now() < deadline) {
@@ -244,12 +248,14 @@ export class BenchmarkCommand extends Command {
 
       progress = body.data.progress;
 
-      // Print progress only when the completed count advances.
-      if (progress.completedGames !== lastCompleted) {
+      // Print progress when the completed count advances, AND send a heartbeat
+      // when it has been stuck (a single long game can keep completedGames at 0
+      // for minutes) — MAF-GAP-047. Never print on every poll (2s spam).
+      const elapsedMs = Date.now() - runStartedAt;
+      if (progress.completedGames !== lastCompleted || elapsedMs - lastHeartbeatAt >= HEARTBEAT_INTERVAL_MS) {
         lastCompleted = progress.completedGames;
-        console.log(chalk.gray(`   progress: ${progress.completedGames}/${progress.totalGames} games completed` +
-          (progress.failedGames > 0 ? `, ${progress.failedGames} failed` : '') +
-          ` [${progress.status}]`));
+        lastHeartbeatAt = elapsedMs;
+        console.log(chalk.gray(this.formatProgressLine(progress, elapsedMs)));
       }
 
       if (TERMINAL.has(progress.status)) {
@@ -292,6 +298,14 @@ export class BenchmarkCommand extends Command {
 
   private sleep(ms: number): Promise<void> {
     return new Promise((resolve) => setTimeout(resolve, ms));
+  }
+
+  /** Format one progress/heartbeat status line (MAF-GAP-047). */
+  private formatProgressLine(progress: RunProgress, elapsedMs: number): string {
+    const elapsedSec = Math.round(elapsedMs / 1000);
+    return `⏳ [${progress.status}] ${progress.completedGames}/${progress.totalGames} games completed` +
+      (progress.failedGames > 0 ? `, ${progress.failedGames} failed` : '') +
+      ` (elapsed ${elapsedSec}s)`;
   }
 
   private async fetchReport(serverUrl: string): Promise<BenchmarkReport> {
