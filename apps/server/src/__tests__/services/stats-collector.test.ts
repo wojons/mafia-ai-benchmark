@@ -933,6 +933,117 @@ describe('StatsCollector', () => {
       expect(townModel.wins).toBe(1); // town side won
       expect(townModel.winRate).toBe(1);
     });
+
+    it('merges CUSTOM/provider-prefixed rows into the plain provider/model row (MAF-GAP-045)', () => {
+      // Live fragmentation: provider='CUSTOM' rows carry the model ALREADY
+      // fully prefixed ('openai/gpt-4o-mini') while the usage path stores
+      // provider='openai' with plain 'gpt-4o-mini'. Both are the same real
+      // model — the canonical key is the model's OWN prefix, so exactly
+      // ONE row must survive, and it must NOT be CUSTOM/openai/gpt-4o-mini.
+      // (The old normalizeModelKey only stripped a prefix matching the
+      // row's OWN provider, so these produced two report rows.)
+      repo.seedGame({
+        id: 'gap045-a',
+        players: [
+          { id: 'a1', name: 'A1', role: 'TOWN', joinOrder: 0, isMafia: false,
+            provider: 'openai', model: 'gpt-4o-mini', won: 1, tokens_used: 100 },
+        ],
+      });
+      repo.seedGame({
+        id: 'gap045-b',
+        players: [
+          { id: 'b1', name: 'B1', role: 'TOWN', joinOrder: 0, isMafia: false,
+            provider: 'CUSTOM', model: 'openai/gpt-4o-mini', won: 1, tokens_used: 90 },
+        ],
+      });
+
+      const cmp = stats.getModelComparison();
+      const row = cmp.find(m => m.provider === 'openai' && m.model === 'gpt-4o-mini')!;
+      expect(row).toBeDefined();
+      // Two distinct games (one per spelling) — the canonical GROUP BY
+      // counts distinct games, it does not drop either spelling's games.
+      expect(row.gamesPlayed).toBe(2);
+      expect(row.wins).toBe(2);
+      expect(row.winRate).toBe(1);
+      // The fragmented spelling must be gone: no CUSTOM/openai/gpt-4o-mini row.
+      expect(cmp.find(m => m.provider === 'CUSTOM' && m.model === 'openai/gpt-4o-mini')).toBeUndefined();
+      // And only ONE row for this real model.
+      expect(cmp.filter(m => m.model === 'gpt-4o-mini')).toHaveLength(1);
+    });
+
+    it('merge-max across sources keeps the most-games row and max wins (MAF-GAP-045)', () => {
+      // The same game can be recorded by BOTH the players table (dbStats)
+      // and token_usage (usage source): game mm-a has a players row AND
+      // usage rows. Summing sources would count mm-a twice (3); merge-max
+      // keeps the most complete source (usage, 2 games) and never
+      // fabricates wins: wins = max(1, 0) = 1.
+      repo.seedGame({
+        id: 'mm-a', status: 'ENDED',
+        players: [
+          { id: 'm1', name: 'M1', role: 'TOWN', joinOrder: 0, isMafia: false,
+            provider: 'openai', model: 'gpt-4o-mini', won: 1, tokens_used: 100 },
+        ],
+      });
+      repo.seedGame({ id: 'mm-b', status: 'ENDED' });
+      for (const [gameId, tokens, cost] of [['mm-a', 500, 0.0005], ['mm-b', 300, 0.0003]] as const) {
+        stats.recordTokenUsage({
+          gameId, playerId: 'ALL', turnNumber: 0,
+          provider: 'openai', model: 'gpt-4o-mini',
+          promptTokens: tokens, completionTokens: 0, totalTokens: tokens,
+          cost, timestamp: Date.now(),
+        });
+      }
+
+      const cmp = stats.getModelComparison();
+      const row = cmp.find(m => m.provider === 'openai' && m.model === 'gpt-4o-mini')!;
+      expect(row).toBeDefined();
+      expect(row.gamesPlayed).toBe(2); // max(1 dbStats, 2 usage) — NOT 3 (mm-a double-counted)
+      expect(row.wins).toBe(1); // max(1 dbStats win, 0 usage wins) — never fabricated
+      expect(row.winRate).toBeCloseTo(0.5, 5);
+    });
+
+    it('merged row keeps REAL latency when the dominant source lacks it (MAF-GAP-045)', () => {
+      // Live shape: the dominant source's row can report avgLatency 0
+      // because IT has no api_calls, while the other source has real
+      // calls. The merge keeps the dominant row (most games) but must NOT
+      // zero out the real 750ms — the loser's real metric fills the gap.
+      // Games fill-a/fill-b: players rows (dbStats, 2 games, NO api_calls
+      // -> latency 0). Game fill-c: usage-only with api_calls 700+800
+      // (usage source, 1 game, latency 750).
+      repo.seedGame({
+        id: 'fill-a',
+        players: [
+          { id: 'fa1', name: 'FA1', role: 'TOWN', joinOrder: 0, isMafia: false,
+            provider: 'openai', model: 'gpt-4o-mini', won: 1, tokens_used: 100 },
+        ],
+      });
+      repo.seedGame({
+        id: 'fill-b',
+        players: [
+          { id: 'fb1', name: 'FB1', role: 'TOWN', joinOrder: 0, isMafia: false,
+            provider: 'openai', model: 'gpt-4o-mini', won: 0, tokens_used: 90 },
+        ],
+      });
+      repo.seedGame({ id: 'fill-c', status: 'ENDED' });
+      stats.recordTokenUsage({
+        gameId: 'fill-c', playerId: 'ALL', turnNumber: 0,
+        provider: 'openai', model: 'gpt-4o-mini',
+        promptTokens: 100, completionTokens: 50, totalTokens: 150,
+        cost: 0.001, timestamp: Date.now(),
+      });
+      for (const latency of [700, 800]) {
+        repo.insertApiCall({
+          gameId: 'fill-c', playerId: 'ALL', provider: 'openai', model: 'gpt-4o-mini',
+          endpoint: '/v1/chat/completions', latency, timestamp: Date.now(),
+        });
+      }
+
+      const cmp = stats.getModelComparison();
+      const row = cmp.find(m => m.provider === 'openai' && m.model === 'gpt-4o-mini')!;
+      expect(row).toBeDefined();
+      expect(row.gamesPlayed).toBe(2); // dominant = dbStats (2 games)
+      expect(row.avgLatency).toBeCloseTo(750, 5); // real value survives the merge
+    });
   });
 
   // ==========================================================================
@@ -1080,6 +1191,56 @@ describe('StatsCollector', () => {
       expect(rows[0].gamesPlayed).toBe(2);
       expect(rows[0].wins).toBe(2);
       expect(rows[0].winRate).toBeCloseTo(1, 5);
+    });
+
+    it('merges CUSTOM/provider-prefixed rows into the canonical key (MAF-GAP-045)', () => {
+      // Legacy benchmark-path rows carry provider='CUSTOM' with the model
+      // ALREADY prefixed ('openai/gpt-4o-mini'). The canonical provider is
+      // the model's OWN prefix — the old single-prefix expression only
+      // stripped a prefix matching the row's provider, so this row kept a
+      // fragmented CUSTOM/openai/gpt-4o-mini key. It must merge with the
+      // plain openai/gpt-4o-mini spelling into ONE row.
+      repo.seedGame({
+        id: 'g045a',
+        players: [
+          { id: 'g1', name: 'G1', role: 'TOWN', joinOrder: 0, isMafia: false,
+            provider: 'openai', model: 'gpt-4o-mini', won: 1, tokens_used: 100 },
+        ],
+      });
+      repo.seedGame({
+        id: 'g045b',
+        players: [
+          { id: 'g2', name: 'G2', role: 'TOWN', joinOrder: 0, isMafia: false,
+            provider: 'CUSTOM', model: 'openai/gpt-4o-mini', won: 1, tokens_used: 90 },
+        ],
+      });
+
+      const rows = repo.getModelStats();
+      expect(rows).toHaveLength(1);
+      expect(rows[0].provider).toBe('openai');
+      expect(rows[0].model).toBe('gpt-4o-mini');
+      expect(rows[0].gamesPlayed).toBe(2); // both distinct games counted
+      expect(rows[0].wins).toBe(2);
+    });
+
+    it('keeps the honest CUSTOM/openai legacy floor row intact (MAF-GAP-045)', () => {
+      // provider='CUSTOM' with model='openai' (no slash) is a REAL model
+      // name, not a prefixed spelling — it must keep its identity and not
+      // merge into anything.
+      repo.seedGame({
+        id: 'g045c',
+        players: [
+          { id: 'g3', name: 'G3', role: 'TOWN', joinOrder: 0, isMafia: false,
+            provider: 'CUSTOM', model: 'openai', won: 0, tokens_used: 100 },
+        ],
+      });
+
+      const rows = repo.getModelStats();
+      expect(rows).toHaveLength(1);
+      expect(rows[0].provider).toBe('CUSTOM');
+      expect(rows[0].model).toBe('openai');
+      expect(rows[0].gamesPlayed).toBe(1);
+      expect(rows[0].wins).toBe(0);
     });
   });
 

@@ -23,35 +23,67 @@ const TOWN_ROLES = new Set([
 ]);
 
 /**
- * SQL expression selecting the NORMALIZED model string for a table alias
- * (MAF-GAP-036). Some rows carry the provider prefix inside the model
+ * SQL expression selecting the canonical MODEL string for a table alias
+ * (MAF-GAP-036/045). Some rows carry the provider prefix inside the model
  * column (provider='openai', model='openai/gpt-4o-mini') while others do
  * not (provider='openai', model='gpt-4o-mini'). Both are the same real
- * model, so the prefix is stripped before aggregation (LIKE is
- * case-insensitive for ASCII in SQLite, matching normalizeModelKey below).
+ * model, so the prefix is stripped before aggregation. MAF-GAP-045: the
+ * strip no longer depends on the row's OWN provider — legacy rows store
+ * provider='CUSTOM' with the model already fully prefixed
+ * ('openai/gpt-4o-mini'); the prefix is stripped whenever the model
+ * string contains a slash, regardless of the stored provider. Models
+ * without a slash are unchanged.
  */
 function normalizedModelSql(alias: string): string {
-  return `CASE WHEN ${alias}.model LIKE ${alias}.provider || '/%' THEN substr(${alias}.model, length(${alias}.provider) + 2) ELSE ${alias}.model END`;
+  return `CASE WHEN instr(${alias}.model, '/') > 0
+    THEN substr(${alias}.model, instr(${alias}.model, '/') + 1)
+    ELSE ${alias}.model END`;
 }
 
 /**
- * Normalize a provider/model pair for aggregation (MAF-GAP-036): strip a
- * leading '<provider>/' prefix from the model string when present
- * (case-insensitive), so provider-prefixed and plain model spellings
- * merge into ONE row instead of producing duplicate/contradictory rows.
- * The provider is returned unchanged.
+ * SQL expression selecting the canonical PROVIDER for a table alias
+ * (MAF-GAP-045): when the model string itself carries a provider prefix
+ * ('openai/gpt-4o-mini'), that prefix IS the provider — regardless of the
+ * row's stored provider ('CUSTOM' legacy rows). When the prefix matches
+ * the stored provider (case-insensitive, LIKE semantics as before) the
+ * stored spelling wins so 'OPENAI/openai/gpt-4o-mini' keeps provider
+ * 'OPENAI'. Models without a slash keep the stored provider unchanged
+ * (this is what preserves the honest 'CUSTOM/openai' legacy floor row).
+ */
+function normalizedProviderSql(alias: string): string {
+  return `CASE
+    WHEN instr(${alias}.model, '/') > 0
+      AND lower(substr(${alias}.model, 1, instr(${alias}.model, '/') - 1)) = lower(${alias}.provider)
+    THEN ${alias}.provider
+    WHEN instr(${alias}.model, '/') > 0
+    THEN substr(${alias}.model, 1, instr(${alias}.model, '/') - 1)
+    ELSE ${alias}.provider END`;
+}
+
+/**
+ * Normalize a provider/model pair for aggregation (MAF-GAP-036/045): a
+ * model string that itself contains a provider prefix ('openai/gpt-4o-mini')
+ * collapses to the canonical key (provider='openai', model='gpt-4o-mini')
+ * REGARDLESS of the row's stored provider ('CUSTOM' legacy rows) — two
+ * keys for one real model is the fragmentation MAF-GAP-045 fixes. When
+ * the stored provider matches the model's own prefix (case-insensitive),
+ * the stored spelling is kept, preserving the pre-existing
+ * 'OPENAI/openai/gpt-4o-mini' -> 'OPENAI/gpt-4o-mini' behavior. Models
+ * without a slash (including the honest 'CUSTOM/openai' legacy floor row)
+ * are returned unchanged.
  */
 export function normalizeModelKey(
   provider: string,
   model: string,
 ): { provider: string; model: string } {
   if (!provider || !model) return { provider, model };
-  const prefix = `${provider}/`;
-  if (
-    model.length > prefix.length &&
-    model.slice(0, prefix.length).toLowerCase() === prefix.toLowerCase()
-  ) {
-    return { provider, model: model.slice(prefix.length) };
+  const slash = model.indexOf('/');
+  if (slash > 0) {
+    const prefix = model.slice(0, slash);
+    if (provider.toLowerCase() === prefix.toLowerCase()) {
+      return { provider, model: model.slice(slash + 1) };
+    }
+    return { provider: prefix, model: model.slice(slash + 1) };
   }
   return { provider, model };
 }
@@ -82,8 +114,10 @@ function getModelComparisonFromAssignments(
   avgLatency: number;
 }> {
   const db = gameRepository.getDatabase();
+  const provExpr = normalizedProviderSql('pma');
+  const modelExpr = normalizedModelSql('pma');
   const rows = db.prepare(`
-    SELECT pma.provider, pma.model, pma.game_id, pma.role
+    SELECT ${provExpr} as provider, ${modelExpr} as model, pma.game_id, pma.role
     FROM player_model_assignments pma
     JOIN games g ON g.id = pma.game_id
     WHERE g.status = 'ENDED'
@@ -125,15 +159,16 @@ function getModelComparisonFromAssignments(
   // merge level instead: players.is_mafia joined to the real game winner
   // (per-player participation, never fake 'ALL'-player assignment rows).
   try {
-    const pExpr = normalizedModelSql('p');
+    const pProvExpr = normalizedProviderSql('p');
+    const pModelExpr = normalizedModelSql('p');
     const wonRows = db.prepare(`
       SELECT p.game_id,
-             p.provider,
-             ${pExpr} as model
+             ${pProvExpr} as provider,
+             ${pModelExpr} as model
       FROM players p
       WHERE p.provider IS NOT NULL AND p.model IS NOT NULL
         AND p.won = 1
-      GROUP BY p.game_id, p.provider, ${pExpr}
+      GROUP BY p.game_id, ${pProvExpr}, ${pModelExpr}
     `).all() as Array<{
       game_id: string;
       provider: string;
@@ -157,11 +192,13 @@ function getModelComparisonFromAssignments(
     Array<{ gameId: string; tokens: number; cost: number }>
   >();
   try {
+    const tuProvExpr = normalizedProviderSql('tu');
+    const tuModelExpr = normalizedModelSql('tu');
     const usageRows = db.prepare(`
-      SELECT provider, model, game_id,
+      SELECT ${tuProvExpr} as provider, ${tuModelExpr} as model, tu.game_id,
              SUM(total_tokens) as tokens, COALESCE(SUM(cost), 0) as cost
-      FROM token_usage
-      GROUP BY provider, model, game_id
+      FROM token_usage tu
+      GROUP BY ${tuProvExpr}, ${tuModelExpr}, tu.game_id
     `).all() as Array<{
       provider: string;
       model: string;
@@ -187,11 +224,13 @@ function getModelComparisonFromAssignments(
   // Real mean per-call latency per model from recorded api_calls.
   const latencyByModel = new Map<string, number>();
   try {
+    const acProvExpr = normalizedProviderSql('ac');
+    const acModelExpr = normalizedModelSql('ac');
     const latencyRows = db.prepare(`
-      SELECT provider, model, AVG(latency) as avg_latency
-      FROM api_calls
+      SELECT ${acProvExpr} as provider, ${acModelExpr} as model, AVG(latency) as avg_latency
+      FROM api_calls ac
       WHERE latency >= 50
-      GROUP BY provider, model
+      GROUP BY ${acProvExpr}, ${acModelExpr}
     `).all() as Array<{
       provider: string;
       model: string;
@@ -256,9 +295,11 @@ function getSideAttributedWinGames(
   }
   if (!db) return winGamesByModel;
   try {
+    const pProvExpr = normalizedProviderSql('p');
+    const pModelExpr = normalizedModelSql('p');
     const rows = db.prepare(`
-      SELECT p.game_id, p.provider,
-             ${normalizedModelSql('p')} as model,
+      SELECT p.game_id, ${pProvExpr} as provider,
+             ${pModelExpr} as model,
              p.is_mafia, g.winner
       FROM players p
       JOIN games g ON g.id = p.game_id
@@ -331,15 +372,17 @@ function getModelComparisonFromUsage(
   avgLatency: number;
 }> {
   const db = gameRepository.getDatabase();
+  const tuProvExpr = normalizedProviderSql('tu');
+  const tuModelExpr = normalizedModelSql('tu');
   const rows = db.prepare(`
-    SELECT tu.provider, tu.model,
+    SELECT ${tuProvExpr} as provider, ${tuModelExpr} as model,
            COUNT(DISTINCT tu.game_id) as games,
            SUM(tu.total_tokens) as tokens,
            COALESCE(SUM(tu.cost), 0) as cost
     FROM token_usage tu
     JOIN games g ON g.id = tu.game_id
     WHERE g.status = 'ENDED'
-    GROUP BY tu.provider, tu.model
+    GROUP BY ${tuProvExpr}, ${tuModelExpr}
   `).all() as Array<{
     provider: string;
     model: string;
@@ -350,11 +393,13 @@ function getModelComparisonFromUsage(
 
   const latencyByModel = new Map<string, number>();
   try {
+    const acProvExpr = normalizedProviderSql('ac');
+    const acModelExpr = normalizedModelSql('ac');
     const latencyRows = db.prepare(`
-      SELECT provider, model, AVG(latency) as avg_latency
-      FROM api_calls
+      SELECT ${acProvExpr} as provider, ${acModelExpr} as model, AVG(latency) as avg_latency
+      FROM api_calls ac
       WHERE latency >= 50
-      GROUP BY provider, model
+      GROUP BY ${acProvExpr}, ${acModelExpr}
     `).all() as Array<{ provider: string; model: string; avg_latency: number }>;
     for (const row of latencyRows) {
       if (!row.provider || !row.model) continue;
@@ -461,17 +506,28 @@ export function getModelComparison(
         // exist ONLY in token_usage ('ALL'-player rows), so the earlier
         // source must not shadow hundreds of real games. Wins may only
         // come from real players.won rows, so take the max (never fabricate).
-        if ((normalized.gamesPlayed || 0) > (existing.gamesPlayed || 0)) {
-          merged.set(key, {
-            ...normalized,
-            wins: Math.max(existing.wins || 0, normalized.wins || 0),
-          });
-        } else {
-          merged.set(key, {
-            ...existing,
-            wins: Math.max(existing.wins || 0, normalized.wins || 0),
-          });
-        }
+        // MAF-GAP-045: a source with no api_calls/token_usage rows reports
+        // 0 for a metric — that must not zero out the OTHER source's real
+        // value. The dominant row is primary; the loser fills any metric
+        // the primary lacks (0 = "no data from this source").
+        const dominant =
+          (normalized.gamesPlayed || 0) > (existing.gamesPlayed || 0)
+            ? normalized
+            : existing;
+        const other = dominant === normalized ? existing : normalized;
+        const wins = Math.max(existing.wins || 0, normalized.wins || 0);
+        const gamesPlayed = dominant.gamesPlayed || 0;
+        merged.set(key, {
+          ...dominant,
+          gamesPlayed,
+          wins,
+          // MAF-GAP-045: wins may change on merge — winRate must stay
+          // consistent (winRate = wins / gamesPlayed, per api-specs.md).
+          winRate: gamesPlayed > 0 ? wins / gamesPlayed : 0,
+          avgTokens: dominant.avgTokens || other.avgTokens || 0,
+          avgCost: dominant.avgCost || other.avgCost || 0,
+          avgLatency: dominant.avgLatency || other.avgLatency || 0,
+        });
       }
     }
   };
@@ -560,19 +616,20 @@ function getHonestReportFallbackModels(
     avgLatency: number;
   }> = [];
   const covered = new Set<string>();
-  const pExpr = normalizedModelSql('p');
+  const pProvExpr = normalizedProviderSql('p');
+  const pModelExpr = normalizedModelSql('p');
 
   // 1. players-table rows (any role) — wins from players.won per row.
   try {
     const playerRows = db.prepare(`
-      SELECT p.provider,
-             ${pExpr} as model,
+      SELECT ${pProvExpr} as provider,
+             ${pModelExpr} as model,
              COUNT(DISTINCT p.game_id) as games_played,
              SUM(CASE WHEN p.won = 1 THEN 1 ELSE 0 END) as wins,
              COALESCE(AVG(p.tokens_used), 0) as avg_tokens
       FROM players p
       WHERE p.provider IS NOT NULL AND p.model IS NOT NULL
-      GROUP BY p.provider, ${pExpr}
+      GROUP BY ${pProvExpr}, ${pModelExpr}
     `).all() as Array<{
       provider: string;
       model: string;
@@ -600,10 +657,11 @@ function getHonestReportFallbackModels(
 
   // 2. real recorded usage for ended games (wins stay 0 — unattributable).
   try {
-    const tuExpr = normalizedModelSql('tu');
+    const tuProvExpr = normalizedProviderSql('tu');
+    const tuModelExpr = normalizedModelSql('tu');
     const usageRows = db.prepare(`
-      SELECT tu.provider,
-             ${tuExpr} as model,
+      SELECT ${tuProvExpr} as provider,
+             ${tuModelExpr} as model,
              COUNT(DISTINCT tu.game_id) as games_played,
              SUM(tu.total_tokens) as tokens,
              COALESCE(SUM(tu.cost), 0) as cost
@@ -611,7 +669,7 @@ function getHonestReportFallbackModels(
       JOIN games g ON g.id = tu.game_id
       WHERE g.status = 'ENDED'
         AND tu.provider IS NOT NULL AND tu.model IS NOT NULL
-      GROUP BY tu.provider, ${tuExpr}
+      GROUP BY ${tuProvExpr}, ${tuModelExpr}
     `).all() as Array<{
       provider: string;
       model: string;
@@ -695,14 +753,16 @@ export function getCompareReport(
     modelFilter && modelFilter.length > 0 ? modelFilter : null;
 
   // ===== Per-model aggregate stats =====
-  // MAF-GAP-036: aggregate on the NORMALIZED model string — rows that carry
-  // the provider prefix inside the model column and rows that don't are the
-  // same real model and must merge into ONE row.
-  const modelExpr = normalizedModelSql('p');
+  // MAF-GAP-036/045: aggregate on the NORMALIZED provider/model — rows
+  // that carry the provider prefix inside the model column and rows that
+  // don't are the same real model and must merge into ONE row, even when
+  // the stored provider is 'CUSTOM' (MAF-GAP-045).
+  const pProvExpr = normalizedProviderSql('p');
+  const pModelExpr = normalizedModelSql('p');
   let modelQuery = `
       SELECT 
-        p.provider,
-        ${modelExpr} as model,
+        ${pProvExpr} as provider,
+        ${pModelExpr} as model,
         COUNT(DISTINCT p.game_id) as games_played,
         SUM(CASE WHEN p.won = 1 THEN 1 ELSE 0 END) as wins,
         COALESCE(AVG(p.tokens_used), 0) as avg_tokens,
@@ -715,11 +775,11 @@ export function getCompareReport(
 
   if (modelList) {
     const placeholders = modelList.map(() => '?').join(',');
-    modelQuery += ` AND (p.model IN (${placeholders}) OR ${modelExpr} IN (${placeholders}))`;
+    modelQuery += ` AND (p.model IN (${placeholders}) OR ${pModelExpr} IN (${placeholders}))`;
     modelParams.push(...modelList, ...modelList);
   }
 
-  modelQuery += ` GROUP BY p.provider, ${modelExpr} ORDER BY games_played DESC`;
+  modelQuery += ` GROUP BY ${pProvExpr}, ${pModelExpr} ORDER BY games_played DESC`;
 
   const modelRows = db
     .prepare(modelQuery)
@@ -727,8 +787,8 @@ export function getCompareReport(
 
   // ===== Per-model role-specific performance =====
   let roleQueryBody = `
-        p.provider,
-        ${modelExpr} as model,
+        ${pProvExpr} as provider,
+        ${pModelExpr} as model,
         p.role,
         COUNT(DISTINCT p.game_id) as games_played,
         SUM(CASE WHEN p.won = 1 THEN 1 ELSE 0 END) as wins
@@ -740,11 +800,11 @@ export function getCompareReport(
 
   if (modelList) {
     const placeholders = modelList.map(() => '?').join(',');
-    roleQueryBody += ` AND (p.model IN (${placeholders}) OR ${modelExpr} IN (${placeholders}))`;
+    roleQueryBody += ` AND (p.model IN (${placeholders}) OR ${pModelExpr} IN (${placeholders}))`;
     roleParams.push(...modelList, ...modelList);
   }
 
-  const roleQuery = `SELECT ${roleQueryBody} GROUP BY p.provider, ${modelExpr}, p.role`;
+  const roleQuery = `SELECT ${roleQueryBody} GROUP BY ${pProvExpr}, ${pModelExpr}, p.role`;
   const roleRows = db
     .prepare(roleQuery)
     .all(...roleParams) as Record<string, unknown>[];
@@ -767,7 +827,8 @@ export function getCompareReport(
     };
   }
 
-  // ===== Avg cost per model (normalized key, MAF-GAP-036) =====
+  // ===== Avg cost per model (normalized key, MAF-GAP-036/045) =====
+  const tuProvExpr = normalizedProviderSql('tu');
   const tuModelExpr = normalizedModelSql('tu');
   let costQuery = `
       SELECT 
@@ -775,7 +836,7 @@ export function getCompareReport(
         tu.model_n,
         COALESCE(AVG(cost_sum), 0) as avg_cost_per_game
       FROM (
-        SELECT tu.provider,
+        SELECT ${tuProvExpr} as provider,
                ${tuModelExpr} as model_n,
                tu.game_id,
                SUM(tu.cost) as cost_sum
@@ -788,7 +849,7 @@ export function getCompareReport(
     costQuery += ` AND (tu.model IN (${placeholders}) OR ${tuModelExpr} IN (${placeholders}))`;
     costParams.push(...modelList, ...modelList);
   }
-  costQuery += ` GROUP BY tu.provider, model_n, tu.game_id) tu GROUP BY tu.provider, tu.model_n`;
+  costQuery += ` GROUP BY ${tuProvExpr}, model_n, tu.game_id) tu GROUP BY tu.provider, tu.model_n`;
   const costRows = db
     .prepare(costQuery)
     .all(...costParams) as Record<string, unknown>[];
@@ -798,11 +859,12 @@ export function getCompareReport(
     costMap.set(`${row.provider}/${row.model_n}`, row.avg_cost_per_game as number);
   }
 
-  // ===== Avg latency per model (normalized key, MAF-GAP-036) =====
+  // ===== Avg latency per model (normalized key, MAF-GAP-036/045) =====
+  const acProvExpr = normalizedProviderSql('ac');
   const acModelExpr = normalizedModelSql('ac');
   let latencyQuery = `
       SELECT 
-        ac.provider,
+        ${acProvExpr} as provider,
         ${acModelExpr} as model,
         COALESCE(AVG(ac.latency), 0) as avg_latency
       FROM api_calls ac
@@ -815,7 +877,7 @@ export function getCompareReport(
     latencyQuery += ` AND (ac.model IN (${placeholders}) OR ${acModelExpr} IN (${placeholders}))`;
     latencyParams.push(...modelList, ...modelList);
   }
-  latencyQuery += ` GROUP BY ac.provider, ${acModelExpr}`;
+  latencyQuery += ` GROUP BY ${acProvExpr}, ${acModelExpr}`;
   const latencyRows = db
     .prepare(latencyQuery)
     .all(...latencyParams) as Record<string, unknown>[];
@@ -871,8 +933,8 @@ export function getCompareReport(
   // ===== Trends (game-by-game data) =====
   let trendQuery = `
       SELECT 
-        p.provider,
-        ${modelExpr} as model,
+        ${pProvExpr} as provider,
+        ${pModelExpr} as model,
         p.game_id,
         p.role,
         p.won,
@@ -886,10 +948,10 @@ export function getCompareReport(
   const trendParams: string[] = [];
   if (modelList) {
     const placeholders = modelList.map(() => '?').join(',');
-    trendQuery += ` AND (p.model IN (${placeholders}) OR ${modelExpr} IN (${placeholders}))`;
+    trendQuery += ` AND (p.model IN (${placeholders}) OR ${pModelExpr} IN (${placeholders}))`;
     trendParams.push(...modelList, ...modelList);
   }
-  trendQuery += ` ORDER BY ${modelExpr}, g.created_at ASC`;
+  trendQuery += ` ORDER BY ${pModelExpr}, g.created_at ASC`;
 
   const trendRows = db
     .prepare(trendQuery)
@@ -933,13 +995,13 @@ export function getCompareReport(
     try {
       const wonRows = db.prepare(`
         SELECT p.game_id,
-               p.provider,
-               ${modelExpr} as model,
+               ${pProvExpr} as provider,
+               ${pModelExpr} as model,
                SUM(CASE WHEN p.won = 1 THEN 1 ELSE 0 END) as wins
         FROM players p
         WHERE p.provider IS NOT NULL AND p.model IS NOT NULL
           AND p.won = 1
-        GROUP BY p.game_id, p.provider, ${modelExpr}
+        GROUP BY p.game_id, ${pProvExpr}, ${pModelExpr}
       `).all() as Array<{
         game_id: string;
         provider: string;

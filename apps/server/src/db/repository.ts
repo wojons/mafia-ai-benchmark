@@ -567,18 +567,40 @@ export class GameRepository {
     // MAF-GAP-036/039): one win per game per model.
     //
     // The model key is normalized before grouping (same expression as
-    // normalizedModelSql in stats-collector/models.ts, MAF-GAP-036) so
-    // provider-prefixed spellings (provider='openai', model='openai/gpt-4o-mini'
-    // vs model='gpt-4o-mini') merge into ONE row instead of producing
-    // duplicate/contradictory entries. The returned model string is the
-    // normalized spelling, matching what getModelComparison keys on.
-    const pExpr =
-      `CASE WHEN p.model LIKE p.provider || '/%' ` +
-      `THEN substr(p.model, length(p.provider) + 2) ELSE p.model END`;
+    // normalizedModelSql/normalizedProviderSql in stats-collector/models.ts,
+    // MAF-GAP-036/045) so provider-prefixed spellings merge into ONE row:
+    // provider='openai', model='openai/gpt-4o-mini' and
+    // provider='openai', model='gpt-4o-mini' are the same real model.
+    // MAF-GAP-045: legacy rows store provider='CUSTOM' with the model
+    // already fully prefixed ('openai/gpt-4o-mini') — the canonical
+    // provider is the model's OWN prefix, not the stored 'CUSTOM'. The
+    // returned provider/model are the normalized spellings, matching what
+    // getModelComparison keys on. Models without a slash (e.g. the honest
+    // 'CUSTOM/openai' legacy floor) are unchanged.
+    const pProvExpr =
+      `CASE WHEN instr(p.model, '/') > 0 ` +
+      `AND lower(substr(p.model, 1, instr(p.model, '/') - 1)) = lower(p.provider) ` +
+      `THEN p.provider ` +
+      `WHEN instr(p.model, '/') > 0 ` +
+      `THEN substr(p.model, 1, instr(p.model, '/') - 1) ` +
+      `ELSE p.provider END`;
+    const pModelExpr =
+      `CASE WHEN instr(p.model, '/') > 0 ` +
+      `THEN substr(p.model, instr(p.model, '/') + 1) ELSE p.model END`;
+    const acProvExpr =
+      `CASE WHEN instr(ac.model, '/') > 0 ` +
+      `AND lower(substr(ac.model, 1, instr(ac.model, '/') - 1)) = lower(ac.provider) ` +
+      `THEN ac.provider ` +
+      `WHEN instr(ac.model, '/') > 0 ` +
+      `THEN substr(ac.model, 1, instr(ac.model, '/') - 1) ` +
+      `ELSE ac.provider END`;
+    const acModelExpr =
+      `CASE WHEN instr(ac.model, '/') > 0 ` +
+      `THEN substr(ac.model, instr(ac.model, '/') + 1) ELSE ac.model END`;
     const rows = this.db.prepare(`
       SELECT 
-        p.provider,
-        ${pExpr} as model,
+        ${pProvExpr} as provider,
+        ${pModelExpr} as model,
         COUNT(DISTINCT p.game_id) as games_played,
         COUNT(DISTINCT CASE WHEN p.won = 1 THEN p.game_id END) as wins,
         AVG(p.tokens_used) as avg_tokens,
@@ -588,12 +610,13 @@ export class GameRepository {
         )), 0) as avg_cost,
         COALESCE(AVG((
           SELECT AVG(ac.latency) FROM api_calls ac
-          WHERE ac.game_id = p.game_id AND ac.provider = p.provider AND ac.model = p.model
+          WHERE ac.game_id = p.game_id
+            AND ${acProvExpr} = ${pProvExpr} AND ${acModelExpr} = ${pModelExpr}
             AND ac.latency >= 50
         )), 0) as avg_latency
       FROM players p
       WHERE p.provider IS NOT NULL
-      GROUP BY p.provider, ${pExpr}
+      GROUP BY ${pProvExpr}, ${pModelExpr}
       ORDER BY games_played DESC
     `).all() as Record<string, unknown>[];
     
