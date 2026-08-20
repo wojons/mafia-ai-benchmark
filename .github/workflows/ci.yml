@@ -59,7 +59,7 @@ jobs:
             # Wait for server to be ready (up to 60s)
             SERVER_READY=false
             for i in $(seq 1 60); do
-              if curl -s http://localhost:3000/health > /dev/null 2>&1; then
+              if curl -s http://localhost:3004/health > /dev/null 2>&1; then
                 echo "Server ready after ${i}s"
                 SERVER_READY=true
                 break
@@ -80,10 +80,11 @@ jobs:
 
           # Run tests
           echo "Running vitest..."
-          # The suite's BASE_URL default is :3004 (compose host port); CI's own
-          # source server runs on :3000, so pin TEST_BASE_URL for the server package.
+          # The suite's BASE_URL default and the source server's direct-run
+          # default are both :3004 (compose host port; MAF-GAP-052), so CI's
+          # own source server and the tests agree on :3004.
           if [ "${{ matrix.package }}" = "apps/server" ]; then
-            export TEST_BASE_URL=http://localhost:3000
+            export TEST_BASE_URL=http://localhost:3004
           fi
           npx vitest run
           TEST_EXIT=$?
