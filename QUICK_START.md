@@ -24,8 +24,9 @@ cd mafia-ai-benchmark
 # Install dependencies (all workspaces)
 pnpm install
 
-# Set your API key
-echo 'OPENAI_API_KEY=sk-or-v1-YOUR-ACTUAL-KEY-HERE' > .env
+# Set your API key — `>>` appends so any existing keys (MODEL, OPENAI_BASE_URL, ...)
+# are preserved. `cp .env.sample .env` gives you the full template to edit instead.
+echo 'OPENAI_API_KEY=sk-or-v1-YOUR-ACTUAL-KEY-HERE' >> .env
 ```
 
 ## Step 3: Run Your First Game
