@@ -20,10 +20,11 @@ import GameRepositoryDefault, { GameRepository } from './db/repository.js';
 import { createDatabase } from './db/migrate.js';
 import { setupRoutes } from './routes/index.js';
 import { setupWebSocket } from './websocket/index.js';
+import { DEFAULT_PORT } from './config.js';
 
 dotenv.config();
 
-const PORT = process.env.PORT || 3000;
+const PORT = process.env.PORT || DEFAULT_PORT;
 
 export interface ServerContext {
   gameEngine: GameEngine;
