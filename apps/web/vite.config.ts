@@ -23,6 +23,23 @@ export default defineConfig({
   build: {
     outDir: 'dist',
     sourcemap: true,
+    rollupOptions: {
+      output: {
+        manualChunks(id: string) {
+          if (!id.includes('node_modules')) return undefined;
+          if (id.includes('node_modules/chart.js/') || id.includes('node_modules/react-chartjs-2/')) return 'chart';
+          if (
+            id.includes('node_modules/react/') ||
+            id.includes('node_modules/react-dom/') ||
+            id.includes('node_modules/react-router')
+          ) {
+            return 'react';
+          }
+          if (id.includes('node_modules/three/') || id.includes('node_modules/@react-three/')) return 'three';
+          return 'vendor';
+        },
+      },
+    },
   },
   resolve: {
     alias: {
