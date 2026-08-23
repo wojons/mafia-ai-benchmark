@@ -23,20 +23,22 @@ export default defineConfig({
   build: {
     outDir: 'dist',
     sourcemap: true,
+    // ThreeDViz (three.js + @react-three, ~919 kB min / 254 kB gzip) is
+    // React.lazy-loaded on the /3d route only — fetched on demand, never on
+    // first paint. The limit is raised so this intentional deferred chunk
+    // doesn't emit a false warning; every chunk that IS on the initial
+    // critical path stays far below 500 kB (MAF-GAP-055).
+    chunkSizeWarningLimit: 1000,
     rollupOptions: {
       output: {
-        manualChunks(id: string) {
-          if (!id.includes('node_modules')) return undefined;
-          if (id.includes('node_modules/chart.js/') || id.includes('node_modules/react-chartjs-2/')) return 'chart';
-          if (
-            id.includes('node_modules/react/') ||
-            id.includes('node_modules/react-dom/') ||
-            id.includes('node_modules/react-router')
-          ) {
-            return 'react';
-          }
-          if (id.includes('node_modules/three/') || id.includes('node_modules/@react-three/')) return 'three';
-          return 'vendor';
+        // Object form (entry-point subtrees), NOT a function with a catch-all
+        // 'vendor': a catch-all pulls three.js into a chunk the entry imports
+        // statically, defeating the React.lazy split. With the object form,
+        // three.js stays unassigned and rollup keeps it inside the async
+        // ThreeDViz chunk, fetched only when /3d is visited (MAF-GAP-055).
+        manualChunks: {
+          react: ['react', 'react-dom', 'react-router-dom'],
+          chart: ['chart.js', 'react-chartjs-2'],
         },
       },
     },

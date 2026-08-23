@@ -1,4 +1,4 @@
-import React, { useEffect } from 'react';
+import React, { Suspense, lazy, useEffect } from 'react';
 import { Routes, Route, Navigate } from 'react-router-dom';
 import { useGameStore } from './stores/gameStore';
 import { useUIStore } from './stores/uiStore';
@@ -13,7 +13,9 @@ import Settings from './components/Settings';
 import Loading from './components/Loading';
 import SplitPaneView from './components/SplitPaneView';
 import TimelineView from './components/TimelineView';
-import ThreeDViz from './components/ThreeDViz';
+// ThreeDViz pulls in three.js (~720 kB minified) — lazy-load so the /3d
+// route's chunk is only fetched when the route is actually visited.
+const ThreeDViz = lazy(() => import('./components/ThreeDViz'));
 
 function App() {
   const { initialize, connected } = useGameStore();
@@ -38,6 +40,7 @@ function App() {
       <div className="app-body">
         <Sidebar />
         <main className={`main-content ${sidebarOpen ? '' : 'sidebar-collapsed'}`}>
+          <Suspense fallback={<Loading message="Loading view..." />}>
           <Routes>
             <Route path="/" element={<GameList />} />
             <Route path="/game/:gameId" element={<GameBoard />} />
@@ -50,6 +53,7 @@ function App() {
             <Route path="/settings" element={<Settings />} />
             <Route path="*" element={<Navigate to="/" replace />} />
           </Routes>
+          </Suspense>
         </main>
       </div>
     </div>
