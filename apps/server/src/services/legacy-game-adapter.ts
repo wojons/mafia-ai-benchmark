@@ -157,35 +157,7 @@ export class LegacyGameAdapter extends EventEmitter {
     // player_model_assignments gives the stats service honest per-model
     // data (wins only count for models that actually played).
     if (config.roleModels) {
-      try {
-        const db = (this.gameRepository as any).db;
-        if (db) {
-          const insert = db.prepare(`
-            INSERT OR REPLACE INTO player_model_assignments
-              (id, game_id, player_id, role, provider, model, temperature, max_tokens, priority, created_at)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-          `);
-          for (const [role, modelSpec] of Object.entries(config.roleModels)) {
-            if (!modelSpec || typeof modelSpec !== 'string') continue;
-            const [provider, model] = modelSpec.split('/');
-            if (!provider || !model) continue;
-            insert.run(
-              uuidv4(),
-              gameId,
-              'ALL', // schema requires player_id NOT NULL; role-level sentinel
-              role.toUpperCase(),
-              provider,
-              model,
-              0.7,
-              500,
-              0,
-              Date.now(),
-            );
-          }
-        }
-      } catch (e: any) {
-        console.error(`[LegacyAdapter] Failed to persist role model assignments: ${e?.message || e}`);
-      }
+      this.persistRoleModelAssignments(gameId, config.roleModels);
     }
     
     // Build environment with per-role model assignments
@@ -423,6 +395,58 @@ export class LegacyGameAdapter extends EventEmitter {
         
       default:
         console.log(`[LegacyAdapter:${gameId}] Unknown message type:`, message.type);
+    }
+  }
+
+  /**
+   * Persist per-role model assignments (player_model_assignments) mirroring
+   * the roleModels config the game was started with (MAF-GAP-012).
+   *
+   * MAF-GAP-057: keep the FULL spec in the model column when it carries a
+   * provider prefix ('openai/gpt-4o') and derive the provider from the
+   * first segment. The old `.split('/')` destructure silently SKIPPED
+   * slash-less specs (`if (!provider || !model) continue`) and truncated
+   * multi-segment ones ('CUSTOM/openai/gpt-4o' -> provider 'CUSTOM', model
+   * 'openai'), so assignments for a whole pairing side were never persisted
+   * or landed on a phantom bare model name. Slash-less bare names keep the
+   * pre-existing behavior (provider = the whole string). The report's
+   * normalizeModelKey collapses prefixed model strings to canonical
+   * 'provider/model' keys at aggregation time.
+   *
+   * All writes are best-effort: a failure logs and never breaks game start.
+   */
+  private persistRoleModelAssignments(
+    gameId: string,
+    roleModels: Record<string, string>,
+  ): void {
+    try {
+      const db = (this.gameRepository as any).db;
+      if (!db) return;
+      const insert = db.prepare(`
+        INSERT OR REPLACE INTO player_model_assignments
+          (id, game_id, player_id, role, provider, model, temperature, max_tokens, priority, created_at)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      `);
+      for (const [role, modelSpec] of Object.entries(roleModels)) {
+        if (!modelSpec || typeof modelSpec !== 'string') continue;
+        const slashIdx = modelSpec.indexOf('/');
+        const provider = slashIdx === -1 ? modelSpec : modelSpec.slice(0, slashIdx);
+        if (!provider) continue;
+        insert.run(
+          uuidv4(),
+          gameId,
+          'ALL', // schema requires player_id NOT NULL; role-level sentinel
+          role.toUpperCase(),
+          provider,
+          modelSpec,
+          0.7,
+          500,
+          0,
+          Date.now(),
+        );
+      }
+    } catch (e: any) {
+      console.error(`[LegacyAdapter] Failed to persist role model assignments: ${e?.message || e}`);
     }
   }
 

@@ -766,10 +766,21 @@ function getPlayerModelConfig() {
 
       for (const [role, model] of Object.entries(roleModels)) {
         if (model) {
-          const [provider, modelName] = model.split("/");
+          // MAF-GAP-057: derive the provider from the spec's first segment
+          // but keep the FULL spec as the model string whenever it carries a
+          // provider prefix ("openai/gpt-4o"). The old `modelName || model`
+          // destructure truncated multi-segment specs ("CUSTOM/openai/gpt-4o"
+          // -> provider CUSTOM, model openai), attributing usage to a
+          // phantom bare model name and composing the invalid wire id
+          // "CUSTOM/openai". composeModelId passes prefixed strings through
+          // unchanged, so the outgoing wire id is identical for normal
+          // specs — only the tracked/stored model spelling becomes
+          // lossless. Bare names behave exactly as before.
+          const slashIdx = model.indexOf("/");
+          const provider = slashIdx === -1 ? model : model.slice(0, slashIdx);
           playerModelConfig.setRoleModel(role, {
             provider: provider || "openai",
-            model: modelName || model,
+            model,
           });
           console.log(`[CONFIG] ${role} role using model: ${model}`);
         }

@@ -326,4 +326,67 @@ describe('BenchmarkRunner', () => {
       expect(runner.getStatus(result.runId)!.status).toBe('COMPLETED');
     });
   });
+
+  // ==========================================================================
+  // Model spec parsing / role-model attribution (MAF-GAP-057)
+  //
+  // Live bug (run d7647a7c, game d988b26f): the CLI documents slash specs
+  // ('openai/gpt-4o-mini,openai/gpt-4o') but parseModel only understood
+  // "provider:model", so slash specs became ['CUSTOM', 'openai/gpt-4o'] and
+  // were re-joined into 'CUSTOM/openai/gpt-4o'. Every downstream split('/')
+  // truncated that to provider='CUSTOM' + model='openai': token_usage /
+  // api_calls / player_model_assignments recorded the SECOND model under a
+  // phantom bare 'openai' name, and the engine sent the invalid wire id
+  // 'CUSTOM/openai' to OpenRouter.
+  // ==========================================================================
+
+  describe('slash-format model specs (MAF-GAP-057)', () => {
+    it('passes slash specs through verbatim as legacy roleModels (no CUSTOM double prefix)', () => {
+      const legacyAdapter = createFakeLegacyGameAdapter(repo as any);
+      runner = new BenchmarkRunner({
+        gameEngine: {} as GameEngine,
+        agentCoordinator: agentCoord,
+        eventBus,
+        statsCollector: stats,
+        gameRepository: repo as any,
+        legacyAdapter,
+      });
+
+      // Exactly the CLI's DEFAULT_MODELS pair.
+      runner.start({
+        models: ['openai/gpt-4o-mini', 'openai/gpt-4o'],
+        gamesPerPairing: 1,
+        numPlayers: 5,
+      });
+
+      expect(legacyAdapter.started).toHaveLength(1);
+      expect(legacyAdapter.started[0].config.roleModels).toEqual({
+        MAFIA: 'openai/gpt-4o-mini',
+        SHERIFF: 'openai/gpt-4o-mini',
+        TOWN: 'openai/gpt-4o',
+        DOCTOR: 'openai/gpt-4o',
+      });
+    });
+
+    it('keeps colon specs on the historical rebuild spelling', () => {
+      const legacyAdapter = createFakeLegacyGameAdapter(repo as any);
+      runner = new BenchmarkRunner({
+        gameEngine: {} as GameEngine,
+        agentCoordinator: agentCoord,
+        eventBus,
+        statsCollector: stats,
+        gameRepository: repo as any,
+        legacyAdapter,
+      });
+
+      runner.start({ models: ['openrouter:model-a', 'openrouter:model-b'], gamesPerPairing: 1, numPlayers: 5 });
+
+      expect(legacyAdapter.started[0].config.roleModels).toEqual({
+        MAFIA: 'OPENROUTER/model-a',
+        SHERIFF: 'OPENROUTER/model-a',
+        TOWN: 'OPENROUTER/model-b',
+        DOCTOR: 'OPENROUTER/model-b',
+      });
+    });
+  });
 });

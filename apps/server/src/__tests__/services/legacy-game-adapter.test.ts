@@ -1,5 +1,6 @@
 import { describe, it, expect, beforeEach } from 'vitest';
 import { LegacyGameAdapter } from '../../services/legacy-game-adapter.js';
+import { StatsCollector } from '../../services/stats-collector.js';
 import { createFakeEventBus, createFakeGameRepository, createSqliteBackedRepository } from './mocks.js';
 import type { GameEvent } from '@mafia/shared/events';
 
@@ -1178,6 +1179,153 @@ describe('LegacyGameAdapter', () => {
   // ==========================================================================
   // persistPlayers — players rows from ROLES_ASSIGNED (MAF-GAP-043B)
   // ==========================================================================
+
+  // ==========================================================================
+  // Role-model assignment persistence — full model string (MAF-GAP-057)
+  //
+  // Live bug (run d7647a7c, game d988b26f): a 2-model benchmark recorded
+  // token_usage/api_calls/player_model_assignments rows for BOTH pairing
+  // sides under provider='CUSTOM', model='openai' — the truncated
+  // 'CUSTOM/openai/gpt-4o' role-model string. The report then showed a
+  // phantom 'openai' row (~810K avgTokens) while 'openai/gpt-4o' looked
+  // free. Assignments must carry the real model strings.
+  // ==========================================================================
+
+  describe('persistRoleModelAssignments() full model string (MAF-GAP-057)', () => {
+    it('persists assignments for BOTH models with the full prefixed spec as model', () => {
+      const sqliteRepo = createSqliteBackedRepository();
+      sqliteRepo.seedGame({ id: 'g-gap057', status: 'IN_PROGRESS' });
+      const sqliteAdapter = new LegacyGameAdapter(eventBus, sqliteRepo as any);
+
+      // Exactly what BenchmarkRunner.launchLegacyGame passes for the CLI's
+      // DEFAULT_MODELS pair after the fix.
+      (sqliteAdapter as any).persistRoleModelAssignments('g-gap057', {
+        MAFIA: 'openai/gpt-4o-mini',
+        SHERIFF: 'openai/gpt-4o-mini',
+        TOWN: 'openai/gpt-4o',
+        DOCTOR: 'openai/gpt-4o',
+      });
+
+      const rows = sqliteRepo.db.prepare(
+        'SELECT role, provider, model FROM player_model_assignments WHERE game_id = ? ORDER BY role'
+      ).all('g-gap057') as Array<Record<string, unknown>>;
+      expect(rows).toHaveLength(4);
+      expect(rows).toEqual(expect.arrayContaining([
+        { role: 'MAFIA', provider: 'openai', model: 'openai/gpt-4o-mini' },
+        { role: 'SHERIFF', provider: 'openai', model: 'openai/gpt-4o-mini' },
+        { role: 'TOWN', provider: 'openai', model: 'openai/gpt-4o' },
+        { role: 'DOCTOR', provider: 'openai', model: 'openai/gpt-4o' },
+      ]));
+      // No phantom bare-model rows.
+      expect(rows.some(r => r.model === 'openai')).toBe(false);
+    });
+
+    it('keeps bare (slash-less) specs playable instead of skipping them', () => {
+      const sqliteRepo = createSqliteBackedRepository();
+      sqliteRepo.seedGame({ id: 'g-gap057-bare', status: 'IN_PROGRESS' });
+      const sqliteAdapter = new LegacyGameAdapter(eventBus, sqliteRepo as any);
+
+      // Old code skipped these entirely (`if (!provider || !model) continue`),
+      // so no assignment row existed for that pairing side at all.
+      (sqliteAdapter as any).persistRoleModelAssignments('g-gap057-bare', {
+        MAFIA: 'qwen3.6-35b-fast',
+        TOWN: 'openai/gpt-4o-mini',
+      });
+
+      const rows = sqliteRepo.db.prepare(
+        'SELECT role, provider, model FROM player_model_assignments WHERE game_id = ?'
+      ).all('g-gap057-bare') as Array<Record<string, unknown>>;
+      expect(rows).toHaveLength(2);
+      expect(rows).toEqual(expect.arrayContaining([
+        { role: 'MAFIA', provider: 'qwen3.6-35b-fast', model: 'qwen3.6-35b-fast' },
+        { role: 'TOWN', provider: 'openai', model: 'openai/gpt-4o-mini' },
+      ]));
+    });
+
+    it('end-to-end: done-message usage lands on the real model keys and the report shows avgTokens > 0 for both models', () => {
+      const sqliteRepo = createSqliteBackedRepository();
+      sqliteRepo.seedGame({ id: 'g-gap057-e2e', status: 'IN_PROGRESS' });
+      const eventBus2 = createFakeEventBus();
+      const sqliteAdapter = new LegacyGameAdapter(eventBus2, sqliteRepo as any);
+
+      // Game start with the benchmark's roleModels...
+      (sqliteAdapter as any).gameConfigs.set('g-gap057-e2e', {
+        numPlayers: 5,
+        roleModels: {
+          MAFIA: 'openai/gpt-4o-mini',
+          TOWN: 'openai/gpt-4o',
+        },
+      });
+      (sqliteAdapter as any).activeGames.set('g-gap057-e2e', {
+        gameId: 'g-gap057-e2e',
+        process: null,
+        eventCount: 1,
+        status: 'RUNNING',
+        startedAt: new Date(Date.now() - 5000),
+      });
+      // ...mirrors the env-var writes startGame performs (startGame itself
+      // spawns the bridge process, which tests must not do). Same for the
+      // role-model assignment persistence startGame runs on config.roleModels.
+      process.env.MAFIA_MODEL = 'openai/gpt-4o-mini';
+      process.env.VILLAGER_MODEL = 'openai/gpt-4o';
+      (sqliteAdapter as any).persistRoleModelAssignments('g-gap057-e2e', {
+        MAFIA: 'openai/gpt-4o-mini',
+        TOWN: 'openai/gpt-4o',
+      });
+
+      try {
+        // Bridge 'done' reports per-model usage under the engine's tracker
+        // spelling (full prefixed spec) — the shape AFTER the engine fix.
+        (sqliteAdapter as any).handleBridgeMessage('g-gap057-e2e', {
+          type: 'done',
+          winner: 'TOWN',
+          totalEvents: 1,
+          dayCount: 1,
+          usage: [
+            { provider: 'openai', model: 'openai/gpt-4o-mini', promptTokens: 3000, completionTokens: 1500, totalTokens: 4500, cost: 0.0036, apiCalls: 12, latencyMs: 900 },
+            { provider: 'openai', model: 'openai/gpt-4o', promptTokens: 4000, completionTokens: 2000, totalTokens: 6000, cost: 0.06, apiCalls: 10, latencyMs: 1100 },
+          ],
+        });
+
+        // Write-path contract: usage rows carry the REAL model strings.
+        // (Binary collation: 'openai/gpt-4o' sorts before 'openai/gpt-4o-mini'.)
+        const tu = sqliteRepo.db.prepare(
+          'SELECT DISTINCT provider, model FROM token_usage WHERE game_id = ? ORDER BY model'
+        ).all('g-gap057-e2e') as Array<Record<string, unknown>>;
+        expect(tu).toEqual([
+          { provider: 'openai', model: 'openai/gpt-4o' },
+          { provider: 'openai', model: 'openai/gpt-4o-mini' },
+        ]);
+
+        // Assignments persisted from config.roleModels match.
+        const pma = sqliteRepo.db.prepare(
+          'SELECT DISTINCT provider, model FROM player_model_assignments WHERE game_id = ? ORDER BY model'
+        ).all('g-gap057-e2e') as Array<Record<string, unknown>>;
+        expect(pma).toEqual([
+          { provider: 'openai', model: 'openai/gpt-4o' },
+          { provider: 'openai', model: 'openai/gpt-4o-mini' },
+        ]);
+      } finally {
+        delete process.env.MAFIA_MODEL;
+        delete process.env.VILLAGER_MODEL;
+      }
+
+      // Acceptance criterion 2: the report's modelPerformance shows
+      // avgTokens > 0 per model and NO phantom bare-'openai' row. The game
+      // must be ENDED for the report to include it.
+      sqliteRepo.db.prepare("UPDATE games SET status = 'ENDED' WHERE id = 'g-gap057-e2e'").run();
+
+      const report = new StatsCollector(sqliteRepo as any).generateReport();
+      const mini = report.modelPerformance.find((m: any) => m.provider === 'openai' && m.model === 'gpt-4o-mini');
+      const full = report.modelPerformance.find((m: any) => m.provider === 'openai' && m.model === 'gpt-4o');
+      expect(mini).toBeDefined();
+      expect(mini.avgTokens).toBeGreaterThan(0);
+      expect(full).toBeDefined();
+      expect(full.avgTokens).toBeGreaterThan(0);
+      const phantom = report.modelPerformance.find((m: any) => m.provider === 'CUSTOM' && m.model === 'openai');
+      expect(phantom).toBeUndefined();
+    });
+  });
 
   describe('persistPlayers() from ROLES_ASSIGNED', () => {
     function rolesAssignedEvent(content: Record<string, unknown>) {

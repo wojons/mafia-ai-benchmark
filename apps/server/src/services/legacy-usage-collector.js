@@ -158,10 +158,16 @@ async function collectUsage(game) {
     for (const model of Object.values(roleModels)) {
       if (!model || seen.has(model)) continue;
       seen.add(model);
-      const [provider, modelName] = model.split('/');
+      // MAF-GAP-057: mirror the engine's role-model resolution — derive
+      // the provider from the spec's first segment and keep the FULL
+      // spec as the model string when it carries a prefix, so these rows
+      // match the tracker-reported spelling ("openai/gpt-4o") instead of
+      // fragmenting into a second key ("gpt-4o").
+      const slashIdx = model.indexOf('/');
+      const provider = slashIdx === -1 ? model : model.slice(0, slashIdx);
       usage.push({
         provider: provider || 'openai',
-        model: modelName || model,
+        model,
         promptTokens: 0,
         completionTokens: 0,
         totalTokens: 0,

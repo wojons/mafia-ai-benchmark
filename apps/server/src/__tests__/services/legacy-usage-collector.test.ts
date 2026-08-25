@@ -151,11 +151,35 @@ describe('collectUsage()', () => {
 
     const usage = await collector.collectUsage(makeGame());
     expect(usage).toHaveLength(2);
-    const mafia = usage.find((u: any) => u.model === 'gpt-4o-mini');
+    // MAF-GAP-057: prefixed specs keep the FULL spec as the model string
+    // (mirroring the engine's tracker spelling) — the provider comes from
+    // the spec's first segment. normalizeModelKey collapses this to the
+    // canonical 'openai/gpt-4o-mini' key at aggregation time.
+    const mafia = usage.find((u: any) => u.model === 'openai/gpt-4o-mini');
     expect(mafia.provider).toBe('openai');
     expect(mafia.totalTokens).toBe(0);
     expect(mafia.cost).toBe(0);
     expect(mafia.latencyMs).toBe(0);
+  });
+
+  it('keeps the full spec as the model string for multi-segment role models (MAF-GAP-057)', async () => {
+    // Regression: run d7647a7c recorded the second pairing side under a
+    // phantom bare 'openai' model because the old split('/') destructure
+    // truncated 'CUSTOM/openai/gpt-4o' -> {CUSTOM, openai}. The fallback
+    // must mirror the engine's lossless spelling instead.
+    process.env.MAFIA_MODEL = 'openai/gpt-4o-mini';
+    process.env.VILLAGER_MODEL = 'openai/gpt-4o';
+
+    const usage = await collector.collectUsage(makeGame());
+    expect(usage).toHaveLength(2);
+    const mini = usage.find((u: any) => u.model === 'openai/gpt-4o-mini');
+    const full = usage.find((u: any) => u.model === 'openai/gpt-4o');
+    expect(mini).toBeDefined();
+    expect(mini!.provider).toBe('openai');
+    expect(full).toBeDefined();
+    expect(full!.provider).toBe('openai');
+    // No phantom bare-name rows.
+    expect(usage.find((u: any) => u.model === 'openai')).toBeUndefined();
   });
 
   it('returns [] when there are no trackers and no env role models', async () => {

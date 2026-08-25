@@ -453,8 +453,8 @@ export class BenchmarkRunner {
     providerB: LLMProvider,
     modelB: string,
   ): string | null {
-    const modelSpecA = `${providerA}/${modelA}`;
-    const modelSpecB = `${providerB}/${modelB}`;
+    const modelSpecA = this.toLegacyModelSpec(pairing.modelA);
+    const modelSpecB = this.toLegacyModelSpec(pairing.modelB);
 
     const gameState = this.legacyAdapter!.startGame({
       numPlayers: config.numPlayers,
@@ -607,15 +607,58 @@ export class BenchmarkRunner {
     return game.id;
   }
 
-  /** Parse a "provider:model" string into [LLMProvider, model]. */
+  /**
+   * Parse a model spec into [LLMProvider, model].
+   *
+   * Two spellings are accepted:
+   *   - "provider:model"  (legacy internal form, e.g. "openrouter:model-a")
+   *   - "provider/model"  (the documented benchmark form — the CLI's
+   *     --models help text and DEFAULT_MODELS use it, e.g.
+   *     "openai/gpt-4o-mini")
+   *
+   * MAF-GAP-057: only the colon form was understood. A slash spec like
+   * 'openai/gpt-4o' fell through to ['CUSTOM', 'openai/gpt-4o'] and was
+   * then re-joined as 'CUSTOM/openai/gpt-4o' by launchLegacyGame; every
+   * downstream `.split('/')` destructure truncated that to
+   * provider='CUSTOM', model='openai' — usage/assignments recorded under
+   * a phantom bare 'openai' model and an invalid wire id ('CUSTOM/openai')
+   * sent to OpenRouter. The slash form is now parsed at the source so
+   * roleModels carry exactly 'provider/model'.
+   */
   private parseModel(spec: string): [LLMProvider, string] {
-    const idx = spec.indexOf(':');
-    if (idx === -1) {
-      return ['CUSTOM', spec];
+    const colonIdx = spec.indexOf(':');
+    const slashIdx = spec.indexOf('/');
+    // Whichever separator comes first wins; a path segment after a slash
+    // may itself contain colons and vice versa.
+    if (slashIdx !== -1 && (colonIdx === -1 || slashIdx < colonIdx)) {
+      return [spec.slice(0, slashIdx).toUpperCase() as LLMProvider, spec.slice(slashIdx + 1)];
     }
-    const provider = spec.slice(0, idx).toUpperCase();
-    const model = spec.slice(idx + 1);
-    return [provider as LLMProvider, model];
+    if (colonIdx !== -1) {
+      const provider = spec.slice(0, colonIdx).toUpperCase();
+      const model = spec.slice(colonIdx + 1);
+      return [provider as LLMProvider, model];
+    }
+    // Bare model name with no provider: CUSTOM passthrough (pre-existing).
+    return ['CUSTOM', spec];
+  }
+
+  /**
+   * Convert a benchmark model spec into the legacy engine's "provider/model"
+   * role-model string.
+   *
+   * MAF-GAP-057: this used to be `${providerA}/${modelA}` from parseModel's
+   * parts. For slash specs ('openai/gpt-4o') parseModel fell through to
+   * CUSTOM + full string and the rebuild produced 'CUSTOM/openai/gpt-4o' —
+   * every downstream `.split('/')` destructure then truncated it to
+   * provider='CUSTOM', model='openai' (the phantom bare 'openai' rows).
+   * Slash specs now pass through VERBATIM so env vars, assignments, and
+   * engine tracking all carry exactly 'openai/gpt-4o'; colon specs keep the
+   * historical rebuild spelling ('OPENROUTER/model-a').
+   */
+  private toLegacyModelSpec(spec: string): string {
+    if (spec.includes('/')) return spec;
+    const [provider, model] = this.parseModel(spec);
+    return `${provider}/${model}`;
   }
 
   private persistRun(
