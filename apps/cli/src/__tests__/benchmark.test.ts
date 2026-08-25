@@ -347,3 +347,79 @@ describe('benchmark progress heartbeat (MAF-GAP-047)', () => {
     10000
   );
 });
+
+// --- MAF-GAP-059: report presentation (mocked report, no live server) ---
+
+type DisplayResultsFn = (report: unknown) => void;
+
+/** Access the private displayResults method (unit-test seam, same as runBenchmarkOf). */
+function displayResultsOf(cmd: BenchmarkCommand): DisplayResultsFn {
+  return (cmd as unknown as { displayResults: DisplayResultsFn }).displayResults.bind(cmd);
+}
+
+/** Report body mirroring the live server's row shapes (2026-08-25). */
+const GAP059_REPORT = {
+  summary: { totalGames: 1467 },
+  modelPerformance: [
+    { provider: 'openai', model: 'gpt-4o-mini', gamesPlayed: 1198, wins: 543, winRate: 0.4533, avgTokens: 60116, avgCost: 0.0118 },
+    // The unattributable legacy floor: provider CUSTOM, slash-less bare model,
+    // wins 0 because usage-only rows carry no side data (MAF-GAP-036/039).
+    { provider: 'CUSTOM', model: 'openai', gamesPlayed: 208, wins: 0, winRate: 0, avgTokens: 810196, avgCost: 0.1584 },
+    { provider: 'openai', model: 'gpt-4o', gamesPlayed: 54, wins: 33, winRate: 0.6111, avgTokens: 110572, avgCost: 0.0059 },
+  ],
+  recommendations: [],
+};
+
+describe('benchmark report presentation (MAF-GAP-059)', () => {
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  it('renders the unattributable 0-win row with n/a losses, not a defeat count', () => {
+    const logSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
+    displayResultsOf(new BenchmarkCommand())(GAP059_REPORT);
+
+    const printed = logSpy.mock.calls.map((args) => args.join(' ')).join('\n');
+
+    // The legacy floor row shows n/a in the Losses position…
+    expect(printed).toMatch(/CUSTOM\/openai\s+\d+\s+0\s+n\/a/);
+    // …and never presents its games as losses.
+    expect(printed).not.toContain('206');
+    expect(printed).not.toContain('LOSSES');
+  });
+
+  it('keeps the real losses count for rows that DO have wins', () => {
+    const logSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
+    displayResultsOf(new BenchmarkCommand())(GAP059_REPORT);
+
+    const printed = logSpy.mock.calls.map((args) => args.join(' ')).join('\n');
+
+    // gpt-4o-mini: 1198 games - 543 wins = 655 real losses.
+    expect(printed).toMatch(/gpt-4o-mini\s+1198\s+543\s+655\b/);
+    // gpt-4o: 54 - 33 = 21.
+    expect(printed).toMatch(/gpt-4o\s+54\s+33\s+21\b/);
+  });
+
+  it('includes the sample size in the winner banner', () => {
+    const logSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
+    displayResultsOf(new BenchmarkCommand())(GAP059_REPORT);
+
+    const printed = logSpy.mock.calls.map((args) => args.join(' ')).join('\n');
+
+    expect(printed).toContain('🏆 Winner: openai/gpt-4o (61.1% win rate, 54 games)');
+  });
+
+  it('renders row names exactly as the API reports provider/model', () => {
+    const logSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
+    displayResultsOf(new BenchmarkCommand())(GAP059_REPORT);
+
+    const printed = logSpy.mock.calls.map((args) => args.join(' ')).join('\n');
+
+    // The API row is {provider:'openai', model:'gpt-4o-mini'} → openai/gpt-4o-mini.
+    expect(printed).toContain('openai/gpt-4o-mini');
+    expect(printed).not.toMatch(/CUSTOM\/gpt-4o-mini/);
+    // No CLI-invented drift for any row.
+    expect(printed).not.toMatch(/CUSTOM\/CUSTOM\//);
+  });
+});
+

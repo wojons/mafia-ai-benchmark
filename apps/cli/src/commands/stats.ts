@@ -7,6 +7,7 @@
 import { Command } from 'commander';
 import chalk from 'chalk';
 import { resolveServerUrl } from '../config.js';
+import { displayName } from '../report-format.js';
 
 interface Stats {
   totalGames: number;
@@ -86,7 +87,8 @@ export class StatsCommand extends Command {
       
       stats.topModels.slice(0, 5).forEach((model, i) => {
         const rank = (i + 1).toString().padStart(2);
-        const name = `${model.provider}/${model.model}`.padEnd(24);
+        // MAF-GAP-059: render exactly the provider/model the API row reports.
+        const name = displayName(model.provider, model.model).padEnd(24);
         const gamesStr = model.gamesPlayed.toString().padStart(5);
         const winRate = (model.winRate * 100).toFixed(1).padStart(7) + '%';
         const tokens = (model.avgTokens / 1000).toFixed(1).padStart(8) + 'K';

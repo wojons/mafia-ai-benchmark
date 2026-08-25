@@ -18,6 +18,7 @@ import chalk from 'chalk';
 import fs from 'fs';
 import { ExportCommand } from './export.js';
 import { resolveServerUrl } from '../config.js';
+import { displayName } from '../report-format.js';
 
 /** Default model pair when --games is given without --models. */
 const DEFAULT_MODELS = ['openai/gpt-4o-mini', 'openai/gpt-4o'];
@@ -355,12 +356,20 @@ export class BenchmarkCommand extends Command {
     console.log(chalk.gray('  ' + '─'.repeat(75)));
 
     results.forEach(r => {
-      const model = `${r.provider}/${r.model}`.padEnd(20);
+      // MAF-GAP-059: render exactly the provider/model the API row reports —
+      // no CLI-side prefixing or rewriting. (The 'CUSTOM/<bare-model>' legacy
+      // floor is injected server-side; see report-format.ts.)
+      const model = displayName(r.provider, r.model).padEnd(20);
       const gamesPlayed = (r.gamesPlayed ?? 0);
       const wins = (r.wins ?? 0);
       const games = gamesPlayed.toString().padStart(5);
       const winsStr = wins.toString().padStart(5);
-      const losses = (gamesPlayed - wins).toString().padStart(6);
+      // MAF-GAP-059: a 0-win row has no side data (documented honest floor,
+      // MAF-GAP-036/039) — its games are unattributable, not defeats.
+      // Real win counts are kept for rows that DO have wins.
+      const losses = (wins === 0)
+        ? 'n/a'.padStart(6)
+        : (gamesPlayed - wins).toString().padStart(6);
       const winRate = ((r.winRate ?? 0) * 100).toFixed(1).padStart(8) + '%';
       const tokens = ((r.avgTokens ?? 0) / 1000).toFixed(1).padStart(10) + 'K';
       const cost = '$' + (r.avgCost ?? 0).toFixed(2).padStart(7);
@@ -370,8 +379,10 @@ export class BenchmarkCommand extends Command {
 
     if (results.length > 0) {
       const winner = results.reduce((best, m) => (m.winRate ?? 0) > (best.winRate ?? 0) ? m : best, results[0]);
-      console.log(chalk.green('\n🏆 Winner: ') + chalk.yellow(`${winner.provider}/${winner.model}`) +
-                  chalk.gray(` (${((winner.winRate ?? 0) * 100).toFixed(1)}% win rate)\n`));
+      // MAF-GAP-059: sample size is part of the headline — a 54-game win rate
+      // must be readable as such next to a 1000+-game rival.
+      console.log(chalk.green('\n🏆 Winner: ') + chalk.yellow(displayName(winner.provider, winner.model)) +
+                  chalk.gray(` (${((winner.winRate ?? 0) * 100).toFixed(1)}% win rate, ${(winner.gamesPlayed ?? 0)} games)\n`));
     }
 
     // Recommendations come from the server report
