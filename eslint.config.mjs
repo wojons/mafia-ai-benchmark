@@ -6,9 +6,10 @@ import globals from 'globals';
 export default [
   {
     ignores: [
-      'dist/',
+      '**/dist/',
       'node_modules/',
       '.turbo/',
+      '.opencode/',
       '**/*.cjs',
       '**/*.js',
       '**/__tests__/**',
