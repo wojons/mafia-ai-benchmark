@@ -344,8 +344,15 @@ export class LegacyGameAdapter extends EventEmitter {
             const duration = state.startedAt
               ? Date.now() - state.startedAt.getTime()
               : 0;
-            db.prepare(`UPDATE games SET status = 'ENDED', ended_at = ?, duration = ?, config = json_set(config, '$.winner', ?) WHERE id = ?`)
-              .run(Date.now(), duration, winner, gameId);
+            // MAF-GAP-056: ALSO write the games.winner column — previously
+            // only config.$.winner was set, so summary mafiaWins/townWins
+            // (COUNT over games.winner) never saw legacy outcomes and
+            // game detail had no top-level winner. Only a decided outcome
+            // ('MAFIA'|'TOWN') lands in the column; UNKNOWN stays NULL.
+            const columnWinner =
+              winner === 'MAFIA' || winner === 'TOWN' ? winner : null;
+            db.prepare(`UPDATE games SET status = 'ENDED', ended_at = ?, duration = ?, winner = ?, config = json_set(config, '$.winner', ?) WHERE id = ?`)
+              .run(Date.now(), duration, columnWinner, winner, gameId);
             // MAF-GAP-043: persist per-player won (1 winning side / 0
             // losing side) so model win rates read real data. Only when the
             // bridge reported a real winner; games without players rows

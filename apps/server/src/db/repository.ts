@@ -115,15 +115,33 @@ export class GameRepository {
     const playersWithDeaths = players.map(p =>
       deadSet.has(p.id) ? { ...p, isAlive: false } : p,
     );
-    
+
+    // MAF-GAP-056: expose the game result. Prefer the games.winner column
+    // (written by updateGameResults / the legacy done handler); fall back to
+    // config.winner for historical games whose outcome was recorded only in
+    // the config blob by the pre-MAF-GAP-056 adapter. Only a real decided
+    // outcome is exposed — never fabricated — so games without one keep
+    // winner absent and the payload is byte-identical to before.
+    const parsedConfig = JSON.parse(row.config as string);
+    const columnWinner =
+      row.winner === 'MAFIA' || row.winner === 'TOWN'
+        ? (row.winner as 'MAFIA' | 'TOWN')
+        : undefined;
+    const configWinner =
+      parsedConfig?.winner === 'MAFIA' || parsedConfig?.winner === 'TOWN'
+        ? (parsedConfig.winner as 'MAFIA' | 'TOWN')
+        : undefined;
+    const winner = columnWinner ?? configWinner;
+
     return {
       id: row.id as string,
       createdAt: new Date(row.created_at as number),
       startedAt: row.started_at ? new Date(row.started_at as number) : undefined,
       endedAt: row.ended_at ? new Date(row.ended_at as number) : undefined,
       status: row.status as Game['status'],
+      ...(winner ? { winner } : {}),
       players: playersWithDeaths,
-      config: JSON.parse(row.config as string),
+      config: parsedConfig,
       currentState: {
         // MAF-GAP-044: an ENDED game's phase is GAME_OVER, never SETUP.
         phase: row.status === 'ENDED' ? 'GAME_OVER' : 'SETUP',
@@ -270,6 +288,12 @@ export class GameRepository {
       isAlive: Boolean(row.is_alive),
       isMafia: Boolean(row.is_mafia),
       joinOrder: row.join_order as number,
+      // MAF-GAP-056: per-player result (1 winning side / 0 losing side)
+      // written by setPlayersWon at game end. NULL (no decided outcome,
+      // e.g. in-progress games) stays absent rather than fabricated.
+      ...(row.won === null || row.won === undefined
+        ? {}
+        : { won: row.won as number }),
     }));
   }
 

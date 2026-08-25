@@ -27,6 +27,13 @@ export interface Player {
   model?: string;
   tokensUsed?: number;
   apiCalls?: number;
+  /**
+   * Per-player game result (MAF-GAP-056): 1 when the player's side won,
+   * 0 when it lost. Populated from the players.won column (written by
+   * setPlayersWon at game end); undefined when the game has no decided
+   * outcome recorded — never fabricated.
+   */
+  won?: number;
 }
 
 export type RoleType = 
@@ -46,6 +53,12 @@ export interface Game {
   startedAt?: Date;
   endedAt?: Date;
   status: GameStatus;
+  /**
+   * Decided game outcome (MAF-GAP-056): 'MAFIA' or 'TOWN'. Populated from
+   * the games.winner column (config.winner fallback for historical legacy
+   * games). Absent when no decided outcome was recorded — never fabricated.
+   */
+  winner?: TeamType;
   players: Player[];
   config: GameConfig;
   currentState: GameState;

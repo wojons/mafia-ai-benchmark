@@ -383,8 +383,37 @@ export function createGamesRouter(
           const state = legacyAdapter.getGameState(req.params.gameId);
           if (state) {
             const events = gameRepository.getEvents(req.params.gameId);
-            const players =
-              LegacyGameAdapter.extractPlayersFromEvents(events).map(toApiPlayer);
+            const extracted =
+              LegacyGameAdapter.extractPlayersFromEvents(events);
+
+            // MAF-GAP-056: expose the game result on the legacy-fallback
+            // payload too. Winner comes from the game's GAME_ENDED event
+            // (the adapter publishes data.winner at completion); per-player
+            // won follows each player's side against that winner, matching
+            // setPlayersWon's 1-winning-side / 0-losing-side semantics.
+            // No decided outcome -> neither field is emitted (no fabrication).
+            let fallbackWinner: 'MAFIA' | 'TOWN' | undefined;
+            for (const event of events) {
+              if (event.type !== 'GAME_ENDED') continue;
+              const w = (
+                event.data as Record<string, unknown> | undefined
+              )?.winner;
+              if (w === 'MAFIA' || w === 'TOWN') fallbackWinner = w;
+            }
+            const players = extracted.map((p) => {
+              const api = toApiPlayer(p);
+              return fallbackWinner === undefined
+                ? api
+                : {
+                    ...api,
+                    won: p.isMafia === (fallbackWinner === 'MAFIA') ? 1 : 0,
+                  };
+            });
+            // Death-revealed eliminations (extractor marks victims dead),
+            // mirroring the main branch's currentState.eliminatedPlayers.
+            const eliminatedIds = extracted
+              .filter((p) => !p.isAlive)
+              .map((p) => p.id);
 
             // MAF-GAP-029: attach per-player provider/model (+ usage for
             // completed games). The route maps RUNNING -> IN_PROGRESS and
@@ -403,9 +432,22 @@ export function createGamesRouter(
                 status:
                   state.status === 'RUNNING' ? 'IN_PROGRESS' : 'ENDED',
                 config: { engineType: 'legacy' },
+                ...(fallbackWinner ? { winner: fallbackWinner } : {}),
                 eventCount: state.eventCount,
                 startedAt: state.startedAt,
                 players: enriched,
+                // Result-state parity with the repository branch (only when
+                // there is something to say — running games stay unchanged).
+                ...(fallbackWinner || eliminatedIds.length > 0
+                  ? {
+                      currentState: {
+                        activePlayers: extracted
+                          .filter((p) => p.isAlive)
+                          .map((p) => p.id),
+                        eliminatedPlayers: eliminatedIds,
+                      },
+                    }
+                  : {}),
               },
             });
           }
