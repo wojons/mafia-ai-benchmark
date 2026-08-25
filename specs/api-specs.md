@@ -120,37 +120,73 @@ ws://localhost:3004/ws
 
 ```json
 {
-  "id": "game-123",
-  "status": "IN_PROGRESS",
-  "phase": "DAY_VOTING",
-  "dayNumber": 2,
-  "roundNumber": 4,
-  "config": {
-    "seed": 12345,
-    "players": 10,
-    "mafia": 3
-  },
-  "players": [
-    {
-      "id": "p1",
-      "name": "Alice",
-      "role": "villager", // Only shows if authorized
-      "alive": true
-    }
-    // ... all players
-  ],
-  "aliveCount": 6,
-  "deadCount": 4,
-  "winner": null, // "town", "mafia", or null if ongoing
-  "createdAt": 1703774400000,
-  "startedAt": 1703774401000,
-  "finishedAt": null
+  "success": true,
+  "data": {
+    "id": "game-123",
+    "status": "ENDED",
+    "winner": "TOWN",
+    "config": {
+      "numPlayers": 5,
+      "engineType": "legacy",
+      "winner": "TOWN"
+    },
+    "createdAt": "2026-08-25T16:27:48.540Z",
+    "endedAt": "2026-08-25T16:30:02.132Z",
+    "currentState": {
+      "phase": "GAME_OVER",
+      "dayNumber": 1,
+      "turnNumber": 1,
+      "timeRemaining": 0,
+      "activePlayers": ["p2", "p3"],
+      "eliminatedPlayers": ["p1"],
+      "votes": [],
+      "nightActions": []
+    },
+    "players": [
+      {
+        "id": "p1",
+        "name": "Alice",
+        "role": "MAFIA",
+        "isAlive": false,
+        "isMafia": true,
+        "joinOrder": 0,
+        "won": 0,
+        "provider": "openai",
+        "model": "openai/gpt-4o-mini",
+        "tokensUsed": 11539,
+        "apiCalls": 1
+      }
+      // ... all players
+    ],
+    "events": [
+      {
+        "id": "evt-1",
+        "gameId": "game-123",
+        "type": "GAME_STARTED",
+        "timestamp": "2026-08-25T16:28:22.463Z",
+        "visibility": "PUBLIC",
+        "actorId": null,
+        "targetId": null,
+        "data": {},
+        "metadata": {}
+      }
+      // ... game events
+    ]
+  }
 }
 ```
 
-**Status values:** "SETUP", "IN_PROGRESS", "PAUSED", "ENDED", "CANCELLED"
+**Field availability notes (realigned to the live API):**
 
-**Phase values:** "SETUP", "NIGHT_ACTIONS", "MORNING_REVEAL", "DAY_DISCUSSION", "DAY_VOTING", "RESOLUTION", "END"
+- `winner` is emitted only when the game has a decided outcome ("TOWN" | "MAFIA"); running/undecided games omit it. The same result also lives at `config.winner` (legacy engine writes it on completion).
+- `endedAt` is present only on ended games; `createdAt` is an ISO-8601 string, not epoch millis.
+- Per-player `provider`/`model`/`tokensUsed`/`apiCalls` are attached for completed games (MAF-GAP-029); `won` (1 = winning side, 0 = losing side) is attached when the game has a decided winner (MAF-GAP-056).
+- `currentState.phase` for ended games is `GAME_OVER`; `currentState` for running games carries the live FSM state.
+- `aliveCount`/`deadCount`/`startedAt`/`finishedAt`/`roundNumber` are NOT part of the live payload — alive/dead players are derived from `players[].isAlive` + `currentState.eliminatedPlayers`.
+
+**Status values:** "SETUP", "IN_PROGRESS", "PAUSED", "ENDED", "CANCELLED" (legacy games map RUNNING → "IN_PROGRESS", everything else → "ENDED")
+
+**Phase values:** "SETUP", "NIGHT_ACTIONS", "MORNING_REVEAL", "DAY_DISCUSSION", "DAY_VOTING", "RESOLUTION", "END", "GAME_OVER"
 
 ---
 
@@ -168,23 +204,30 @@ ws://localhost:3004/ws
 
 ```json
 {
-  "games": [
+  "success": true,
+  "data": [
     {
       "id": "game-123",
-      "status": "IN_PROGRESS",
-      "phase": "DAY_DISCUSSION",
-      "dayNumber": 2,
-      "aliveCount": 6,
-      "winner": null,
-      "createdAt": 1703774400000
+      "status": "ENDED",
+      "players": 5,
+      "createdAt": "2026-08-25T16:27:48.540Z",
+      "config": {
+        "numPlayers": 5,
+        "engineType": "legacy",
+        "winner": "TOWN"
+      }
     }
     // ... more games
   ],
-  "total": 123,
-  "limit": 50,
-  "offset": 0
+  "count": 2
 }
 ```
+
+**Notes (realigned to the live API):**
+
+- List rows are SUMMARY objects — `players` is the player COUNT (number), not an array; there is no `phase`/`dayNumber`/`aliveCount`/`winner` field at list level (those live on the detail endpoint under `currentState` / top-level `winner`).
+- `config` carries the same shape as the detail endpoint's config; `config.winner` is present on ended games.
+- `createdAt` is an ISO-8601 string, not epoch millis. The envelope is `{success, data, count}` — there is no `total`/`limit`/`offset` echo.
 
 ---
 
