@@ -750,10 +750,11 @@ class DayVotingState implements FSMState {
   private handleTie(game: Game, targets: string[], votes: number): void {
     // Use configured tie breaker
     switch (game.config.tieBreaker) {
-      case 'RANDOM':
+      case 'RANDOM': {
         const randomIndex = Math.floor(Math.random() * targets.length);
         this.lynchPlayer(game, targets[randomIndex], votes);
         break;
+      }
       case 'FIRST':
         this.lynchPlayer(game, targets[0], votes);
         break;

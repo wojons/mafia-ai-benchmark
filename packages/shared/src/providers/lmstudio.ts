@@ -178,7 +178,7 @@ export class LMStudioProvider implements LLMProviderAdapter {
               const chunk = JSON.parse(data);
               const streamChunk = this.parseStreamChunk(chunk);
               if (streamChunk) yield streamChunk;
-            } catch {}
+            } catch { /* ignore malformed chunk */ }
           }
         }
       }
