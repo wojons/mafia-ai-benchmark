@@ -190,3 +190,73 @@ What still blocks honest benchmarking: per-model win rates are structurally
 benchmark games can degenerate into empty-SAYS crawls (MAF-GAP-042).
 Verdict stays **PROMISING-BUT-ROUGH** — the value is real and much closer
 to the door, but the headline benchmark output is still not trustworthy.
+
+---
+
+## 2026-08-24 — Third dogfood: how the result/usage pipeline actually works now
+
+### The winner/won write path (it works — but only half of it)
+
+The legacy game loop is `game-engine.js` (root) driven through
+`apps/server/src/services/legacy-bridge.js` → `legacy-game-adapter.ts`.
+On the bridge's `done` message the adapter (legacy-game-adapter.ts:333-375):
+
+1. `UPDATE games SET status='ENDED', ended_at, duration,
+   config = json_set(config, '$.winner', ?)` — **writes the winner ONLY into
+   the config JSON blob, never into the `games.winner` column**. That is why
+   the games list shows `config.winner=TOWN` while the summary
+   (`SELECT COUNT(*) WHERE winner='MAFIA'/'TOWN'`) counts 55+856=911 of 1495
+   completed games and `GET /games/:id` returns `winner: null`.
+2. `setPlayersWon(gameId, winner)` (repository.ts:347) — sets `players.won`
+   = 1/0 per `is_mafia`. **This works**: fresh games have won flags in the
+   DB, and per-model report wins (gpt-4o-mini 370/1025) increment live.
+3. `persistUsage` — real token_usage/api_calls rows (per-player + 'ALL'
+   aggregates).
+
+The new-engine path (`game-engine.ts:494` calls `updateGameResults` which
+sets the winner column) is NOT the path that plays live games — every live
+game is `engineType: "legacy"`. So the column stays NULL forever and the
+summary's win counters and the detail endpoint (which reads the row, not the
+config blob) are starved. **Fix direction:** on the legacy `done` path, also
+write the `winner` column (and surface winner/won/eliminatedPlayers in the
+detail response — the data is all there). Board: MAF-GAP-056.
+
+### Why the report shows a phantom `openai` model with 810K avg tokens
+
+`getModelStats` (repository.ts:548) reads the `players` table; the live
+report also merges usage-only rows. For run d7647a7c (models
+openai/gpt-4o-mini + openai/gpt-4o) the token_usage rows for gpt-4o players
+carry `provider='CUSTOM', model='openai'` (e.g. 106,890 tokens for one
+player) — the model NAME is dropped somewhere between benchmark-runner model
+assignment, the engine's per-role config (game-engine.js:768 `model.split('/')`)
+and the usage collector (legacy-usage-collector.js). Consequence: the
+`openai/gpt-4o` report row shows avgTokens=0/avgLatency=0 while a bare
+`openai` row (207 games) absorbs all of gpt-4o's tokens — the cost
+comparison the README advertises is wrong for the second model. Board:
+MAF-GAP-057.
+
+### Known-good invariants (re-verified this run)
+
+- Summary reconciliation: `totalGames === activeGames + completedGames +
+  failedGames` (1610 = 97 + 1495 + 18) — MAF-GAP-050 holds.
+- `avgDuration` sane (174 s) — MAF-GAP-026 holds.
+- status filter validation (400 on unknown vocab) — MAF-GAP-049 holds.
+- `players.won` non-null on recent ENDED games (DB level) — MAF-GAP-043
+  write path holds; the READ side (detail response) never exposes it.
+- Per-player provider/model/tokensUsed/apiCalls in detail — MAF-GAP-029
+  holds (tokensUsed is populated from api_calls; `players.tokens_used`
+  column itself is 0 everywhere — the report's avgTokens comes from
+  token_usage via the stats collector, not from that column).
+
+### Errors/quirks hit during the run (all non-fatal)
+
+- WS: a guessed `{"type":"subscribe"}` → `{"type":"ERROR","payload":
+  {"message":"Unknown message type: subscribe"}}` — the only client
+  protocol is `JOIN_GAME` (what watch-game sends).
+- `events?limit=5` silently ignored (returns all 27) — no pagination.
+- WS GAME_STATE `phase` shows SETUP while night actions are flowing — the
+  state payload lags the event stream.
+- `GET /api/v1/benchmark/runs/:id` returns the run object directly as
+  `data` (not wrapped) — consistent with the list, fine once known.
+- The in-repo usage skill (.opencode/skills/mafia-usage) was stale about
+  wins/eliminations — refreshed this run; keep it in sync with the board.

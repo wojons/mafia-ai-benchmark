@@ -71,3 +71,49 @@ SKILL.md (refreshed — was stale re: CLI).
 **Foreman:** NOT woken — cooldown 21600 s is an operator pin in fleet.toml
 (fleet convention: stand-in cycles skip G5 for this project); foreman
 ticked PRODUCTIVE today at 13:18 and will pick the tasks up next tick.
+
+| 2026-08-24 | 🟡 PROMISING-BUT-ROUGH (trending SHIPPABLE) | "Benchmark AI models' Mafia-playing ability via `mafiactl run-game`/`mafiactl benchmark`, HTTP API :3004, or web :5174, with per-model win/cost stats" | (1) game detail API omits the result — no winner/won/eliminatedPlayers on ENDED games, and games.winner column NULL for ALL 1610 games (584/1495 completed winnerless; mafiaWinRate 0.0368 deflated) — MAF-GAP-056; (2) second-model (gpt-4o) usage recorded as phantom 'openai' — report shows gpt-4o with 0 tokens and a fake 810K-token model — MAF-GAP-057; (3) spec drift: api-specs.md documents winner/aliveCount/deadCount/startedAt/finishedAt never returned (MAF-GAP-058) + CLI presents unattributable as losses (MAF-GAP-059). FIXED SINCE 08-15: per-model wins REAL (gpt-4o-mini 370/1025), eliminations visible (PLAYER_LYNCHED + isAlive), benchmark CLI prints progress, watch-game no "Phase: undefined" | CLI: ~1 min; full loop (run → ENDED → report updated): ~6 min |
+
+## 2026-08-24 — Third full dogfood run (cron)
+
+**Promise statement (null hypothesis):** A user can benchmark AI models'
+Mafia-playing ability by running `mafiactl run-game` / `mafiactl benchmark`
+against the local server (or the HTTP API / web dashboard at :3004/:5174),
+and get real games with split-pane THINK/SAYS plus per-model win/cost
+statistics.
+
+**What was done (real use, not tests):**
+- Full API surface probed against the live stack (server :3004 healthy 5d,
+  web :5174): health (bare + /api/v1), games list (limit honored, status
+  filter validates → 400 on bogus), game detail, events, SSE, stats,
+  benchmark report + runs + run detail, WS JOIN_GAME protocol.
+- Real CLI benchmark run: `mafiactl benchmark --games 1 --models
+  openai/gpt-4o-mini,openai/gpt-4o` → run d7647a7c, real 10p game
+  d988b26f (79 events, 5 PLAYER_LYNCHED, winner TOWN), 210 s, CLI printed
+  progress lines (MAF-GAP-047 fixed), exited 0. Report updated in seconds:
+  gpt-4o-mini 1024→1025 games, wins 369→370; gpt-4o 54→55, wins 33→34.
+- DB truth via container sqlite: players.won=1/0 persisted (setPlayersWon
+  works — MAF-GAP-043 write path REAL), but games.winner NULL for ALL 1610
+  games (adapter writes json_set(config,'$.winner') only); players.tokens_used
+  = 0 everywhere (bridge backfill never fills it); token_usage for gpt-4o
+  players carries model='openai' (phantom row: 207 games, ~810K avg tokens).
+- Web dashboard serves; /api + /ws proxied through nginx; bundle has no
+  :3000 hardcodes.
+- WS: JOIN_GAME → GAME_JOINED → GAME_STATE + events (no 'subscribe' type).
+
+**Friction count: 8** (detail hides winner/won/eliminatedPlayers; games.winner
+column never written on legacy path; gpt-4o usage → phantom openai row; spec
+documents fields API never returns; CLI shows unattributable as losses +
+winner banner ignores sample size; events?limit ignored; WS GAME_STATE phase
+lags; run config says numPlayers 10 while roster grows 5→10).
+
+**Tasks written:** MAF-GAP-056 (P1 detail omits result), MAF-GAP-057 (P2
+usage mis-attribution), MAF-GAP-058 (P2 spec shape drift), MAF-GAP-059 (P3
+CLI report warts). See .coding-hermes/board/tasks.jsonl.
+
+**Artifacts left:** docs/dogfood/2026-08-24-integration.md (new),
+docs/dogfood/diagnostics.md (appended), .opencode/skills/mafia-usage/
+SKILL.md (refreshed — was stale re: wins/eliminations).
+
+**Foreman:** woken via scheduler PUT CooldownS=900 (was 21600 fleet.toml
+pin) — board has fresh P1/P2 work; self-pause logic will slow it back down.
