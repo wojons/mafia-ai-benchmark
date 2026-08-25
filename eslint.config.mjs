@@ -10,6 +10,7 @@ export default [
       'node_modules/',
       '.turbo/',
       '.opencode/',
+      '**/*.d.ts',
       '**/*.cjs',
       '**/*.js',
       '**/__tests__/**',
