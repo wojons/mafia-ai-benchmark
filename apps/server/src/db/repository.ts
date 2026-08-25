@@ -539,6 +539,61 @@ export class GameRepository {
   }
 
   /**
+   * True when EVERY ENDED game has a non-NULL games.winner (MAF-GAP-060).
+   *
+   * This is the completeness switch between the two winner sources: the
+   * games.winner column only became populated when the MAF-GAP-056 adapter
+   * write landed, so ~1600 legacy games carry their outcome solely as a
+   * GAME_OVER-phase event. Mixing per side (column for one, events for the
+   * other) produced impossible totals like mafiaWins=48 + townWins=13.
+   */
+  hasCompleteWinnerColumn(): boolean {
+    const row = this.db.prepare(
+      `SELECT
+         (SELECT COUNT(*) FROM games WHERE status = 'ENDED') AS ended,
+         (SELECT COUNT(*) FROM games WHERE status = 'ENDED' AND winner IS NOT NULL) AS decided`,
+    ).get() as { ended: number; decided: number };
+    return row.ended > 0 && row.decided === row.ended;
+  }
+
+  /**
+   * Event-derived winner counts across ALL ended games (MAF-GAP-060).
+   *
+   * Mirrors getGameWinnerFromEvents (first GAME_OVER-phase event carrying
+   * data.winner per game, scanned in sequence order) as one set-based SQL
+   * pass over the events table — no per-game event loading and no
+   * newest-1000 listGames cap, which previously truncated the count on
+   * databases larger than 1000 games. Only decisive outcomes count: a game
+   * with no GAME_OVER winner event contributes to neither side.
+   */
+  getWinnerEventCounts(): { mafiaWins: number; townWins: number } {
+    const rows = this.db.prepare(
+      `SELECT w.winner AS winner, COUNT(*) AS count FROM (
+         SELECT json_extract(e.data, '$.winner') AS winner,
+                ROW_NUMBER() OVER (
+                  PARTITION BY e.game_id
+                  ORDER BY e.sequence
+                ) AS rn
+         FROM events e
+         JOIN games g ON g.id = e.game_id
+         WHERE g.status = 'ENDED'
+           AND e.phase = 'GAME_OVER'
+           AND json_extract(e.data, '$.winner') IN ('MAFIA', 'TOWN')
+       ) w
+       WHERE w.rn = 1
+       GROUP BY w.winner`,
+    ).all() as Array<{ winner: string; count: number }>;
+
+    let mafiaWins = 0;
+    let townWins = 0;
+    for (const row of rows) {
+      if (row.winner === 'MAFIA') mafiaWins = row.count;
+      else if (row.winner === 'TOWN') townWins = row.count;
+    }
+    return { mafiaWins, townWins };
+  }
+
+  /**
    * List games that never reached a terminal outcome (MAF-GAP-050) —
    * statuses other than IN_PROGRESS/ENDED (SETUP, PAUSED, CANCELLED, or
    * unknown). Exposed so stuck / no-winner games are auditable instead of

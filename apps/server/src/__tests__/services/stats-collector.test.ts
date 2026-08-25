@@ -370,6 +370,85 @@ describe('StatsCollector', () => {
       expect(failed[0].endedAt).toEqual(new Date(1_700_000_100_000));
       expect(failed[1]).toMatchObject({ id: 'stuck2', status: 'SETUP', endedAt: null });
     });
+
+    it('uses the games.winner column when every ENDED game has a winner (MAF-GAP-060)', () => {
+      // All ended games carry a non-NULL winner, so the column is the single
+      // consistent source — even though the events disagree (legacy noise
+      // must NOT leak in once the column is complete).
+      repo.seedGame({
+        id: 'c1', status: 'ENDED', winner: 'MAFIA', duration: 60_000,
+        events: [{ type: 'PHASE_CHANGED', data: { winner: 'TOWN' }, phase: 'GAME_OVER' }],
+      });
+      repo.seedGame({
+        id: 'c2', status: 'ENDED', winner: 'TOWN', duration: 60_000,
+        events: [{ type: 'PHASE_CHANGED', data: { winner: 'MAFIA' }, phase: 'GAME_OVER' }],
+      });
+      repo.seedGame({
+        id: 'c3', status: 'ENDED', winner: 'MAFIA', duration: 60_000,
+        events: [{ type: 'PHASE_CHANGED', data: { winner: 'TOWN' }, phase: 'GAME_OVER' }],
+      });
+
+      const s = stats.getGameStats();
+      expect(s.completedGames).toBe(3);
+      expect(s.mafiaWins).toBe(2); // column: MAFIA, TOWN, MAFIA
+      expect(s.townWins).toBe(1);  // column, NOT the events (which say 2 TOWN)
+    });
+
+    it('uses event-derived counts when the winner column is incomplete — no cross-source mixing (MAF-GAP-060)', () => {
+      // Legacy shape: 3 ended games with NULL winner (outcome only in a
+      // GAME_OVER event) + 1 ended game whose column winner is TOWN.
+      // Column counts: mafia=0, town=1. Event counts: mafia=2, town=2.
+      // The old per-side mixing would report 2/1 (sum 3 != completed 4);
+      // the single-source rule must report 2/2.
+      repo.seedGame({
+        id: 'l1', status: 'ENDED', winner: null, duration: 60_000,
+        events: [{ type: 'PHASE_CHANGED', data: { winner: 'MAFIA' }, phase: 'GAME_OVER' }],
+      });
+      repo.seedGame({
+        id: 'l2', status: 'ENDED', winner: null, duration: 60_000,
+        events: [{ type: 'PHASE_CHANGED', data: { winner: 'MAFIA' }, phase: 'GAME_OVER' }],
+      });
+      repo.seedGame({
+        id: 'l3', status: 'ENDED', winner: null, duration: 60_000,
+        events: [{ type: 'PHASE_CHANGED', data: { winner: 'TOWN' }, phase: 'GAME_OVER' }],
+      });
+      repo.seedGame({
+        id: 'l4', status: 'ENDED', winner: 'TOWN', duration: 60_000,
+        events: [{ type: 'PHASE_CHANGED', data: { winner: 'TOWN' }, phase: 'GAME_OVER' }],
+      });
+
+      const s = stats.getGameStats();
+      expect(s.completedGames).toBe(4);
+      expect(s.mafiaWins).toBe(2); // events, NOT the column (0)
+      expect(s.townWins).toBe(2);  // events, NOT the column (1)
+      expect(s.mafiaWins + s.townWins).toBe(s.completedGames);
+    });
+
+    it('counts the first decisive GAME_OVER event per game and ignores non-decisive outcomes (MAF-GAP-060)', () => {
+      // Two GAME_OVER events in one game: the FIRST (by sequence) decides.
+      repo.seedGame({
+        id: 'f1', status: 'ENDED', winner: null, duration: 60_000,
+        events: [
+          { type: 'PHASE_CHANGED', data: { winner: 'MAFIA' }, phase: 'GAME_OVER' },
+          { type: 'PHASE_CHANGED', data: { winner: 'TOWN' }, phase: 'GAME_OVER' },
+        ],
+      });
+      // A game whose only GAME_OVER event is non-decisive contributes to neither side.
+      repo.seedGame({
+        id: 'f2', status: 'ENDED', winner: null, duration: 60_000,
+        events: [{ type: 'PHASE_CHANGED', data: { winner: 'DRAW' }, phase: 'GAME_OVER' }],
+      });
+      // A GAME_OVER event on a non-ENDED game must not count.
+      repo.seedGame({
+        id: 'f3', status: 'IN_PROGRESS', winner: null,
+        events: [{ type: 'PHASE_CHANGED', data: { winner: 'MAFIA' }, phase: 'GAME_OVER' }],
+      });
+
+      const s = stats.getGameStats();
+      expect(s.completedGames).toBe(2);
+      expect(s.mafiaWins).toBe(1); // f1's first GAME_OVER event
+      expect(s.townWins).toBe(0);  // f2 DRAW excluded, f3 not ended
+    });
   });
 
   // ==========================================================================

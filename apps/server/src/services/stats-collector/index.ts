@@ -7,7 +7,6 @@
 import { GameRepository } from '../../db/repository.js';
 import { v4 as uuidv4 } from 'uuid';
 import {
-  getAggregatedWins,
   getGameWinnerFromEvents,
   computeDurationFromEvents,
 } from './wins.js';
@@ -413,19 +412,36 @@ export class StatsCollector {
   
   /**
    * Get game statistics, deriving winner info from events when the games table lacks data.
+   *
+   * Winner counts come from a SINGLE consistent source (MAF-GAP-060): the
+   * games.winner column when EVERY ended game has a non-NULL winner
+   * (hasCompleteWinnerColumn), otherwise the GAME_OVER event stream
+   * (getWinnerEventCounts). The old per-side mixing — column for one side,
+   * events for the other — produced impossible totals like mafiaWins=48 +
+   * townWins=13 != completedGames.
    */
   getGameStats(): GameStats {
     const stats = this.gameRepository.getGameStats();
-    const wins = getAggregatedWins(this.gameRepository);
-    
+
+    let mafiaWins: number;
+    let townWins: number;
+    if (this.gameRepository.hasCompleteWinnerColumn()) {
+      mafiaWins = stats.mafiaWins;
+      townWins = stats.townWins;
+    } else {
+      const eventWins = this.gameRepository.getWinnerEventCounts();
+      mafiaWins = eventWins.mafiaWins;
+      townWins = eventWins.townWins;
+    }
+
     return {
       totalGames: stats.totalGames,
       activeGames: stats.activeGames,
       completedGames: stats.completedGames,
       failedGames: stats.failedGames,
       avgDuration: stats.avgDuration,
-      mafiaWins: stats.mafiaWins > 0 ? stats.mafiaWins : wins.mafiaWins,
-      townWins: stats.townWins > 0 ? stats.townWins : wins.townWins,
+      mafiaWins,
+      townWins,
     };
   }
   
