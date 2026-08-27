@@ -158,6 +158,36 @@ describe.skipIf(!SERVER_AVAILABLE)('benchmark report (live server)', () => {
   );
 
   it(
+    '--export writes the fetched report to the file',
+    async () => {
+      const cwd = makeTempCwd();
+      const outPath = path.join(cwd, 'report.json');
+      const { stdout, stderr, code } = await runCli(cwd, ['benchmark', '--quick', '--export', outPath, '--server', TEST_BASE_URL]);
+
+      expect(stderr).toBe('');
+      expect(code).toBe(0);
+      expect(stdout).toContain('Results exported to');
+
+      expect(existsSync(outPath)).toBe(true);
+      const written = JSON.parse(readFileSync(outPath, 'utf-8'));
+      expect(typeof written.summary?.totalGames).toBe('number');
+      expect(Array.isArray(written.modelPerformance)).toBe(true);
+    },
+    90000
+  );
+});
+
+// --- MAF-GAP-062: fresh-game runs cost REAL money and are explicit opt-in ---
+//
+// The test below POSTs a fresh run and polls it until real LLMs finish playing
+// a REAL game against the server (6-10 minutes, real OpenRouter credits). An
+// ordinary test-suite run must never trigger it: it only executes when BOTH
+// the server is reachable AND the operator explicitly opts in via
+// MAFIA_LIVE_BENCHMARK=1.
+describe.skipIf(
+  !SERVER_AVAILABLE || process.env.MAFIA_LIVE_BENCHMARK !== '1'
+)('benchmark fresh game run (live server, opt-in via MAFIA_LIVE_BENCHMARK=1)', () => {
+  it(
     '--games 1 --models <pair> POSTs a run, polls progress, and prints the report',
     async () => {
       const cwd = makeTempCwd();
@@ -183,25 +213,6 @@ describe.skipIf(!SERVER_AVAILABLE)('benchmark report (live server)', () => {
       expect(Array.isArray(printed.modelPerformance)).toBe(true);
     },
     12 * 60 * 1000
-  );
-
-  it(
-    '--export writes the fetched report to the file',
-    async () => {
-      const cwd = makeTempCwd();
-      const outPath = path.join(cwd, 'report.json');
-      const { stdout, stderr, code } = await runCli(cwd, ['benchmark', '--quick', '--export', outPath, '--server', TEST_BASE_URL]);
-
-      expect(stderr).toBe('');
-      expect(code).toBe(0);
-      expect(stdout).toContain('Results exported to');
-
-      expect(existsSync(outPath)).toBe(true);
-      const written = JSON.parse(readFileSync(outPath, 'utf-8'));
-      expect(typeof written.summary?.totalGames).toBe('number');
-      expect(Array.isArray(written.modelPerformance)).toBe(true);
-    },
-    90000
   );
 });
 
