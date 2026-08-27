@@ -40,7 +40,7 @@ pnpm build
 pnpm --filter @mafia/server dev
 
 # 5. In another terminal, run a benchmark
-pnpm --filter @mafia/cli benchmark
+pnpm --filter @mafia/cli dev -- benchmark
 ```
 
 ### What You'll See
@@ -175,7 +175,7 @@ See **[specs/correct-night-flow.md](specs/correct-night-flow.md)** for complete 
 | Command | Purpose | When to Use |
 | --- | --- | --- |
 | `pnpm --filter @mafia/cli game:run` | **Run a game** | Playing Mafia with AI agents |
-| `pnpm --filter @mafia/cli benchmark` | **Run benchmark** | Automated model evaluation |
+| `pnpm --filter @mafia/cli dev -- benchmark` | **Run benchmark** | Automated model evaluation |
 | `pnpm --filter @mafia/cli stats` | **View stats** | Game and model statistics |
 | `pnpm --filter @mafia/cli list-games` | **List games** | Browse recent games |
 | `pnpm --filter @mafia/cli config show` | **View config** | Check current settings |
