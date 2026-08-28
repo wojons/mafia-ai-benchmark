@@ -15,7 +15,7 @@
     "test:run": "vitest run",
     "lint": "eslint src --ext .ts",
     "type-check": "tsc --noEmit",
-    "benchmark": "node dist/index.js benchmark",
+    "benchmark": "tsx src/index.ts benchmark",
     "game:run": "tsx src/commands/run-game.ts",
     "game:watch": "tsx src/commands/watch-game.ts"
   },
