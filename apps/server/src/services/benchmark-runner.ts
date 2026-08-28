@@ -448,10 +448,10 @@ export class BenchmarkRunner {
     pairing: PairingSchedule,
     seed: number,
     config: Required<BenchmarkConfig>,
-    providerA: LLMProvider,
-    modelA: string,
-    providerB: LLMProvider,
-    modelB: string,
+    _providerA: LLMProvider,
+    _modelA: string,
+    _providerB: LLMProvider,
+    _modelB: string,
   ): string | null {
     const modelSpecA = this.toLegacyModelSpec(pairing.modelA);
     const modelSpecB = this.toLegacyModelSpec(pairing.modelB);

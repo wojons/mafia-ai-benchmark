@@ -22,7 +22,7 @@ export function createAgentsRouter(context: ServerContext): Router {
         success: true,
         data: agents,
       });
-    } catch (error) {
+    } catch {
       res
         .status(500)
         .json({ success: false, error: 'Failed to list agents' });
@@ -58,7 +58,7 @@ export function createAgentsRouter(context: ServerContext): Router {
         success: true,
         data: { id, name, provider, model },
       });
-    } catch (error) {
+    } catch {
       res
         .status(500)
         .json({ success: false, error: 'Failed to register agent' });
@@ -74,7 +74,7 @@ export function createAgentsRouter(context: ServerContext): Router {
         success: true,
         data: stats,
       });
-    } catch (error) {
+    } catch {
       res
         .status(500)
         .json({ success: false, error: 'Failed to get agent stats' });

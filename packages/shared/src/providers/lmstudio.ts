@@ -9,13 +9,11 @@ import {
   ProviderConfig, 
   ChatRequest, 
   ChatResponse, 
-  ChatMessage,
   StreamResponse,
   StreamChunk,
   ProviderStats,
   LLMError,
   ERROR_CODES,
-  calculateCost
 } from './index.js';
 
 export class LMStudioProvider implements LLMProviderAdapter {

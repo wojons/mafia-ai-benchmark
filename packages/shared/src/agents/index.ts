@@ -19,10 +19,8 @@ import {
   GamePhase
 } from '../types/index.js';
 import { 
-  generateRolePrompt, 
   getRoleConfig, 
   getMafiaTeammates,
-  getInvestigationResult,
   isAbilityUsed 
 } from '../roles/index.js';
 
@@ -286,7 +284,7 @@ export class MafiaAgent implements AgentPolicy {
   
   private buildTrustMap(context: AgentContext): Map<string, number> {
     const trustMap = new Map<string, number>();
-    const { game, player, memory } = context;
+    const { game, memory } = context;
     
     // Start with existing trust
     memory.internalMonologue.trustMap.forEach((trust, id) => {
@@ -317,8 +315,7 @@ export class MafiaAgent implements AgentPolicy {
           
         case 'ROLE_CLAIMED':
           if (event.actorId) {
-            const claimedRole = (event.data as { role: RoleType }).role;
-            const claimer = game.players.find(p => p.id === event.actorId);
+const claimer = game.players.find(p => p.id === event.actorId);
             
             if (claimer) {
               // Role claims increase visibility
@@ -516,7 +513,7 @@ export class MafiaAgent implements AgentPolicy {
   }
   
   private calculateConfidence(context: AgentContext): number {
-    const { player, memory, recentEvents } = context;
+    const { player, memory } = context;
     
     // Base confidence
     let confidence = 0.5;
@@ -606,7 +603,7 @@ export class MafiaAgent implements AgentPolicy {
     return 'I have no comment at this time.';
   }
   
-  private generateNightAction(thinking: AgentThinking): string {
+  private generateNightAction(_thinking: AgentThinking): string {
     // Night actions are private, but we need a placeholder
     return '[Night action submitted privately]';
   }
@@ -638,8 +635,8 @@ export class MafiaAgent implements AgentPolicy {
   }
   
   private generateRoleSpecificDiscussion(
-    thinking: AgentThinking,
-    activePlayers: Player[]
+    _thinking: AgentThinking,
+    _activePlayers: Player[]
   ): string {
     // This will be overridden by role-specific agents
     return '';
@@ -664,7 +661,7 @@ export class MafiaAgent implements AgentPolicy {
     thinking: AgentThinking,
     turnContext: TurnContext
   ): AgentAction | undefined {
-    const { phase, activePlayers } = turnContext;
+    const { phase } = turnContext;
     
     if (phase === 'NIGHT_ACTIONS') {
       if (thinking.targets.length > 0) {

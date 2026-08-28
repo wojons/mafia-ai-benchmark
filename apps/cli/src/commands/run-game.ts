@@ -96,6 +96,7 @@ export class RunGameCommand extends Command {
         console.log(chalk.gray('  Game ID: ' + gameId));
         console.log(chalk.gray('\nUse: mafiactl watch-game ' + gameId + ' to watch the game\n'));
       }
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
     } catch (error: any) {
       if (error.cause?.code === 'ECONNREFUSED' || error.message?.includes('fetch')) {
         console.error(chalk.red(`\n❌ Cannot connect to server at ${serverUrl}`));

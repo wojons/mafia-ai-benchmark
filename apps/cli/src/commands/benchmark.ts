@@ -119,7 +119,7 @@ export class BenchmarkCommand extends Command {
   }
 
   async run(): Promise<void> {
-    const { quick: _quick, export: exportPath, json, server, games, models, parallel } = this.opts();
+    const { export: exportPath, json, server, games, models, parallel } = this.opts();
 
     const serverUrl = resolveServerUrl(server);
 
@@ -152,6 +152,7 @@ export class BenchmarkCommand extends Command {
       if (exportPath) {
         this.exportResults(report, exportPath);
       }
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
     } catch (error: any) {
       if (error.cause?.code === 'ECONNREFUSED' || error.message?.includes('fetch')) {
         console.error(chalk.red(`\n❌ Cannot connect to server at ${serverUrl}`));

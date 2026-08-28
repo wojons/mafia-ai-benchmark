@@ -7,16 +7,11 @@
 
 import { 
   Game, 
-  GameState, 
   GamePhase, 
   GameEvent, 
-  Player, 
-  Vote, 
   NightAction,
-  GameConfig,
   RoleType
 } from '../types/index.js';
-import { createEvent, EventType, GameEvent as GameEventType } from '../events/index.js';
 
 // FSM State interface
 export interface FSMState {
@@ -209,11 +204,11 @@ class SetupState implements FSMState {
     console.log('[FSM] Entering SETUP state');
   }
   
-  exit(game: Game): void {
+  exit(_game: Game): void {
     console.log('[FSM] Exiting SETUP state');
   }
   
-  update(game: Game, deltaTime: number): void {
+  update(game: Game, _deltaTime: number): void {
     // Check if we can start the game
     const alivePlayers = game.players.filter(p => p.isAlive);
     if (alivePlayers.length >= game.config.minPlayers && game.status === 'SETUP') {
@@ -270,7 +265,7 @@ class SetupState implements FSMState {
     });
   }
   
-  private handleGameStarted(game: Game, event: GameEvent): void {
+  private handleGameStarted(game: Game, _event: GameEvent): void {
     game.startedAt = new Date();
     game.status = 'IN_PROGRESS';
     game.currentState.dayNumber = 1;
@@ -307,7 +302,7 @@ class NightActionsState implements FSMState {
     }, game.config.nightPhaseDuration * 1000);
   }
   
-  exit(game: Game): void {
+  exit(_game: Game): void {
     if (this.actionTimeout) {
       clearTimeout(this.actionTimeout);
     }
@@ -489,11 +484,11 @@ class MorningRevealState implements FSMState {
     this.processNightReveals(game);
   }
   
-  exit(game: Game): void {
+  exit(_game: Game): void {
     console.log('[FSM] Exiting MORNING_REVEAL state');
   }
   
-  update(game: Game, deltaTime: number): void {
+  update(game: Game, _deltaTime: number): void {
     // Stay in this state briefly to show night results
     // Then automatically transition to DAY_DISCUSSION
     setTimeout(() => {
@@ -501,7 +496,7 @@ class MorningRevealState implements FSMState {
     }, 3000); // 3 second reveal
   }
   
-  handleEvent(game: Game, event: GameEvent): void {
+  handleEvent(_game: Game, _event: GameEvent): void {
     // No specific event handling in this state
   }
   
@@ -557,7 +552,7 @@ class DayDiscussionState implements FSMState {
     }, game.config.dayPhaseDuration * 1000);
   }
   
-  exit(game: Game): void {
+  exit(_game: Game): void {
     if (this.discussionTimeout) {
       clearTimeout(this.discussionTimeout);
     }
@@ -647,7 +642,7 @@ class DayVotingState implements FSMState {
     }, game.config.votingDuration * 1000);
   }
   
-  exit(game: Game): void {
+  exit(_game: Game): void {
     if (this.votingTimeout) {
       clearTimeout(this.votingTimeout);
     }
@@ -805,18 +800,18 @@ class ResolutionState implements FSMState {
     console.log('[FSM] Entering RESOLUTION state');
   }
   
-  exit(game: Game): void {
+  exit(_game: Game): void {
     console.log('[FSM] Exiting RESOLUTION state');
   }
   
-  update(game: Game, deltaTime: number): void {
+  update(game: Game, _deltaTime: number): void {
     // Auto-transition to game over
     setTimeout(() => {
       game.currentState.phase = 'GAME_OVER';
     }, 1000);
   }
   
-  handleEvent(game: Game, event: GameEvent): void {
+  handleEvent(_game: Game, _event: GameEvent): void {
     // No specific event handling
   }
 }
@@ -837,15 +832,15 @@ class GameOverState implements FSMState {
     this.calculateGameResults(game);
   }
   
-  exit(game: Game): void {
+  exit(_game: Game): void {
     console.log('[FSM] Exiting GAME_OVER state');
   }
   
-  update(game: Game, deltaTime: number): void {
+  update(_game: Game, _deltaTime: number): void {
     // No updates in game over state
   }
   
-  handleEvent(game: Game, event: GameEvent): void {
+  handleEvent(_game: Game, _event: GameEvent): void {
     // No event handling in game over
   }
   

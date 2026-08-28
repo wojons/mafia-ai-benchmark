@@ -23,7 +23,7 @@ export function createStatsRouter(context: ServerContext): Router {
         success: true,
         data: stats,
       });
-    } catch (error) {
+    } catch {
       res
         .status(500)
         .json({ success: false, error: 'Failed to get statistics' });
@@ -39,7 +39,7 @@ export function createStatsRouter(context: ServerContext): Router {
         success: true,
         data: comparison,
       });
-    } catch (error) {
+    } catch {
       res
         .status(500)
         .json({ success: false, error: 'Failed to get model comparison' });
@@ -55,7 +55,7 @@ export function createStatsRouter(context: ServerContext): Router {
         success: true,
         data: matchups,
       });
-    } catch (error) {
+    } catch {
       res
         .status(500)
         .json({ success: false, error: 'Failed to get matchups' });
@@ -105,7 +105,7 @@ export function createStatsRouter(context: ServerContext): Router {
           recentGames,
         },
       });
-    } catch (error) {
+    } catch {
       res
         .status(500)
         .json({ success: false, error: 'Failed to get dashboard data' });
@@ -117,7 +117,9 @@ export function createStatsRouter(context: ServerContext): Router {
       const gameStats = statsCollector.getGameStats();
       const modelComparison = statsCollector.getModelComparison();
       const agentStats = statsCollector.getAgentStats();
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
       const eventDist = (statsCollector as any).getEventDistribution
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
         ? (statsCollector as any).getEventDistribution()
         : {};
 
@@ -150,7 +152,7 @@ export function createStatsRouter(context: ServerContext): Router {
           },
         },
       });
-    } catch (error) {
+    } catch {
       res.status(500).json({
         success: false,
         error: 'Failed to get analytics data',

@@ -116,7 +116,7 @@ class WebSocketService {
   }
   
   private handleMessage(message: WSMessage): void {
-    const { type, payload, timestamp } = message;
+    const { type, payload } = message;
     
     // Emit to specific handlers
     this.emit(type, payload);

@@ -8,7 +8,7 @@ import Loading from './Loading';
 const GameWatcher: React.FC = () => {
   const { gameId } = useParams<{ gameId: string }>();
   const navigate = useNavigate();
-  const { currentGame, gameState, players, events, selectGame } = useGameStore();
+  const { currentGame, gameState, players, selectGame } = useGameStore();
   const [liveUpdates, setLiveUpdates] = useState<Array<{ type: string; message: string; time: Date }>>([]);
   
   useEffect(() => {

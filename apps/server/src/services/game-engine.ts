@@ -7,20 +7,15 @@
 import { 
   Game, 
   GameState, 
-  GamePhase, 
   GameEvent, 
-  Player, 
   RoleType,
   GameConfig,
-  Vote,
-  NightAction
 } from '@mafia/shared/types';
 import { GameFSM, createGameFSM } from '@mafia/shared/fsm';
 import { GameRepository } from '../db/repository.js';
 import { AgentCoordinator } from './agent-coordinator.js';
 import { EventBus } from './event-bus.js';
 import { StatsCollector } from './stats-collector.js';
-import { v4 as uuidv4 } from 'uuid';
 
 export interface CreateGameOptions {
   config?: Partial<GameConfig>;

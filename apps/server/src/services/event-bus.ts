@@ -4,7 +4,7 @@
  * Central event distribution system for the Mafia game engine.
  */
 
-import { GameEvent, GamePhase } from '@mafia/shared/types';
+import { GameEvent } from '@mafia/shared/types';
 
 export type EventHandler = (event: GameEvent) => void;
 export type EventFilter = (event: GameEvent) => boolean;
@@ -116,7 +116,7 @@ export class EventBus {
    */
   unsubscribe(subscriptionId: string): boolean {
     // Check regular subscriptions
-    for (const [eventType, subs] of this.subscriptions) {
+    for (const [, subs] of this.subscriptions) {
       const index = subs.findIndex(s => s.id === subscriptionId);
       if (index !== -1) {
         subs.splice(index, 1);

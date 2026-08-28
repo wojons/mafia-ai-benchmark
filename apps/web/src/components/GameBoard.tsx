@@ -13,8 +13,8 @@ const GameBoard: React.FC = () => {
   const { gameId } = useParams<{ gameId: string }>();
   const navigate = useNavigate();
   const { currentGame, gameState, players, events, selectGame, clearCurrentGame } = useGameStore();
-  const { showChatPanel, showVotePanel, showPlayerList } = useUIStore();
-  const [myPlayerId, setMyPlayerId] = useState<string | null>(null);
+  const { showChatPanel, showVotePanel } = useUIStore();
+  const [myPlayerId] = useState<string | null>(null);
   
   useEffect(() => {
     if (gameId) {
@@ -33,7 +33,7 @@ const GameBoard: React.FC = () => {
   const alivePlayers = players.filter((p) => p.isAlive);
   const eliminatedPlayers = players.filter((p) => !p.isAlive);
   
-  const handleVote = async (targetId: string) => {
+  const handleVote = async (_targetId: string) => {
     if (!myPlayerId || !gameId) return;
     // Vote logic will be handled by ActionPanel
   };

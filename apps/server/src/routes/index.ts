@@ -14,7 +14,7 @@ import { createBenchmarkRouter } from './benchmark.js';
 import { createAgentsRouter } from './agents.js';
 
 export function setupRoutes(app: Express, context: ServerContext): void {
-  const { gameEngine, agentCoordinator, statsCollector, gameRepository, eventBus, benchmarkRunner } = context;
+  const { gameRepository, eventBus } = context;
 
   // Initialize legacy game adapter
   let legacyAdapter: LegacyGameAdapter | null = null;

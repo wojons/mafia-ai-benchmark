@@ -8,7 +8,7 @@ interface ActionPanelProps {
   disabled: boolean;
 }
 
-const ActionPanel: React.FC<ActionPanelProps> = ({ phase, players, onAction, disabled }) => {
+const ActionPanel: React.FC<ActionPanelProps> = ({ phase, players: _players, onAction, disabled }) => {
   if (disabled) {
     return (
       <div className="action-panel disabled">

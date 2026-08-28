@@ -29,6 +29,7 @@ import { MetaProvider } from './meta.js';
 import { QwenProvider } from './qwen.js';
 import { XAIProvider } from './xai.js';
 
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
 const PROVIDERS: Map<string, new (...args: any[]) => LLMProviderAdapter> = new Map([
   ['OPENAI', OpenAIProvider],
   ['ANTHROPIC', AnthropicProvider],
@@ -41,6 +42,7 @@ const PROVIDERS: Map<string, new (...args: any[]) => LLMProviderAdapter> = new M
   ['META', MetaProvider],
   ['QWEN', QwenProvider],
   ['XAI', XAIProvider],
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
 ] as Array<[string, new (...args: any[]) => LLMProviderAdapter]>);
 
 // Provider metadata (minimal, just names and defaults)

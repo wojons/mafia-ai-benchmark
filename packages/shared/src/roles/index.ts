@@ -5,7 +5,7 @@
  * Defines behavior, capabilities, and prompts for each role.
  */
 
-import { RoleType, Player, Game, AgentMemory, InternalMonologue } from '../types/index.js';
+import { RoleType, Player, Game, AgentMemory } from '../types/index.js';
 import { GameEvent } from '../events/index.js';
 
 // Role configuration
@@ -370,7 +370,6 @@ export function updateRoleMemory(
 
 function updateMafiaMemory(memory: AgentMemory, game: Game, event: GameEvent): AgentMemory {
   // Update internal monologue based on game events
-  const alivePlayers = game.players.filter(p => p.isAlive);
   
   // Update suspect list
   const suspects = memory.internalMonologue.currentSuspects.filter(id => {

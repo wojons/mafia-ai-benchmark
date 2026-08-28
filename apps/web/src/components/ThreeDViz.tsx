@@ -1,17 +1,14 @@
 import React, { useEffect, useRef, useState, useMemo, useCallback } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
-import { Canvas, useFrame, useThree } from '@react-three/fiber';
+import { Canvas, useFrame } from '@react-three/fiber';
 import {
   OrbitControls,
-  Text,
   Html,
   Environment,
-  useTexture,
-  Sphere,
   Line,
 } from '@react-three/drei';
 import * as THREE from 'three';
-import type { Player, GameState, GamePhase } from '@mafia/shared/types';
+import type { Player, GamePhase } from '@mafia/shared/types';
 import { api } from '../services/api';
 import { websocket } from '../services/websocket';
 
@@ -33,7 +30,6 @@ interface PlayerNode {
 
 // ── Constants ────────────────────────────────────────────────────────
 const TABLE_RADIUS = 8;
-const PLAYER_SEATS = 8; // max players around table
 const TABLE_HEIGHT = 1.5;
 
 const ROLE_COLORS: Record<string, string> = {
@@ -101,8 +97,6 @@ const PlayerFigure: React.FC<{
   const isDead = !player.isAlive;
   const targetOpacity = isDead ? 0.3 : 1.0;
   const opacityRef = useRef(targetOpacity);
-  const emissiveIntensity = isHovered ? 0.4 : 0.05;
-  const emissiveTarget = player.isMafia && player.isAlive ? 0.3 : emissiveIntensity;
 
   useFrame((_, delta) => {
     if (!meshRef.current) return;
@@ -398,7 +392,7 @@ const SceneContent: React.FC<{
       <MafiaConnections players={players} />
 
       {/* Chairs (simple cubes) */}
-      {players.map((player, i) => {
+      {players.map((player, _i) => {
         const seatPos = player.targetPosition.clone();
         const outward = seatPos.clone().normalize();
         const chairPos = seatPos.clone().add(outward.multiplyScalar(1.8));
@@ -593,6 +587,7 @@ const ThreeDViz: React.FC<ThreeDVizProps> = ({ gameId: propGameId, embedded = fa
       setLoading(true);
       setError(null);
       try {
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
         const response = await api.games.get(gameId) as any;
         if (cancelled) return;
 
@@ -607,7 +602,7 @@ const ThreeDViz: React.FC<ThreeDVizProps> = ({ gameId: propGameId, embedded = fa
           setRoundNumber(game.currentState.turnNumber || 0);
         }
         setLoading(false);
-      } catch (err) {
+      } catch {
         if (!cancelled) {
           setError('Failed to load game data');
           setLoading(false);
@@ -624,6 +619,7 @@ const ThreeDViz: React.FC<ThreeDVizProps> = ({ gameId: propGameId, embedded = fa
 
     unsubs.push(
       websocket.on('GAME_STATE', (data: unknown) => {
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
         const stateData = data as any;
         const state = stateData?.state || stateData;
         if (state?.phase) setPhase(state.phase);
@@ -634,6 +630,7 @@ const ThreeDViz: React.FC<ThreeDVizProps> = ({ gameId: propGameId, embedded = fa
 
     unsubs.push(
       websocket.on('GAME_EVENT', (event: unknown) => {
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
         const evt = event as any;
         if (!evt || evt.gameId !== gameId) return;
 
@@ -656,6 +653,7 @@ const ThreeDViz: React.FC<ThreeDVizProps> = ({ gameId: propGameId, embedded = fa
           }
           case 'ROLES_ASSIGNED': {
             // Refresh players to get updated roles
+            // eslint-disable-next-line @typescript-eslint/no-explicit-any
             api.games.get(gameId).then((res: any) => {
               const game = res?.data || res;
               if (game?.players) {
@@ -665,6 +663,7 @@ const ThreeDViz: React.FC<ThreeDVizProps> = ({ gameId: propGameId, embedded = fa
             break;
           }
           case 'GAME_STARTED': {
+            // eslint-disable-next-line @typescript-eslint/no-explicit-any
             api.games.get(gameId).then((res: any) => {
               const game = res?.data || res;
               if (game?.players) {
@@ -787,6 +786,7 @@ const ThreeDViz: React.FC<ThreeDVizProps> = ({ gameId: propGameId, embedded = fa
         aliveCount={aliveCount}
         totalPlayers={players.length}
         hoveredPlayer={hoveredPlayer}
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
         onBack={() => navigate(embedded ? -1 as any : '/')}
       />
     </div>

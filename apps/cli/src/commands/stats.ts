@@ -47,7 +47,7 @@ export class StatsCommand extends Command {
   }
   
   async run(): Promise<void> {
-    const { json, games: _games, models: _models, verbose, server } = this.opts();
+    const { json, verbose, server } = this.opts();
     
     const serverUrl = resolveServerUrl(server);
     
@@ -114,6 +114,7 @@ export class StatsCommand extends Command {
       }
       
       console.log('');
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
     } catch (error: any) {
       if (error.cause?.code === 'ECONNREFUSED' || error.message?.includes('fetch')) {
         console.error(chalk.red(`\n❌ Cannot connect to server at ${serverUrl}`));

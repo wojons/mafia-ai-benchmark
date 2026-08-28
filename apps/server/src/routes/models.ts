@@ -53,7 +53,7 @@ export function createModelsRouter(context: ServerContext): Router {
           },
         });
       }
-    } catch (error) {
+    } catch {
       res
         .status(500)
         .json({ success: false, error: 'Failed to get model pricing' });
@@ -87,7 +87,7 @@ export function createModelsRouter(context: ServerContext): Router {
           success: true,
           data: result,
         });
-      } catch (error) {
+      } catch {
         res
           .status(500)
           .json({ success: false, error: 'Failed to calculate cost' });
@@ -144,7 +144,7 @@ export function createModelsRouter(context: ServerContext): Router {
                 displayName: m.name,
               });
             }
-          } catch (e) {
+          } catch {
             // Skip providers that fail
           }
         }
@@ -159,7 +159,7 @@ export function createModelsRouter(context: ServerContext): Router {
           },
         });
       }
-    } catch (error) {
+    } catch {
       res
         .status(500)
         .json({ success: false, error: 'Failed to list models' });
@@ -218,7 +218,7 @@ export function createModelsRouter(context: ServerContext): Router {
             createdAt: assignment.created_at,
           },
         });
-      } catch (error) {
+      } catch {
         res
           .status(500)
           .json({ success: false, error: 'Failed to set player model' });
@@ -272,7 +272,7 @@ export function createModelsRouter(context: ServerContext): Router {
             createdAt: assignment.created_at,
           },
         });
-      } catch (error) {
+      } catch {
         res
           .status(500)
           .json({ success: false, error: 'Failed to set role model' });
@@ -329,7 +329,7 @@ export function createModelsRouter(context: ServerContext): Router {
             ),
           },
         });
-      } catch (error) {
+      } catch {
         res
           .status(500)
           .json({ success: false, error: 'Failed to bulk update models' });

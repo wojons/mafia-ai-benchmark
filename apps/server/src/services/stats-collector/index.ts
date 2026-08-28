@@ -573,6 +573,7 @@ export class StatsCollector {
               role: p.role,
               survived: p.isAlive,
             })),
+            // eslint-disable-next-line @typescript-eslint/no-explicit-any
             winner: winner || (game as any)?.winner || (game?.status === 'ENDED' ? 'UNKNOWN' : 'IN_PROGRESS'),
           };
         } catch {
@@ -609,7 +610,7 @@ export class StatsCollector {
   /**
    * Export data as CSV
    */
-  exportCSV(gameId?: string): string {
+  exportCSV(_gameId?: string): string {
     const rows: string[] = [];
     
     rows.push('Metric,Value');
@@ -780,7 +781,9 @@ export class StatsCollector {
           role: p.role,
           // MAF-GAP-012: never fabricate a provider/model — report
           // 'unknown' when the players table has no real value.
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
           provider: (p as any).provider || 'unknown',
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
           model: (p as any).model || 'unknown',
           survived: p.isAlive,
           won: isWinner,

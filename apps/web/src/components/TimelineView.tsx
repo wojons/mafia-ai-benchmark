@@ -148,7 +148,6 @@ const TimelineView: React.FC = () => {
   const phaseBlocks = useMemo(() => {
     if (events.length === 0) return [];
     const blocks: { phase: string; startSeq: number; endSeq: number; dayNumber: number }[] = [];
-    const minSeq = events[0].metadata.sequence;
     const maxSeq = events[events.length - 1].metadata.sequence;
 
     // Group consecutive events by phase

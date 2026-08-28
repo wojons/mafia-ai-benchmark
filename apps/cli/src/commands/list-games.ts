@@ -56,6 +56,7 @@ export class ListGamesCommand extends Command {
       });
       
       console.log(chalk.gray('\nTotal: ' + games.length + ' games\n'));
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
     } catch (error: any) {
       if (error.cause?.code === 'ECONNREFUSED' || error.message?.includes('fetch')) {
         console.error(chalk.red(`\n❌ Cannot connect to server at ${serverUrl}`));

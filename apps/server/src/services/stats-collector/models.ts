@@ -10,18 +10,6 @@ import { getGameWinnerFromEvents } from './wins.js';
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 type AnyRecord = Record<string, any>;
 
-/** Roles that belong to the TOWN team. */
-const TOWN_ROLES = new Set([
-  'TOWN',
-  'SHERIFF',
-  'DOCTOR',
-  'VILLAGER',
-  'VIGILANTE',
-  'JESTER',
-  'DETECTIVE',
-  'BODYGUARD',
-]);
-
 /**
  * SQL expression selecting the canonical MODEL string for a table alias
  * (MAF-GAP-036/045). Some rows carry the provider prefix inside the model

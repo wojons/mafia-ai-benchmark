@@ -81,11 +81,13 @@ export function createGamesRouter(
 
       // Subscribe to event bus for this game (wildcard)
       const unsubscribe = eventBus.subscribeAll(
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
         (event: any) => {
           if (event.gameId === gameId) {
             res.write(`data: ${JSON.stringify(event)}\n\n`);
           }
         },
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
         { filter: (event: any) => event.gameId === gameId },
       );
 
@@ -143,7 +145,7 @@ export function createGamesRouter(
         data: events,
         count: events.length,
       });
-    } catch (error) {
+    } catch {
       res
         .status(500)
         .json({ success: false, error: 'Failed to get events' });
@@ -179,7 +181,7 @@ export function createGamesRouter(
         data: timeline,
         count: timeline.length,
       });
-    } catch (error) {
+    } catch {
       res
         .status(500)
         .json({ success: false, error: 'Failed to get replay' });
@@ -236,6 +238,7 @@ export function createGamesRouter(
       const games = gameRepository.listGames(filters);
 
       // Also include legacy games if adapter is available
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
       const legacyGames: any[] = [];
       if (legacyAdapter) {
         for (const gameId of legacyAdapter.getActiveGames()) {
@@ -296,7 +299,7 @@ export function createGamesRouter(
         data: limitedGames,
         count: limitedGames.length,
       });
-    } catch (error) {
+    } catch {
       res
         .status(500)
         .json({ success: false, error: 'Failed to list games' });
@@ -308,7 +311,6 @@ export function createGamesRouter(
     try {
       const {
         config,
-        hostName,
         numPlayers,
         personaSeeds,
         legacyConfig,
@@ -365,7 +367,7 @@ export function createGamesRouter(
           config: game.config,
         },
       });
-    } catch (error) {
+    } catch {
       res
         .status(500)
         .json({ success: false, error: 'Failed to create game' });
@@ -474,7 +476,7 @@ export function createGamesRouter(
         success: true,
         data: game,
       });
-    } catch (error) {
+    } catch {
       res
         .status(500)
         .json({ success: false, error: 'Failed to get game' });
@@ -503,7 +505,7 @@ export function createGamesRouter(
           success: true,
           data: { eventId: result.event?.id },
         });
-      } catch (error) {
+      } catch {
         res
           .status(500)
           .json({ success: false, error: 'Failed to join game' });
@@ -528,7 +530,7 @@ export function createGamesRouter(
           success: true,
           data: { eventId: result.event?.id },
         });
-      } catch (error) {
+      } catch {
         res
           .status(500)
           .json({ success: false, error: 'Failed to start game' });
@@ -553,7 +555,7 @@ export function createGamesRouter(
           success: true,
           data: state,
         });
-      } catch (error) {
+      } catch {
         res
           .status(500)
           .json({ success: false, error: 'Failed to get game state' });
@@ -626,7 +628,7 @@ export function createGamesRouter(
           success: true,
           data: { eventId: result.event?.id },
         });
-      } catch (error) {
+      } catch {
         res
           .status(500)
           .json({ success: false, error: 'Failed to submit night action' });
@@ -656,7 +658,7 @@ export function createGamesRouter(
           success: true,
           data: { eventId: result.event?.id },
         });
-      } catch (error) {
+      } catch {
         res
           .status(500)
           .json({ success: false, error: 'Failed to submit vote' });
@@ -688,7 +690,7 @@ export function createGamesRouter(
           success: true,
           data: { eventId: result.event?.id },
         });
-      } catch (error) {
+      } catch {
         res
           .status(500)
           .json({ success: false, error: 'Failed to make accusation' });
@@ -718,7 +720,7 @@ export function createGamesRouter(
           success: true,
           data: { eventId: result.event?.id },
         });
-      } catch (error) {
+      } catch {
         res
           .status(500)
           .json({ success: false, error: 'Failed to claim role' });
@@ -739,7 +741,7 @@ export function createGamesRouter(
           success: true,
           data: players,
         });
-      } catch (error) {
+      } catch {
         res
           .status(500)
           .json({ success: false, error: 'Failed to get players' });

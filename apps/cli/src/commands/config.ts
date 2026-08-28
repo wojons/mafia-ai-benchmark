@@ -109,6 +109,7 @@ export class ConfigCommand extends Command {
       console.log(chalk.yellow('\n⚠️  This will reset all configuration to defaults.\n'));
       
       const inquirerMod = await import('inquirer');
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
       const inquirer = (inquirerMod as any).default || inquirerMod;
       const { confirm } = await inquirer.prompt([
         {

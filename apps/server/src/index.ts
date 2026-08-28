@@ -40,6 +40,7 @@ async function main(): Promise<void> {
   console.log('Mafia AI Benchmark Server');
   const dbPath = process.env.DB_PATH || './data/mafia.db';
   const migrator = createDatabase(dbPath);
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const gameRepository = new GameRepositoryDefault((migrator as any).db);
 
   const eventBus = new EventBus();
@@ -64,6 +65,7 @@ async function main(): Promise<void> {
     eventBus,
     statsCollector,
     gameRepository,
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
     benchmarkRunner: null as any,
     legacyAdapter,
   };
@@ -101,7 +103,7 @@ async function main(): Promise<void> {
 
   setupRoutes(app, context);
 
-  app.use((err: Error, req: express.Request, res: express.Response, next: express.NextFunction) => {
+  app.use((err: Error, req: express.Request, res: express.Response, _next: express.NextFunction) => {
     console.error('Server error:', err);
     res.status(500).json({ success: false, error: { code: 'INTERNAL_ERROR', message: process.env.NODE_ENV === 'production' ? 'An internal error occurred' : err.message } });
   });

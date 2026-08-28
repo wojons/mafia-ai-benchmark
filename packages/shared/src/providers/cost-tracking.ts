@@ -5,7 +5,7 @@
  * Uses real-time pricing from models.dev API.
  */
 
-import { getModelPricing, getCachedCostEstimate, ModelPricing } from './model-metadata.js';
+import { getModelPricing, getCachedCostEstimate } from './model-metadata.js';
 
 export interface CostEntry {
   modelId: string;
@@ -82,7 +82,7 @@ export class CostTracker {
     phase: string,
     action?: string,
     playerId?: string,
-    playerName?: string
+    _playerName?: string
   ): Promise<CostEntry> {
     // Calculate cost using real pricing
     const pricing = await getModelPricing(modelId);
@@ -127,7 +127,7 @@ export class CostTracker {
     phase: string,
     action?: string,
     playerId?: string,
-    playerName?: string
+    _playerName?: string
   ): CostEntry {
     // Use cached pricing (synchronous)
     const estimate = getCachedCostEstimate(modelId, inputTokens, outputTokens);

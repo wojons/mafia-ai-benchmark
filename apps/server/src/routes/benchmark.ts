@@ -50,7 +50,7 @@ export function createBenchmarkRouter(context: ServerContext): Router {
       } else {
         res.json(report);
       }
-    } catch (error) {
+    } catch {
       res
         .status(500)
         .json({ success: false, error: 'Failed to generate report' });
@@ -83,7 +83,7 @@ export function createBenchmarkRouter(context: ServerContext): Router {
           data: report,
         });
       }
-    } catch (error) {
+    } catch {
       res.status(500).json({
         success: false,
         error: 'Failed to export benchmark data',
@@ -105,7 +105,7 @@ export function createBenchmarkRouter(context: ServerContext): Router {
         success: true,
         data: report,
       });
-    } catch (error) {
+    } catch {
       res.status(500).json({
         success: false,
         error: 'Failed to generate comparison report',
@@ -119,7 +119,7 @@ export function createBenchmarkRouter(context: ServerContext): Router {
   router.get('/api/v1/benchmark/runs', (req: Request, res: Response) => {
     try {
       res.json({ success: true, data: benchmarkRunner.listRuns() });
-    } catch (error) {
+    } catch {
       res.status(500).json({
         success: false,
         error: 'Failed to list benchmark runs',
@@ -143,7 +143,7 @@ export function createBenchmarkRouter(context: ServerContext): Router {
         }
         const progress = benchmarkRunner.getProgress(runId);
         res.json({ success: true, data: { status, progress } });
-      } catch (error) {
+      } catch {
         res
           .status(500)
           .json({
@@ -168,7 +168,7 @@ export function createBenchmarkRouter(context: ServerContext): Router {
       }
       const progress = benchmarkRunner.getProgress(runId);
       res.json({ success: true, data: { status, progress } });
-    } catch (error) {
+    } catch {
       res
         .status(500)
         .json({
@@ -196,7 +196,7 @@ export function createBenchmarkRouter(context: ServerContext): Router {
           success: true,
           data: { runId, message: 'Benchmark run cancelled' },
         });
-      } catch (error) {
+      } catch {
         res
           .status(500)
           .json({
@@ -223,7 +223,7 @@ export function createBenchmarkRouter(context: ServerContext): Router {
         success: true,
         data: { runId, message: 'Benchmark run cancelled' },
       });
-    } catch (error) {
+    } catch {
       res
         .status(500)
         .json({

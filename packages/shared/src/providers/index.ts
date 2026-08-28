@@ -5,8 +5,6 @@
  * Supports dynamic model metadata fetching and fallback to defaults.
  */
 
-import { LLMProvider } from '../types/index.js';
-
 // Provider configuration
 export interface ProviderConfig {
   provider: string;

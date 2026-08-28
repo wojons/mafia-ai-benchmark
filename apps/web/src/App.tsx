@@ -7,7 +7,6 @@ import Sidebar from './components/Sidebar';
 import GameList from './components/GameList';
 import GameBoard from './components/GameBoard';
 import GameWatcher from './components/GameWatcher';
-import StatsPanel from './components/StatsPanel';
 import BenchmarkDashboard from './components/BenchmarkDashboard';
 import Settings from './components/Settings';
 import Loading from './components/Loading';

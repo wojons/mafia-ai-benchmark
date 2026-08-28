@@ -9,7 +9,6 @@ import {
   ProviderConfig, 
   ChatRequest, 
   ChatResponse, 
-  ChatMessage,
   StreamResponse,
   StreamChunk,
   ProviderStats,

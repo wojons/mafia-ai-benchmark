@@ -271,7 +271,7 @@ export class WebSocketHandler {
         type: 'ACTION_SENT',
         payload: { actionType, targetId },
       });
-    } catch (error) {
+    } catch {
       this.sendToClient(clientId, {
         type: 'ERROR',
         payload: { message: 'Failed to send action' },

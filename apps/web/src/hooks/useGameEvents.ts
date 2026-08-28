@@ -96,11 +96,11 @@ export function useGameEvents(gameId: string | null) {
               // Notify handlers
               const typeHandlers = handlersRef.current.get(event.type);
               if (typeHandlers) {
-                typeHandlers.forEach(h => { try { h(event); } catch (e) { /* ignore */ } });
+                typeHandlers.forEach(h => { try { h(event); } catch { /* ignore */ } });
               }
               const allHandlers = handlersRef.current.get('*');
               if (allHandlers) {
-                allHandlers.forEach(h => { try { h(event); } catch (e) { /* ignore */ } });
+                allHandlers.forEach(h => { try { h(event); } catch { /* ignore */ } });
               }
             } else if (message.type === 'CONNECTED') {
               setConnected(true);

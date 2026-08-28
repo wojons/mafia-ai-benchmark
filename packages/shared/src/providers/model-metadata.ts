@@ -112,6 +112,7 @@ export async function fetchModelMetadata(forceRefresh = false): Promise<Map<stri
     modelCache.clear();
     pricingCache.clear();
     
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
     for (const [providerId, providerData] of Object.entries(data as Record<string, any>)) {
       if (!providerData?.models) continue;
       
@@ -383,7 +384,7 @@ export async function searchModelsByProvider(provider: string): Promise<ModelSea
   const results: ModelSearchResult[] = [];
   const providerLower = provider.toLowerCase();
   
-  for (const [id, model] of modelCache) {
+  for (const [, model] of modelCache) {
     if (model.provider.toLowerCase().includes(providerLower)) {
       results.push({
         id: model.id,

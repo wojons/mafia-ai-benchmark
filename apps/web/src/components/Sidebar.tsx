@@ -1,9 +1,8 @@
 import React from 'react';
-import { Link, useLocation } from 'react-router-dom';
+import { Link } from 'react-router-dom';
 import { useUIStore } from '../stores/uiStore';
 
 const Sidebar: React.FC = () => {
-  const location = useLocation();
   const { sidebarOpen, sidebarCollapsed, toggleSidebarCollapse } = useUIStore();
   
   if (!sidebarOpen) return null;

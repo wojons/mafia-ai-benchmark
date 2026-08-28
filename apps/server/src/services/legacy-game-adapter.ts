@@ -142,11 +142,13 @@ export class LegacyGameAdapter extends EventEmitter {
     // Insert game into repository so foreign key constraints are satisfied for events
     try {
       // Use raw insert to avoid GameConfig type mismatch (legacy adapter has fewer fields)
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
       const db = (this.gameRepository as any).db;
       if (db) {
         db.prepare(`INSERT INTO games (id, status, config, created_at) VALUES (?, 'IN_PROGRESS', ?, ?)`)
           .run(gameId, JSON.stringify({ numPlayers: config.numPlayers || 5, engineType: 'legacy' }), Date.now());
       }
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
     } catch (e: any) {
       console.error(`[LegacyAdapter] Failed to create game in repository: ${e?.message || e}`);
     }
@@ -205,7 +207,7 @@ export class LegacyGameAdapter extends EventEmitter {
         try {
           const parsed = JSON.parse(line);
           this.handleBridgeMessage(gameId, parsed);
-        } catch (e) {
+        } catch {
           console.warn(`[LegacyAdapter] Non-JSON output from bridge:`, line.substring(0, 200));
         }
       }
@@ -227,6 +229,7 @@ export class LegacyGameAdapter extends EventEmitter {
         }
         // Update database status
         try {
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
           const db = (this.gameRepository as any).db;
           if (db && state.status === 'COMPLETED') {
             db.prepare(`UPDATE games SET status = 'ENDED', ended_at = ? WHERE id = ?`)
@@ -235,6 +238,7 @@ export class LegacyGameAdapter extends EventEmitter {
             db.prepare(`UPDATE games SET status = 'CANCELLED', ended_at = ? WHERE id = ?`)
               .run(Date.now(), gameId);
           }
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
         } catch (e: any) {
           console.error(`[LegacyAdapter] Failed to update game status: ${e?.message || e}`);
         }
@@ -308,6 +312,7 @@ export class LegacyGameAdapter extends EventEmitter {
         
         // Update database with winner, duration and completion
         try {
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
           const db = (this.gameRepository as any).db;
           if (db) {
             const winner = message.winner || 'UNKNOWN';
@@ -342,6 +347,7 @@ export class LegacyGameAdapter extends EventEmitter {
                 if (!u || !u.playerId || !u.provider || !u.model) continue;
                 try {
                   this.gameRepository.backfillPlayerModel(u.playerId, u.provider, u.model);
+                // eslint-disable-next-line @typescript-eslint/no-explicit-any
                 } catch (e: any) {
                   console.error(`[LegacyAdapter] Failed to backfill player model for ${u.playerId}: ${e?.message || e}`);
                 }
@@ -349,6 +355,7 @@ export class LegacyGameAdapter extends EventEmitter {
             }
             console.log(`[LegacyAdapter:${gameId}] Database updated: winner=${winner}, duration=${duration}ms`);
           }
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
         } catch (e: any) {
           console.error(`[LegacyAdapter] Failed to update game winner: ${e?.message || e}`);
         }
@@ -420,6 +427,7 @@ export class LegacyGameAdapter extends EventEmitter {
     roleModels: Record<string, string>,
   ): void {
     try {
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
       const db = (this.gameRepository as any).db;
       if (!db) return;
       const insert = db.prepare(`
@@ -445,6 +453,7 @@ export class LegacyGameAdapter extends EventEmitter {
           Date.now(),
         );
       }
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
     } catch (e: any) {
       console.error(`[LegacyAdapter] Failed to persist role model assignments: ${e?.message || e}`);
     }
@@ -478,6 +487,7 @@ export class LegacyGameAdapter extends EventEmitter {
     const hasPlayerUsage = !!usageByPlayer && Array.isArray(usageByPlayer) && usageByPlayer.length > 0;
     if (!hasUsage && !hasPlayerUsage) return;
 
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const db = (this.gameRepository as any).db;
     if (!db) return;
 
@@ -492,6 +502,7 @@ export class LegacyGameAdapter extends EventEmitter {
       for (const r of rows) {
         roleByModel.set(`${r.provider}/${r.model}`, r.role);
       }
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
     } catch (e: any) {
       console.error(`[LegacyAdapter] Failed to read role model assignments: ${e?.message || e}`);
     }
@@ -530,6 +541,7 @@ export class LegacyGameAdapter extends EventEmitter {
           u.cost || 0,
           now,
         );
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
       } catch (e: any) {
         console.error(`[LegacyAdapter] Failed to persist token usage: ${e?.message || e}`);
       }
@@ -546,6 +558,7 @@ export class LegacyGameAdapter extends EventEmitter {
           200,
           now,
         );
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
       } catch (e: any) {
         console.error(`[LegacyAdapter] Failed to persist api call: ${e?.message || e}`);
       }
@@ -563,6 +576,7 @@ export class LegacyGameAdapter extends EventEmitter {
           0,
           null,
         );
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
       } catch (e: any) {
         console.error(`[LegacyAdapter] Failed to persist player game stats: ${e?.message || e}`);
       }
@@ -590,6 +604,7 @@ export class LegacyGameAdapter extends EventEmitter {
             u.cost || 0,
             now,
           );
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
         } catch (e: any) {
           console.error(`[LegacyAdapter] Failed to persist per-player token usage: ${e?.message || e}`);
         }
@@ -606,6 +621,7 @@ export class LegacyGameAdapter extends EventEmitter {
             200,
             now,
           );
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
         } catch (e: any) {
           console.error(`[LegacyAdapter] Failed to persist per-player api call: ${e?.message || e}`);
         }
@@ -683,6 +699,7 @@ export class LegacyGameAdapter extends EventEmitter {
           model: model?.model,
         });
         persisted += 1;
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
       } catch (e: any) {
         console.error(`[LegacyAdapter] Failed to persist player ${playerId}: ${e?.message || e}`);
       }
@@ -868,8 +885,11 @@ export class LegacyGameAdapter extends EventEmitter {
     this.eventBus.publish(gameEvent);
     // Store event in repository for REST retrieval
     try {
+      // eslint-disable-next-line @typescript-eslint/no-unused-vars -- key-exclusion destructure: id/gameId/timestamp stay out of eventData
       const { id, gameId: _, timestamp, ...eventData } = gameEvent;
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
       this.gameRepository.addEvent(gameId, eventData as any);
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
     } catch (e: any) {
       console.error(`[LegacyAdapter] Failed to store event: ${e?.message || e}`);
     }
@@ -887,7 +907,7 @@ export class LegacyGameAdapter extends EventEmitter {
       // We could persist events through the repository,
       // but the legacy engine has its own game ID from the legacy side.
       // For now, just emit through the EventBus.
-    } catch (e) {
+    } catch {
       // Silently ignore - events still flow through EventBus
     }
   }
@@ -955,7 +975,7 @@ export class LegacyGameAdapter extends EventEmitter {
    * Stop all legacy games
    */
   stopAll(): void {
-    this.activeGames.forEach((state, gameId) => {
+    this.activeGames.forEach((state, _gameId) => {
       if (state.status === 'RUNNING') {
         state.process.kill('SIGTERM');
       }
