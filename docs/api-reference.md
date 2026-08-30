@@ -2,6 +2,8 @@
 
 The canonical API specification lives at **[`specs/api-specs.md`](../specs/api-specs.md)**.
 
+The DuckBrain sync-twin integration contract — per-tick /sync markers (`/sync/write-test-YYYY-MM-DD`, `/sync/last-run`), the mafia-benchmark namespace data-skill flow (POST `/api/memories`, X-API-Key auth), and the config/ vs event/ domain split — is documented in [`specs/sync-integration.md`](../specs/sync-integration.md).
+
 That document covers:
 
 - **Endpoints** — `/api/v1/games`, `/api/v1/players`, `/api/v1/agents`, `/api/v1/stats`, `/api/v1/benchmark`, `/api/v1/benchmark/report`, health checks
@@ -33,4 +35,5 @@ attributed to models that did not play. See [`specs/api-specs.md`](../specs/api-
 | [`specs/api-specs.md`](../specs/api-specs.md) | Full API reference & integration guide |
 | [`specs/benchmark-methodology.md`](../specs/benchmark-methodology.md) | Benchmark methodology |
 | [`specs/cli-interface.md`](../specs/cli-interface.md) | CLI tooling reference |
+| [`specs/sync-integration.md`](../specs/sync-integration.md) | Sync-twin (DuckBrain) integration contract — /sync markers, data-skill flow, domain split |
 | [`COST_TRACKING.md`](COST_TRACKING.md) | Token/cost tracking for benchmark runs |
