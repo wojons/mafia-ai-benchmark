@@ -186,14 +186,14 @@ See **[specs/correct-night-flow.md](specs/correct-night-flow.md)** for complete 
 | Command | Purpose | When to Use |
 | --- | --- | --- |
 | `pnpm --filter @mafia/server dev` | **Start server** | Run REST API + WebSocket |
-| `pnpm --filter @mafia/server test:run` | **Run tests** | Verify server tests (290) |
+| `pnpm --filter @mafia/server test:run` | **Run tests** | Verify server tests (298) |
 
 ### Root Commands
 
 ```bash
 pnpm install              # Install all dependencies
 pnpm build                # Build all packages (4/4)
-pnpm --filter @mafia/server test:run    # Server tests (290)
+pnpm --filter @mafia/server test:run    # Server tests (298)
 pnpm --filter @mafia/shared test:run    # Shared tests (410)
 pnpm --filter @mafia/web test:run       # Web tests (29)
 ```
@@ -236,12 +236,17 @@ mafia-ai-benchmark/
 
 ```bash
 # All tests from root
-pnpm --filter @mafia/server test:run   # Server (290 tests)
+pnpm --filter @mafia/server test:run   # Server (298 tests)
 pnpm --filter @mafia/shared test:run   # Shared (410 tests)
 pnpm --filter @mafia/web test:run      # Web (29 tests)
 ```
 
 **Test Coverage**: 835 tests (410 shared, 298 server, 98 CLI, 29 web)
+
+**Test counts are generated — don't hand-edit them.** Every test count in this
+README is produced from live vitest output by `pnpm test:counts`
+(`scripts/sync-test-counts.mjs`). Run it after adding or removing tests to
+regenerate all counts from the suites' own "Tests" summary lines.
 
 ### Game Events
 

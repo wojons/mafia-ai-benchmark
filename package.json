@@ -16,6 +16,7 @@
     "dev": "turbo run dev",
     "build": "turbo run build",
     "test": "turbo run test:run",
+    "test:counts": "node scripts/sync-test-counts.mjs",
     "lint": "turbo run lint",
     "format": "prettier --write \"**/*.{ts,tsx,json,md}\"",
     "server": "pnpm --filter @mafia/server dev",
