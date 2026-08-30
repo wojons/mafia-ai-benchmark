@@ -5,6 +5,7 @@ An advanced AI-powered Mafia game simulation that benchmarks different AI models
 ## ✨ Features
 
 - **🤖 AI Agents**: Autonomous players powered by LLMs (GPT-4o-mini, Claude, etc.)
+- **🔀 Multiple AI Providers**: Benchmark any OpenRouter model head-to-head per player — e.g. `benchmark --models openai/gpt-4o-mini,openai/gpt-4o` (see [FLEXIBLE_PLAYER_MODELS.md](FLEXIBLE_PLAYER_MODELS.md) and [PERSONALIZED_AI_MODELS.md](PERSONALIZED_AI_MODELS.md))
 - **🎭 Dynamic Personas**: Unique characters with diverse backgrounds, communication styles, and personalities
 - **🎛️ Full Configuration**: Control players, roles, messaging limits, AI models, and more
 - **🎯 Correct Game Flow**: Mafia team discussion with consensus (not single-turn votes)
@@ -41,6 +42,9 @@ pnpm --filter @mafia/server dev
 
 # 5. In another terminal, run a benchmark
 pnpm --filter @mafia/cli dev -- benchmark
+
+# Benchmark multiple models head-to-head (default: openai/gpt-4o-mini,openai/gpt-4o)
+pnpm --filter @mafia/cli dev -- benchmark --models openai/gpt-4o-mini,openai/gpt-4o
 ```
 
 ### What You'll See
@@ -304,7 +308,6 @@ Each game action is stored as an event with visibility levels:
 
 - **Pre-made Scenarios** - Test specific game states
 - **Persona Memory** - Characters remember past events
-- **Multiple AI Providers** - Claude, Gemini, Groq, etc.
 
 ## 📝 Notes
 
