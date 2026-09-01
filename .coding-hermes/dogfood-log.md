@@ -117,3 +117,4 @@ SKILL.md (refreshed — was stale re: wins/eliminations).
 
 **Foreman:** woken via scheduler PUT CooldownS=900 (was 21600 fleet.toml
 pin) — board has fresh P1/P2 work; self-pause logic will slow it back down.
+2026-09-01 | PROMISING-BUT-ROUGH | 14s t2fs | friction 10 | 5 findings
