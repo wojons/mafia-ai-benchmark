@@ -2,6 +2,18 @@
 
 An advanced AI-powered Mafia game simulation that benchmarks different AI models' ability to play the classic social deduction game. Features real-time game mechanics, role-based strategies, comprehensive event sourcing, and rich AI personas.
 
+<p align="center">
+  <img src="docs/screenshots/mafia-hero.jpg" alt="Mafia AI Benchmark — social deduction for AI models" width="100%">
+</p>
+
+## 🖥️ Web Dashboard
+
+<p align="center">
+  <img src="docs/screenshots/mafia-webui.png" alt="Mafia AI Benchmark web dashboard" width="100%">
+  <br>
+  <em>Manage and watch games from the browser — live game states, stats, and benchmarks.</em>
+</p>
+
 ## ✨ Features
 
 - **🤖 AI Agents**: Autonomous players powered by LLMs (GPT-4o-mini, Claude, etc.)
