@@ -133,6 +133,15 @@ export class GameRepository {
         : undefined;
     const winner = columnWinner ?? configWinner;
 
+    // DF-MAFIA-AI-BENCHMARK-4: a live game's phase must come from the
+    // event stream, never a hardcoded SETUP. addEvent() persists each
+    // event's metadata.phase/dayNumber/turnNumber into the events columns
+    // and getEvents() returns rows ORDER BY sequence, so the last event is
+    // the most recent phase transition. The ENDED -> GAME_OVER guard below
+    // is preserved; a zero-event IN_PROGRESS game falls back to SETUP with
+    // day/turn 1.
+    const lastEvent = events[events.length - 1];
+
     return {
       id: row.id as string,
       createdAt: new Date(row.created_at as number),
@@ -144,9 +153,14 @@ export class GameRepository {
       config: parsedConfig,
       currentState: {
         // MAF-GAP-044: an ENDED game's phase is GAME_OVER, never SETUP.
-        phase: row.status === 'ENDED' ? 'GAME_OVER' : 'SETUP',
-        dayNumber: 1,
-        turnNumber: 1,
+        // DF-MAFIA-AI-BENCHMARK-4: otherwise report the last event's phase
+        // (SETUP when the stream is empty) instead of freezing at SETUP.
+        phase:
+          row.status === 'ENDED'
+            ? 'GAME_OVER'
+            : (lastEvent?.metadata?.phase ?? 'SETUP'),
+        dayNumber: lastEvent?.metadata?.dayNumber ?? 1,
+        turnNumber: lastEvent?.metadata?.turnNumber ?? 1,
         timeRemaining: 0,
         activePlayers: playersWithDeaths.filter(p => p.isAlive).map(p => p.id),
         eliminatedPlayers,

@@ -392,4 +392,49 @@ describe('GET /api/v1/games/:gameId elimination state (MAF-GAP-044)', () => {
     expect(game.currentState.eliminatedPlayers).toEqual([]);
     expect(game.players.every((p: { isAlive: boolean }) => p.isAlive)).toBe(true);
   });
+
+  it('derives the live phase from the last phase event in the detail payload (DF-MAFIA-AI-BENCHMARK-4)', async () => {
+    repo.seedGame({
+      id: 'g-live-phase',
+      status: 'IN_PROGRESS',
+      players: [
+        { id: 'p1', name: 'Alice', role: 'MAFIA', isMafia: true, joinOrder: 0 },
+        { id: 'p2', name: 'Bob', role: 'VILLAGER', isMafia: false, joinOrder: 1 },
+      ],
+      events: [
+        {
+          type: 'ROLES_ASSIGNED',
+          data: {
+            assignments: [
+              { playerId: 'p1', role: 'MAFIA' },
+              { playerId: 'p2', role: 'VILLAGER' },
+            ],
+          },
+          phase: 'SETUP',
+          dayNumber: 1,
+          turnNumber: 1,
+        },
+        {
+          type: 'PHASE_CHANGED',
+          data: { from: 'SETUP', to: 'DAY_DISCUSSION' },
+          phase: 'DAY_DISCUSSION',
+          dayNumber: 2,
+          turnNumber: 4,
+        },
+      ],
+    });
+
+    const response = await fetch(`${baseUrl}/api/v1/games/g-live-phase`);
+    expect(response.status).toBe(200);
+    const body = await response.json();
+    expect(body.success).toBe(true);
+    const game = body.data;
+
+    // An IN_PROGRESS game whose last event carries phase DAY_DISCUSSION
+    // must report DAY_DISCUSSION — never the hardcoded SETUP.
+    expect(game.status).toBe('IN_PROGRESS');
+    expect(game.currentState.phase).toBe('DAY_DISCUSSION');
+    expect(game.currentState.dayNumber).toBe(2);
+    expect(game.currentState.turnNumber).toBe(4);
+  });
 });
