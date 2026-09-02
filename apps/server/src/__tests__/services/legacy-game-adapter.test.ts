@@ -1,8 +1,32 @@
-import { describe, it, expect, beforeEach } from 'vitest';
+import { describe, it, expect, beforeEach, vi } from 'vitest';
 import { LegacyGameAdapter } from '../../services/legacy-game-adapter.js';
 import { StatsCollector } from '../../services/stats-collector.js';
 import { createFakeEventBus, createFakeGameRepository, createSqliteBackedRepository } from './mocks.js';
 import type { GameEvent } from '@mafia/shared/events';
+
+/**
+ * DF-MAFIA-AI-BENCHMARK-2: intercept child_process.spawn so startGame() can
+ * be exercised without launching a real bridge process. Only
+ * legacy-game-adapter.ts imports child_process anywhere in this module
+ * graph, so the file-wide mock is safe.
+ */
+const spawnHarness = vi.hoisted(() => ({
+  spawnMock: vi.fn(() => {
+    const stub = () => ({ on: vi.fn(), once: vi.fn(), removeListener: vi.fn() });
+    return {
+      pid: 4242,
+      stdout: stub(),
+      stderr: stub(),
+      kill: vi.fn(),
+      on: vi.fn(),
+      once: vi.fn(),
+    };
+  }),
+}));
+
+vi.mock('child_process', () => ({
+  spawn: spawnHarness.spawnMock,
+}));
 
 describe('LegacyGameAdapter', () => {
   let eventBus: ReturnType<typeof createFakeEventBus>;
@@ -68,6 +92,87 @@ describe('LegacyGameAdapter', () => {
       const a1 = LegacyGameAdapter.getInstance(eb, r as any);
       const a2 = LegacyGameAdapter.getInstance(eb, r as any);
       expect(a1).toBe(a2);
+    });
+  });
+
+  // ==========================================================================
+  // startGame — child env sanitization (DF-MAFIA-AI-BENCHMARK-2)
+  // ==========================================================================
+
+  describe('startGame() child env sanitization (DF-MAFIA-AI-BENCHMARK-2)', () => {
+    function withEnv(
+      vars: Record<string, string | undefined>,
+      fn: () => void,
+    ): void {
+      const saved: Array<[string, string | undefined]> = [];
+      for (const [key, value] of Object.entries(vars)) {
+        saved.push([key, process.env[key]]);
+        if (value === undefined) delete process.env[key];
+        else process.env[key] = value;
+      }
+      try {
+        fn();
+      } finally {
+        for (const [key, value] of saved) {
+          if (value === undefined) delete process.env[key];
+          else process.env[key] = value;
+        }
+      }
+    }
+
+    it('does not leak stale host *_MODEL vars into the child env for roles not named in roleModels', () => {
+      spawnHarness.spawnMock.mockClear();
+      withEnv(
+        {
+          MAFIA_MODEL: 'stale/mafia-model',
+          VIGILANTE_MODEL: 'stale/vigilante-model',
+          VILLAGER_MODEL: undefined,
+          DOCTOR_MODEL: undefined,
+          DEFAULT_MODEL: undefined,
+        },
+        () => {
+          // Only TOWN is configured — no MAFIA / VIGILANTE keys. The stale
+          // host MAFIA_MODEL/VIGILANTE_MODEL must NOT reach the child.
+          adapter.startGame({
+            numPlayers: 5,
+            roleModels: { TOWN: 'openai/gpt-4o' },
+          });
+
+          expect(spawnHarness.spawnMock).toHaveBeenCalledTimes(1);
+          const env = spawnHarness.spawnMock.mock.calls[0][2].env as Record<string, string | undefined>;
+          expect(env.MAFIA_MODEL).toBeUndefined();
+          expect(env.VIGILANTE_MODEL).toBeUndefined();
+          expect(env.DOCTOR_MODEL).toBeUndefined();
+          // The TOWN -> VILLAGER_MODEL alias is still applied.
+          expect(env.VILLAGER_MODEL).toBe('openai/gpt-4o');
+        },
+      );
+    });
+
+    it('sets only the role keys present in roleModels and preserves the base env (API keys)', () => {
+      spawnHarness.spawnMock.mockClear();
+      withEnv(
+        {
+          MAFIA_MODEL: 'stale/mafia-model',
+          SHERIFF_MODEL: undefined,
+          VILLAGER_MODEL: undefined,
+          OPENAI_API_KEY: 'sk-test-base-key',
+        },
+        () => {
+          adapter.startGame({
+            numPlayers: 5,
+            roleModels: { MAFIA: 'openai/gpt-4o-mini', TOWN: 'openai/gpt-4o' },
+          });
+
+          expect(spawnHarness.spawnMock).toHaveBeenCalledTimes(1);
+          const env = spawnHarness.spawnMock.mock.calls[0][2].env as Record<string, string | undefined>;
+          expect(env.MAFIA_MODEL).toBe('openai/gpt-4o-mini');
+          expect(env.VILLAGER_MODEL).toBe('openai/gpt-4o');
+          // Stale SHERIFF var removed (not configured), base API key kept.
+          expect(env.SHERIFF_MODEL).toBeUndefined();
+          expect(env.OPENAI_API_KEY).toBe('sk-test-base-key');
+        },
+      );
     });
   });
 
@@ -1199,22 +1304,33 @@ describe('LegacyGameAdapter', () => {
 
       // Exactly what BenchmarkRunner.launchLegacyGame passes for the CLI's
       // DEFAULT_MODELS pair after the fix.
-      (sqliteAdapter as any).persistRoleModelAssignments('g-gap057', {
-        MAFIA: 'openai/gpt-4o-mini',
-        SHERIFF: 'openai/gpt-4o-mini',
-        TOWN: 'openai/gpt-4o',
-        DOCTOR: 'openai/gpt-4o',
-      });
+      const savedDefaultModel = process.env.DEFAULT_MODEL;
+      delete process.env.DEFAULT_MODEL;
+      try {
+        (sqliteAdapter as any).persistRoleModelAssignments('g-gap057', {
+          MAFIA: 'openai/gpt-4o-mini',
+          SHERIFF: 'openai/gpt-4o-mini',
+          TOWN: 'openai/gpt-4o',
+          DOCTOR: 'openai/gpt-4o',
+        });
+      } finally {
+        if (savedDefaultModel === undefined) delete process.env.DEFAULT_MODEL;
+        else process.env.DEFAULT_MODEL = savedDefaultModel;
+      }
 
       const rows = sqliteRepo.db.prepare(
         'SELECT role, provider, model FROM player_model_assignments WHERE game_id = ? ORDER BY role'
       ).all('g-gap057') as Array<Record<string, unknown>>;
-      expect(rows).toHaveLength(4);
+      // DF-MAFIA-AI-BENCHMARK-2: VIGILANTE is not named in roleModels, so a
+      // fallback row is persisted with the child's real resolution
+      // (DEFAULT_MODEL unset -> openai/gpt-4o-mini).
+      expect(rows).toHaveLength(5);
       expect(rows).toEqual(expect.arrayContaining([
         { role: 'MAFIA', provider: 'openai', model: 'openai/gpt-4o-mini' },
         { role: 'SHERIFF', provider: 'openai', model: 'openai/gpt-4o-mini' },
         { role: 'TOWN', provider: 'openai', model: 'openai/gpt-4o' },
         { role: 'DOCTOR', provider: 'openai', model: 'openai/gpt-4o' },
+        { role: 'VIGILANTE', provider: 'openai', model: 'openai/gpt-4o-mini' },
       ]));
       // No phantom bare-model rows.
       expect(rows.some(r => r.model === 'openai')).toBe(false);
@@ -1225,21 +1341,34 @@ describe('LegacyGameAdapter', () => {
       sqliteRepo.seedGame({ id: 'g-gap057-bare', status: 'IN_PROGRESS' });
       const sqliteAdapter = new LegacyGameAdapter(eventBus, sqliteRepo as any);
 
-      // Old code skipped these entirely (`if (!provider || !model) continue`),
-      // so no assignment row existed for that pairing side at all.
-      (sqliteAdapter as any).persistRoleModelAssignments('g-gap057-bare', {
-        MAFIA: 'qwen3.6-35b-fast',
-        TOWN: 'openai/gpt-4o-mini',
-      });
+      const savedDefaultModel = process.env.DEFAULT_MODEL;
+      delete process.env.DEFAULT_MODEL;
+      try {
+        // Old code skipped these entirely (`if (!provider || !model) continue`),
+        // so no assignment row existed for that pairing side at all.
+        (sqliteAdapter as any).persistRoleModelAssignments('g-gap057-bare', {
+          MAFIA: 'qwen3.6-35b-fast',
+          TOWN: 'openai/gpt-4o-mini',
+        });
+      } finally {
+        if (savedDefaultModel === undefined) delete process.env.DEFAULT_MODEL;
+        else process.env.DEFAULT_MODEL = savedDefaultModel;
+      }
 
       const rows = sqliteRepo.db.prepare(
         'SELECT role, provider, model FROM player_model_assignments WHERE game_id = ?'
       ).all('g-gap057-bare') as Array<Record<string, unknown>>;
-      expect(rows).toHaveLength(2);
+      // MAFIA (bare), TOWN, plus SHERIFF/DOCTOR/VIGILANTE fallback rows
+      // (DF-MAFIA-AI-BENCHMARK-2). VILLAGER is covered by the TOWN key.
+      expect(rows).toHaveLength(5);
       expect(rows).toEqual(expect.arrayContaining([
         { role: 'MAFIA', provider: 'qwen3.6-35b-fast', model: 'qwen3.6-35b-fast' },
         { role: 'TOWN', provider: 'openai', model: 'openai/gpt-4o-mini' },
+        { role: 'SHERIFF', provider: 'openai', model: 'openai/gpt-4o-mini' },
+        { role: 'DOCTOR', provider: 'openai', model: 'openai/gpt-4o-mini' },
+        { role: 'VIGILANTE', provider: 'openai', model: 'openai/gpt-4o-mini' },
       ]));
+      expect(rows.some(r => r.role === 'VILLAGER')).toBe(false);
     });
 
     it('end-to-end: done-message usage lands on the real model keys and the report shows avgTokens > 0 for both models', () => {
@@ -1268,6 +1397,11 @@ describe('LegacyGameAdapter', () => {
       // role-model assignment persistence startGame runs on config.roleModels.
       process.env.MAFIA_MODEL = 'openai/gpt-4o-mini';
       process.env.VILLAGER_MODEL = 'openai/gpt-4o';
+      // DF-MAFIA-AI-BENCHMARK-2: pin the fallback so the uncovered-role
+      // rows (SHERIFF/DOCTOR/VIGILANTE) land on a model already in the
+      // expected distinct set instead of the ambient host DEFAULT_MODEL.
+      const savedDefaultModel = process.env.DEFAULT_MODEL;
+      delete process.env.DEFAULT_MODEL;
       (sqliteAdapter as any).persistRoleModelAssignments('g-gap057-e2e', {
         MAFIA: 'openai/gpt-4o-mini',
         TOWN: 'openai/gpt-4o',
@@ -1308,6 +1442,8 @@ describe('LegacyGameAdapter', () => {
       } finally {
         delete process.env.MAFIA_MODEL;
         delete process.env.VILLAGER_MODEL;
+        if (savedDefaultModel === undefined) delete process.env.DEFAULT_MODEL;
+        else process.env.DEFAULT_MODEL = savedDefaultModel;
       }
 
       // Acceptance criterion 2: the report's modelPerformance shows
@@ -1324,6 +1460,98 @@ describe('LegacyGameAdapter', () => {
       expect(full.avgTokens).toBeGreaterThan(0);
       const phantom = report.modelPerformance.find((m: any) => m.provider === 'CUSTOM' && m.model === 'openai');
       expect(phantom).toBeUndefined();
+    });
+  });
+
+  describe('persistRoleModelAssignments() uncovered-role fallback (DF-MAFIA-AI-BENCHMARK-2)', () => {
+    it('persists a row for EVERY playable role, matching the model the child process resolves', () => {
+      const sqliteRepo = createSqliteBackedRepository();
+      sqliteRepo.seedGame({ id: 'g-df2-gap', status: 'IN_PROGRESS' });
+      const sqliteAdapter = new LegacyGameAdapter(eventBus, sqliteRepo as any);
+
+      // Benchmark-style partial split: MAFIA + town core (TOWN). SHERIFF,
+      // DOCTOR and VIGILANTE are not named — the child resolves them to
+      // DEFAULT_MODEL (game-engine.js ~752-794). The persistence must
+      // mirror that resolution, never a silent hole.
+      const savedDefaultModel = process.env.DEFAULT_MODEL;
+      process.env.DEFAULT_MODEL = 'anthropic/claude-3';
+      try {
+        (sqliteAdapter as any).persistRoleModelAssignments('g-df2-gap', {
+          MAFIA: 'openai/gpt-4o',
+          TOWN: 'openai/gpt-4o-mini',
+        });
+      } finally {
+        if (savedDefaultModel === undefined) delete process.env.DEFAULT_MODEL;
+        else process.env.DEFAULT_MODEL = savedDefaultModel;
+      }
+
+      const rows = sqliteRepo.db.prepare(
+        'SELECT role, provider, model FROM player_model_assignments WHERE game_id = ? ORDER BY role'
+      ).all('g-df2-gap') as Array<{ role: string; provider: string; model: string }>;
+
+      // All five roles the engine may run are covered: MAFIA + TOWN from
+      // roleModels (TOWN covers VILLAGER via the ROLE_ENV_MAP alias), and
+      // SHERIFF/DOCTOR/VIGILANTE from the child's DEFAULT_MODEL fallback.
+      expect(rows).toHaveLength(5);
+      const byRole = new Map(rows.map((r) => [r.role, r]));
+      expect(byRole.get('MAFIA')).toEqual({ role: 'MAFIA', provider: 'openai', model: 'openai/gpt-4o' });
+      expect(byRole.get('TOWN')).toEqual({ role: 'TOWN', provider: 'openai', model: 'openai/gpt-4o-mini' });
+      expect(byRole.get('SHERIFF')).toEqual({ role: 'SHERIFF', provider: 'anthropic', model: 'anthropic/claude-3' });
+      expect(byRole.get('DOCTOR')).toEqual({ role: 'DOCTOR', provider: 'anthropic', model: 'anthropic/claude-3' });
+      expect(byRole.get('VIGILANTE')).toEqual({ role: 'VIGILANTE', provider: 'anthropic', model: 'anthropic/claude-3' });
+      // VILLAGER is covered by TOWN — no duplicate row.
+      expect(byRole.has('VILLAGER')).toBe(false);
+    });
+
+    it('every playable role row matches the env the child would actually receive', () => {
+      // The persistence contract is: the row's model equals what the child
+      // resolves for that role after startGame's env sanitization. Sanitized
+      // child env = roleModels keys only + DEFAULT_MODEL inherited; run the
+      // real startGame (spawn mocked) and compare.
+      spawnHarness.spawnMock.mockClear();
+      const savedDefaultModel = process.env.DEFAULT_MODEL;
+      process.env.DEFAULT_MODEL = 'anthropic/claude-3';
+      const saved: Array<[string, string | undefined]> = [];
+      for (const key of ['MAFIA_MODEL', 'SHERIFF_MODEL', 'DOCTOR_MODEL', 'VILLAGER_MODEL', 'VIGILANTE_MODEL']) {
+        saved.push([key, process.env[key]]);
+        delete process.env[key];
+      }
+      try {
+        const sqliteRepo = createSqliteBackedRepository();
+        sqliteRepo.seedGame({ id: 'g-df2-env', status: 'IN_PROGRESS' });
+        const sqliteAdapter = new LegacyGameAdapter(eventBus, sqliteRepo as any);
+
+        sqliteAdapter.startGame({
+          numPlayers: 5,
+          roleModels: { MAFIA: 'openai/gpt-4o', TOWN: 'openai/gpt-4o-mini' },
+        });
+
+        const childEnv = spawnHarness.spawnMock.mock.calls[0][2].env as Record<string, string | undefined>;
+        expect(childEnv.MAFIA_MODEL).toBe('openai/gpt-4o');
+        expect(childEnv.VILLAGER_MODEL).toBe('openai/gpt-4o-mini');
+        expect(childEnv.SHERIFF_MODEL).toBeUndefined();
+        expect(childEnv.DOCTOR_MODEL).toBeUndefined();
+        expect(childEnv.VIGILANTE_MODEL).toBeUndefined();
+
+        // The persisted rows must resolve the same way the child does:
+        // roleModels for named roles, DEFAULT_MODEL for the rest.
+        const rows = sqliteRepo.db.prepare(
+          'SELECT role, provider, model FROM player_model_assignments WHERE game_id = ?'
+        ).all(sqliteAdapter.getActiveGames()[0]) as Array<{ role: string; provider: string; model: string }>;
+        const byRole = new Map(rows.map((r) => [r.role, r]));
+        expect(byRole.get('MAFIA')!.model).toBe('openai/gpt-4o');
+        expect(byRole.get('TOWN')!.model).toBe('openai/gpt-4o-mini');
+        for (const uncovered of ['SHERIFF', 'DOCTOR', 'VIGILANTE']) {
+          expect(byRole.get(uncovered)!.model).toBe('anthropic/claude-3');
+        }
+      } finally {
+        for (const [key, value] of saved) {
+          if (value === undefined) delete process.env[key];
+          else process.env[key] = value;
+        }
+        if (savedDefaultModel === undefined) delete process.env.DEFAULT_MODEL;
+        else process.env.DEFAULT_MODEL = savedDefaultModel;
+      }
     });
   });
 

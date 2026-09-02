@@ -137,6 +137,12 @@ export class LegacyGameAdapter extends EventEmitter {
       args.push('--config', JSON.stringify(config.gameConfig));
     }
     
+    // DF-MAFIA-AI-BENCHMARK-2: pass the ADAPTER's game id to the bridge so
+    // the usage collector can read the game's persisted
+    // player_model_assignments rows (written under this id) — the engine's
+    // internal game id differs and cannot key those rows.
+    args.push('--game-id', gameId);
+    
     console.log(`[LegacyAdapter] Starting legacy game ${gameId} with args:`, args);
     
     // Insert game into repository so foreign key constraints are satisfied for events
@@ -163,7 +169,24 @@ export class LegacyGameAdapter extends EventEmitter {
     }
     
     // Build environment with per-role model assignments
+    //
+    // DF-MAFIA-AI-BENCHMARK-2: the child env must not silently inherit
+    // stale host *_MODEL vars for roles the config does not name. The
+    // engine resolves a role's model from its env var when present and
+    // falls back to DEFAULT_MODEL otherwise (game-engine.js ~752-794);
+    // leaving an unrelated MAFIA_MODEL/DOCTOR_MODEL/... on the host would
+    // override that honest default for every game that omits the role —
+    // corrupting benchmark attribution. Start from the parent env, DELETE
+    // every role-model var (plus a literal '*' catch-all if the parent
+    // carried one), then set ONLY the role keys present in
+    // config.roleModels (preserving the TOWN -> VILLAGER_MODEL alias).
+    // Games configured with complete roleModels behave exactly as before;
+    // this only removes silent inheritance.
     const env: NodeJS.ProcessEnv = { ...process.env };
+    for (const envKey of Object.values(ROLE_ENV_MAP)) {
+      delete env[envKey];
+    }
+    delete env['*'];
     if (config.roleModels) {
       for (const [role, model] of Object.entries(config.roleModels)) {
         const envKey = ROLE_ENV_MAP[role.toUpperCase()];
@@ -420,6 +443,15 @@ export class LegacyGameAdapter extends EventEmitter {
    * normalizeModelKey collapses prefixed model strings to canonical
    * 'provider/model' keys at aggregation time.
    *
+   * DF-MAFIA-AI-BENCHMARK-2: close the roleModel gap — the engine may run
+   * MAFIA/SHERIFF/DOCTOR/VILLAGER/VIGILANTE, and a role absent from
+   * roleModels resolves in the child to DEFAULT_MODEL (game-engine.js
+   * ~752-794, PlayerModelConfig.getPlayerConfig default branch). Persist a
+   * fallback row for every such role with that same resolution, so
+   * player_model_assignments never has silent holes for playable roles
+   * ('TOWN' config keys cover VILLAGER via the ROLE_ENV_MAP alias and are
+   * not duplicated).
+   *
    * All writes are best-effort: a failure logs and never breaks game start.
    */
   private persistRoleModelAssignments(
@@ -452,6 +484,40 @@ export class LegacyGameAdapter extends EventEmitter {
           0,
           Date.now(),
         );
+      }
+
+      // Roles the engine may run that roleModels did not name: persist the
+      // exact fallback the child resolves (DEFAULT_MODEL || openai/gpt-4o-mini),
+      // so attribution for those players matches child-process reality.
+      const ENGINE_PLAYABLE_ROLES = ['MAFIA', 'SHERIFF', 'DOCTOR', 'VILLAGER', 'VIGILANTE'];
+      const isCovered = (role: string): boolean => {
+        const upper = role.toUpperCase();
+        return Object.keys(roleModels).some((key) => {
+          const k = key.toUpperCase();
+          return k === upper ||
+            (k === 'TOWN' && upper === 'VILLAGER') ||
+            (k === 'VILLAGER' && upper === 'TOWN');
+        });
+      };
+      const fallbackSpec = process.env.DEFAULT_MODEL || 'openai/gpt-4o-mini';
+      const fallbackSlashIdx = fallbackSpec.indexOf('/');
+      const fallbackProvider = fallbackSlashIdx === -1 ? fallbackSpec : fallbackSpec.slice(0, fallbackSlashIdx);
+      if (fallbackProvider) {
+        for (const role of ENGINE_PLAYABLE_ROLES) {
+          if (isCovered(role)) continue;
+          insert.run(
+            uuidv4(),
+            gameId,
+            'ALL',
+            role,
+            fallbackProvider,
+            fallbackSpec,
+            0.7,
+            500,
+            0,
+            Date.now(),
+          );
+        }
       }
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     } catch (e: any) {

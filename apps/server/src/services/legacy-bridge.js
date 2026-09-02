@@ -62,6 +62,11 @@ async function main() {
   let numPlayers = 5;
   let personaSeeds = null;
   let gameConfig = {};
+  // DF-MAFIA-AI-BENCHMARK-2: the ADAPTER's game id (the key the adapter
+  // persists player_model_assignments under). Passed to collectUsage so
+  // the config-derived fallback reads the game's real rows instead of
+  // this process's (sanitized) env vars.
+  let adapterGameId = null;
   
   for (let i = 0; i < args.length; i++) {
     if (args[i] === '--players' && args[i + 1]) {
@@ -75,6 +80,8 @@ async function main() {
         emit('error', { message: 'Invalid JSON config: ' + e.message });
         process.exit(1);
       }
+    } else if (args[i] === '--game-id' && args[i + 1]) {
+      adapterGameId = args[++i];
     }
   }
   
@@ -189,7 +196,7 @@ async function main() {
           timestamp: new Date().toISOString(),
           // MAF-GAP-012: real per-model usage aggregates from the engine's
           // in-memory trackers (populated from actual API responses).
-          usage: await collectUsage(game),
+          usage: await collectUsage(game, adapterGameId),
           // MAF-GAP-029: real per-player usage aggregates (same trackers,
           // per-player dimension kept).
           usageByPlayer,

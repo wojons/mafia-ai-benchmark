@@ -57,7 +57,53 @@ function collectLatencyByModel(game) {
   return latency;
 }
 
-async function collectUsage(game) {
+/**
+ * Read the game's persisted per-role model assignments
+ * (player_model_assignments) from the server DB
+ * (DF-MAFIA-AI-BENCHMARK-2).
+ *
+ * The rows are written by LegacyGameAdapter.startGame under the ADAPTER's
+ * game id (passed here via gameIdOverride through the bridge's --game-id
+ * arg), NOT the engine's internal game id. The DB path resolves exactly
+ * like the server's (process.env.DB_PATH || ./data/mafia.db relative to
+ * the bridge cwd).
+ *
+ * Best-effort and read-only: any failure (module missing, file absent,
+ * query error) returns [] so the caller falls through to the DEFAULT_MODEL
+ * fallback. Never creates or writes the DB file.
+ */
+function readPersistedAssignments(game, gameIdOverride) {
+  const gameId = gameIdOverride || (game && game.gameId);
+  if (!gameId) return [];
+  let db = null;
+  try {
+    // Lazy require so the module still loads where better-sqlite3 is not
+    // resolvable (the fallback only needs it when the trackers are absent).
+    // eslint-disable-next-line global-require
+    const Database = require('better-sqlite3');
+    const path = require('path');
+    const dbPath = process.env.DB_PATH || path.join(process.cwd(), 'data', 'mafia.db');
+    db = new Database(dbPath, { readonly: true, fileMustExist: true });
+    const rows = db
+      .prepare(
+        'SELECT role, provider, model FROM player_model_assignments WHERE game_id = ?'
+      )
+      .all(gameId);
+    return Array.isArray(rows) ? rows : [];
+  } catch (e) {
+    return [];
+  } finally {
+    if (db) {
+      try {
+        db.close();
+      } catch (e) {
+        // Best-effort close; nothing to do.
+      }
+    }
+  }
+}
+
+async function collectUsage(game, gameIdOverride) {
   const usage = [];
 
   // 1. CostTracker per-model state (authoritative totals when present).
@@ -142,27 +188,48 @@ async function collectUsage(game) {
     }
   }
 
-  // 3. Config-derived fallback: role models from the environment. These
-  //    carry no token/cost numbers (the engine did not track them), but
-  //    they are the REAL models that played, so the server can record
-  //    per-model rows with zero usage instead of nothing.
+  // 3. Config-derived fallback: the models the game actually ran, with
+  //    zero usage (the engine did not track numbers for them). These come
+  //    from the game's persisted player_model_assignments rows
+  //    (DF-MAFIA-AI-BENCHMARK-2) — the SAME rows LegacyGameAdapter wrote
+  //    at startGame from config.roleModels — NOT from this server's
+  //    process.env *_MODEL vars, which may be stale host leftovers that
+  //    never reached the child (the adapter sanitizes the child env).
+  //    Reading the rows keeps the fallback honest: it mirrors what the
+  //    child actually resolved, and the adapter's game id (gameIdOverride,
+  //    passed through the bridge's --game-id arg) is the key those rows
+  //    were written under.
   if (usage.length === 0) {
-    const roleModels = {
-      MAFIA: process.env.MAFIA_MODEL,
-      DOCTOR: process.env.DOCTOR_MODEL,
-      SHERIFF: process.env.SHERIFF_MODEL,
-      VIGILANTE: process.env.VIGILANTE_MODEL,
-      VILLAGER: process.env.VILLAGER_MODEL,
-    };
+    const rows = readPersistedAssignments(game, gameIdOverride);
     const seen = new Set();
-    for (const model of Object.values(roleModels)) {
-      if (!model || seen.has(model)) continue;
-      seen.add(model);
-      // MAF-GAP-057: mirror the engine's role-model resolution — derive
-      // the provider from the spec's first segment and keep the FULL
-      // spec as the model string when it carries a prefix, so these rows
-      // match the tracker-reported spelling ("openai/gpt-4o") instead of
-      // fragmenting into a second key ("gpt-4o").
+    for (const row of rows) {
+      if (!row || !row.model || seen.has(row.model)) continue;
+      seen.add(row.model);
+      // MAF-GAP-057: keep the FULL spec as the model string and derive the
+      // provider from the spec's first segment, so these rows match the
+      // tracker-reported spelling ("openai/gpt-4o") instead of fragmenting
+      // into a second key ("gpt-4o"). The stored provider column is used
+      // when present (same derivation, written by the adapter).
+      const slashIdx = row.model.indexOf('/');
+      const provider = row.provider || (slashIdx === -1 ? row.model : row.model.slice(0, slashIdx));
+      usage.push({
+        provider: provider || 'openai',
+        model: row.model,
+        promptTokens: 0,
+        completionTokens: 0,
+        totalTokens: 0,
+        cost: 0,
+        apiCalls: 0,
+        latencyMs: 0,
+      });
+    }
+    // No assignment rows: the whole game ran on the engine default
+    // (DEFAULT_MODEL || openai/gpt-4o-mini, game-engine.js ~752-794).
+    // Fall back to that default ONCE — never to arbitrary host *_MODEL
+    // vars, which would re-introduce exactly the contamination this
+    // collector is meant to be immune to.
+    if (usage.length === 0) {
+      const model = process.env.DEFAULT_MODEL || 'openai/gpt-4o-mini';
       const slashIdx = model.indexOf('/');
       const provider = slashIdx === -1 ? model : model.slice(0, slashIdx);
       usage.push({

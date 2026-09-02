@@ -9,14 +9,27 @@
  * surface as MafiaGame; no network, no child process.
  */
 
-import { describe, it, expect, beforeAll, afterEach } from 'vitest';
+import { describe, it, expect, beforeAll, afterAll, afterEach } from 'vitest';
+import Database from 'better-sqlite3';
+import fs from 'fs';
+import os from 'os';
+import path from 'path';
 
 let collector: any;
+
+// Hermetic by default: point the collector at a DB file that does not
+// exist so fallback tests never read the real apps/server/data/mafia.db.
+const hermeticDbPath = path.join(os.tmpdir(), `mafia-usage-collector-${Date.now()}.db`);
 
 beforeAll(async () => {
   // eslint-disable-next-line @typescript-eslint/ban-ts-comment
   // @ts-ignore - legacy CJS module without bundled types
   collector = await import('../../services/legacy-usage-collector.js');
+  process.env.DB_PATH = hermeticDbPath;
+});
+
+afterAll(() => {
+  delete process.env.DB_PATH;
 });
 
 afterEach(() => {
@@ -25,6 +38,9 @@ afterEach(() => {
   delete process.env.SHERIFF_MODEL;
   delete process.env.VIGILANTE_MODEL;
   delete process.env.VILLAGER_MODEL;
+  delete process.env.DEFAULT_MODEL;
+  // Restore the hermetic default after tests that pointed at a temp DB.
+  process.env.DB_PATH = hermeticDbPath;
 });
 
 function makeGame(overrides: Record<string, unknown> = {}) {
@@ -35,6 +51,47 @@ function makeGame(overrides: Record<string, unknown> = {}) {
     apiTracker: null,
     ...overrides,
   };
+}
+
+/** Create a temp SQLite file with a minimal player_model_assignments table. */
+function makeAssignmentDb(rows: Array<{ role: string; provider: string; model: string; gameId?: string }>): string {
+  const dbPath = path.join(os.tmpdir(), `mafia-usage-${Date.now()}-${Math.random().toString(36).slice(2, 8)}.db`);
+  const db = new Database(dbPath);
+  db.exec(`
+    CREATE TABLE player_model_assignments (
+      id TEXT PRIMARY KEY,
+      game_id TEXT NOT NULL,
+      player_id TEXT NOT NULL,
+      player_name TEXT,
+      role TEXT,
+      provider TEXT NOT NULL,
+      model TEXT NOT NULL
+    )
+  `);
+  const insert = db.prepare(
+    'INSERT INTO player_model_assignments (id, game_id, player_id, role, provider, model) VALUES (?, ?, ?, ?, ?, ?)'
+  );
+  for (const row of rows) {
+    insert.run(
+      `pma-${Math.random().toString(36).slice(2, 10)}`,
+      row.gameId ?? 'g1',
+      'ALL',
+      row.role,
+      row.provider,
+      row.model,
+    );
+  }
+  db.close();
+  return dbPath;
+}
+
+function cleanupDb(dbPath: string | undefined): void {
+  if (!dbPath) return;
+  try {
+    fs.unlinkSync(dbPath);
+  } catch (e) {
+    // Already gone — fine.
+  }
 }
 
 describe('collectUsage()', () => {
@@ -145,46 +202,88 @@ describe('collectUsage()', () => {
     expect(usage[0].apiCalls).toBe(3);
   });
 
-  it('falls back to env role models with zero usage when no trackers exist (honest zeros, real models)', async () => {
-    process.env.MAFIA_MODEL = 'openai/gpt-4o-mini';
-    process.env.VILLAGER_MODEL = 'anthropic/claude-3';
-
-    const usage = await collector.collectUsage(makeGame());
-    expect(usage).toHaveLength(2);
-    // MAF-GAP-057: prefixed specs keep the FULL spec as the model string
-    // (mirroring the engine's tracker spelling) — the provider comes from
-    // the spec's first segment. normalizeModelKey collapses this to the
-    // canonical 'openai/gpt-4o-mini' key at aggregation time.
-    const mafia = usage.find((u: any) => u.model === 'openai/gpt-4o-mini');
-    expect(mafia.provider).toBe('openai');
-    expect(mafia.totalTokens).toBe(0);
-    expect(mafia.cost).toBe(0);
-    expect(mafia.latencyMs).toBe(0);
+  it('derives fallback rows from persisted player_model_assignments, deduped by model (never from host *_MODEL vars)', async () => {
+    // DF-MAFIA-AI-BENCHMARK-2: the collector must mirror what the child
+    // actually ran — the persisted assignment rows — not this server's
+    // stale env vars. Two roles share one model: dedupe keeps one row.
+    const dbPath = makeAssignmentDb([
+      { role: 'MAFIA', provider: 'openai', model: 'openai/gpt-4o-mini' },
+      { role: 'VILLAGER', provider: 'openai', model: 'openai/gpt-4o-mini' },
+      { role: 'DOCTOR', provider: 'anthropic', model: 'anthropic/claude-3' },
+    ]);
+    process.env.DB_PATH = dbPath;
+    process.env.MAFIA_MODEL = 'stale/mafia-model';
+    process.env.VIGILANTE_MODEL = 'stale/vigilante-model';
+    try {
+      const usage = await collector.collectUsage(makeGame(), 'g1');
+      expect(usage).toHaveLength(2);
+      expect(usage.map((u: any) => u.model).sort()).toEqual(['anthropic/claude-3', 'openai/gpt-4o-mini']);
+      expect(usage.some((u: any) => u.model === 'stale/mafia-model')).toBe(false);
+      // MAF-GAP-057: prefixed specs keep the FULL spec as the model string
+      // (mirroring the engine's tracker spelling) — the provider comes from
+      // the spec's first segment / the stored column.
+      const mafia = usage.find((u: any) => u.model === 'openai/gpt-4o-mini');
+      expect(mafia.provider).toBe('openai');
+      expect(mafia.totalTokens).toBe(0);
+      expect(mafia.cost).toBe(0);
+      expect(mafia.latencyMs).toBe(0);
+    } finally {
+      delete process.env.DB_PATH;
+      cleanupDb(dbPath);
+    }
   });
 
   it('keeps the full spec as the model string for multi-segment role models (MAF-GAP-057)', async () => {
     // Regression: run d7647a7c recorded the second pairing side under a
     // phantom bare 'openai' model because the old split('/') destructure
     // truncated 'CUSTOM/openai/gpt-4o' -> {CUSTOM, openai}. The fallback
-    // must mirror the engine's lossless spelling instead.
-    process.env.MAFIA_MODEL = 'openai/gpt-4o-mini';
-    process.env.VILLAGER_MODEL = 'openai/gpt-4o';
-
-    const usage = await collector.collectUsage(makeGame());
-    expect(usage).toHaveLength(2);
-    const mini = usage.find((u: any) => u.model === 'openai/gpt-4o-mini');
-    const full = usage.find((u: any) => u.model === 'openai/gpt-4o');
-    expect(mini).toBeDefined();
-    expect(mini!.provider).toBe('openai');
-    expect(full).toBeDefined();
-    expect(full!.provider).toBe('openai');
-    // No phantom bare-name rows.
-    expect(usage.find((u: any) => u.model === 'openai')).toBeUndefined();
+    // must keep the lossless spelling from the persisted rows instead.
+    const dbPath = makeAssignmentDb([
+      { role: 'MAFIA', provider: 'CUSTOM', model: 'CUSTOM/openai/gpt-4o' },
+      { role: 'TOWN', provider: 'openai', model: 'openai/gpt-4o' },
+    ]);
+    process.env.DB_PATH = dbPath;
+    process.env.MAFIA_MODEL = 'stale/mafia-model';
+    try {
+      const usage = await collector.collectUsage(makeGame(), 'g1');
+      expect(usage).toHaveLength(2);
+      const full = usage.find((u: any) => u.model === 'CUSTOM/openai/gpt-4o');
+      const plain = usage.find((u: any) => u.model === 'openai/gpt-4o');
+      expect(full).toBeDefined();
+      expect(full!.provider).toBe('CUSTOM');
+      expect(plain).toBeDefined();
+      expect(plain!.provider).toBe('openai');
+      // No phantom bare-name rows.
+      expect(usage.find((u: any) => u.model === 'openai')).toBeUndefined();
+    } finally {
+      delete process.env.DB_PATH;
+      cleanupDb(dbPath);
+    }
   });
 
-  it('returns [] when there are no trackers and no env role models', async () => {
-    const usage = await collector.collectUsage(makeGame());
-    expect(usage).toEqual([]);
+  it('falls back to DEFAULT_MODEL once when no persisted assignment rows exist (never host *_MODEL vars)', async () => {
+    process.env.MAFIA_MODEL = 'stale/mafia-model';
+    process.env.DEFAULT_MODEL = 'openai/gpt-4o';
+    try {
+      // DB_PATH points at a nonexistent file (beforeAll default): no rows.
+      const usage = await collector.collectUsage(makeGame(), 'g1');
+      expect(usage).toHaveLength(1);
+      expect(usage[0].provider).toBe('openai');
+      expect(usage[0].model).toBe('openai/gpt-4o');
+      expect(usage[0].totalTokens).toBe(0);
+      expect(usage[0].cost).toBe(0);
+    } finally {
+      delete process.env.DEFAULT_MODEL;
+    }
+  });
+
+  it('uses the engine default (openai/gpt-4o-mini) when neither assignments nor DEFAULT_MODEL exist', async () => {
+    // Mirrors game-engine.js getPlayerModelConfig defaultModel resolution.
+    const usage = await collector.collectUsage(makeGame(), 'g1');
+    expect(usage).toHaveLength(1);
+    expect(usage[0].provider).toBe('openai');
+    expect(usage[0].model).toBe('openai/gpt-4o-mini');
+    expect(usage[0].totalTokens).toBe(0);
   });
 });
 

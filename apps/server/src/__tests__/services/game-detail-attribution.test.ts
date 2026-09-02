@@ -425,4 +425,49 @@ describe('GET /api/v1/games/:id per-player model attribution (MAF-GAP-029)', () 
       expect(p.apiCalls).toBe(0);
     }
   });
+
+  it('(j) known-role player with no assignment row stays undefined even when the ALL rows name a single model (DF-MAFIA-AI-BENCHMARK-2)', async () => {
+    // The engine may run a VIGILANTE even when the benchmark's roleModels
+    // never name one (the standard split is MAFIA/SHERIFF/TOWN/DOCTOR). A
+    // known-role player whose role has NO assignment row must stay honest
+    // undefined — never smeared onto the single-recorded-model fallback,
+    // which after env sanitization could be a stale/leaked host model.
+    repo.seedGame({
+      id: 'g-df2-vig',
+      status: 'ENDED',
+      events: [
+        {
+          type: 'ROLES_ASSIGNED',
+          data: {
+            assignments: [
+              { playerId: 'p1', role: 'MAFIA' },
+              { playerId: 'p2', role: 'VILLAGER' },
+              { playerId: 'p3', role: 'VIGILANTE' },
+            ],
+            mafiaTeam: ['p1'],
+          },
+        },
+      ],
+    });
+    // Assignments cover ONLY MAFIA and VILLAGER — VIGILANTE is absent.
+    insertAssignment(repo, { gameId: 'g-df2-vig', role: 'MAFIA', provider: 'provA', model: 'modelA' });
+    insertAssignment(repo, { gameId: 'g-df2-vig', role: 'VILLAGER', provider: 'provB', model: 'modelB' });
+    // The recorded 'ALL' rows name exactly ONE model — pre-fix this made
+    // the singleRecordedModel fallback defined, so an uncovered role could
+    // be smeared onto a model it never ran.
+    repo.insertTokenUsage({ gameId: 'g-df2-vig', playerId: 'ALL', turnNumber: 0, provider: 'provC', model: 'modelC', promptTokens: 1, completionTokens: 1, totalTokens: 100, cost: 0.001 });
+
+    await mount();
+    const players = await getPlayers('g-df2-vig');
+    const byId = new Map(players.map((p) => [p.id, p]));
+
+    // Covered roles resolve from their own assignments.
+    expect(byId.get('p1')).toMatchObject({ provider: 'provA', model: 'modelA' });
+    expect(byId.get('p2')).toMatchObject({ provider: 'provB', model: 'modelB' });
+    // The uncovered VIGILANTE stays undefined — never modelC.
+    expect(byId.get('p3').provider).toBeUndefined();
+    expect(byId.get('p3').model).toBeUndefined();
+    expect(byId.get('p3').tokensUsed).toBe(0);
+    expect(byId.get('p3').apiCalls).toBe(0);
+  });
 });
