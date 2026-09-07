@@ -27,9 +27,11 @@ const DEFAULT_MODELS = ['openai/gpt-4o-mini', 'openai/gpt-4o'];
 type RunStatus = 'QUEUED' | 'RUNNING' | 'COMPLETED' | 'CANCELLED' | 'FAILED';
 const TERMINAL: ReadonlySet<RunStatus> = new Set(['COMPLETED', 'CANCELLED', 'FAILED']);
 
-/** Max wall-clock time to wait for a run, in ms (10 min). Real LLM-driven
- * mafia games have been observed to take 2-6 minutes end-to-end. */
-const RUN_TIMEOUT_MS = 10 * 60 * 1000;
+/** Default max wall-clock time to wait for a run, in ms (30 min). Real
+ * LLM-driven 10-player mafia games have been observed to take ~13-14 min
+ * each (dogfood 2026-09-01), so a 2-game run needs ~27 min. Override with
+ * --timeout <minutes>; 0 waits indefinitely. */
+const DEFAULT_RUN_TIMEOUT_MS = 30 * 60 * 1000;
 /** Poll interval, in ms. */
 const POLL_INTERVAL_MS = 2000;
 /** Print a heartbeat status line when progress is stuck this long, in ms (~15s, 7-8 polls). */
@@ -106,6 +108,7 @@ export class BenchmarkCommand extends Command {
     this.option('--export <path>', 'Export results to file');
     this.option('--json', 'Output results as JSON');
     this.option('--server <url>', 'Server base URL (default: http://localhost:3004)');
+    this.option('--timeout <minutes>', 'Max minutes to wait for a fresh run (default: 30; 0 = wait indefinitely)');
 
     // Fresh-run options: POST a benchmark run and poll it to completion.
     this.addOption(new Option('-g, --games <n>', 'Run N fresh benchmark games (requires server POST /api/v1/benchmark)'));
@@ -119,7 +122,7 @@ export class BenchmarkCommand extends Command {
   }
 
   async run(): Promise<void> {
-    const { export: exportPath, json, server, games, models, parallel } = this.opts();
+    const { export: exportPath, json, server, games, models, parallel, timeout } = this.opts();
 
     const serverUrl = resolveServerUrl(server);
 
@@ -137,7 +140,7 @@ export class BenchmarkCommand extends Command {
       let report: BenchmarkReport;
 
       if (wantsRun) {
-        report = await this.runBenchmark(serverUrl, { games, models, json });
+        report = await this.runBenchmark(serverUrl, { games, models, json, timeout });
       } else {
         report = await this.fetchReport(serverUrl);
       }
@@ -170,7 +173,7 @@ export class BenchmarkCommand extends Command {
    */
   private async runBenchmark(
     serverUrl: string,
-    opts: { games?: string; models?: string; json?: boolean },
+    opts: { games?: string; models?: string; json?: boolean; timeout?: string },
   ): Promise<BenchmarkReport> {
     const modelList = opts.models
       ? opts.models.split(',').map((m) => m.trim()).filter(Boolean)
@@ -183,6 +186,10 @@ export class BenchmarkCommand extends Command {
     const gamesPerPairing = opts.games !== undefined
       ? this.parseGames(opts.games)
       : 2;
+
+    // Validate the wait timeout up front (before any server call) so a bad
+    // --timeout fails fast with a clear message (DF-MAFIA-AI-BENCHMARK-1).
+    const runTimeoutMs = this.resolveRunTimeoutMs(opts.timeout);
 
     const config = {
       models: modelList,
@@ -220,7 +227,7 @@ export class BenchmarkCommand extends Command {
 
     // Poll the run status.
     const statusUrl = `${serverUrl}/api/v1/benchmark/runs/${runId}`;
-    const deadline = Date.now() + RUN_TIMEOUT_MS;
+    const deadline = runTimeoutMs === 0 ? Infinity : Date.now() + runTimeoutMs;
     const runStartedAt = Date.now();
     let lastCompleted = -1;
     let lastHeartbeatAt = 0;
@@ -270,7 +277,8 @@ export class BenchmarkCommand extends Command {
     }
 
     if (!TERMINAL.has(progress.status)) {
-      throw new Error(`Benchmark run ${runId} did not finish within ${Math.round(RUN_TIMEOUT_MS / 1000)}s (last status: ${progress.status}). The server may still be processing it; check 'mafiactl benchmark --json' later.`);
+      const timeoutLabel = runTimeoutMs === 0 ? 'unlimited' : `${Math.round(runTimeoutMs / 1000)}s`;
+      throw new Error(`Benchmark run ${runId} did not finish within ${timeoutLabel} (last status: ${progress.status}). The server may still be processing it; check 'mafiactl benchmark --json' later, or re-run with a larger --timeout.`);
     }
 
     console.log('');
@@ -296,6 +304,18 @@ export class BenchmarkCommand extends Command {
       throw new Error(`--games must be a positive integer, got "${raw}".`);
     }
     return n;
+  }
+
+  /** Resolve the run wait timeout from --timeout <minutes> (default 30; 0 = wait indefinitely). */
+  private resolveRunTimeoutMs(raw?: string): number {
+    if (raw === undefined) {
+      return DEFAULT_RUN_TIMEOUT_MS;
+    }
+    const n = Number(raw);
+    if (!Number.isFinite(n) || n < 0) {
+      throw new Error(`--timeout must be a non-negative number of minutes, got "${raw}".`);
+    }
+    return Math.round(n * 60 * 1000);
   }
 
   private sleep(ms: number): Promise<void> {

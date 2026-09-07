@@ -115,6 +115,21 @@ describe('benchmark --help (parse level)', () => {
       expect(stdout).toContain('--models');
       // --parallel stays accepted (backward compat) and visible.
       expect(stdout).toContain('--parallel');
+      // Run-wait timeout is configurable (DF-MAFIA-AI-BENCHMARK-1: 10-min
+      // hardcoded cap killed documented 2-game runs; default now 30 min).
+      expect(stdout).toContain('--timeout');
+    },
+    90000
+  );
+
+  it(
+    'rejects a negative --timeout with a clear error',
+    async () => {
+      const cwd = makeTempCwd();
+      const { stdout, stderr, code } = await runCli(cwd, ['benchmark', '--games', '1', '--models', 'openai/gpt-4o-mini,openai/gpt-4o', '--timeout', '-5', '--server', 'http://localhost:1']);
+      expect(code).toBe(1);
+      expect(stderr).toContain('--timeout must be a non-negative number of minutes');
+      expect(stdout).not.toContain('Run started');
     },
     90000
   );

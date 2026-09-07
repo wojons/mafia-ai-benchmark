@@ -74,7 +74,14 @@ program.on('--help', () => {
 
 async function main(): Promise<void> {
   try {
-    await program.parseAsync(process.argv);
+    // pnpm run/exec inserts a literal "--" separator before the script's args
+    // (e.g. `pnpm --filter @mafia/cli dev -- benchmark --server <url>` arrives
+    // as argv [..., "--", "benchmark", "--server", "<url>"]). Commander treats
+    // "--" as end-of-options and silently drops every flag after it, so the
+    // documented invocation loses --server/--games/--models/--timeout
+    // (DF-MAFIA-AI-BENCHMARK-3). Strip the separator before parsing.
+    const argv = process.argv.filter((arg) => arg !== '--');
+    await program.parseAsync(argv);
   } catch (error) {
     console.error('\n❌ Fatal error:', error instanceof Error ? error.message : error);
     process.exit(1);
