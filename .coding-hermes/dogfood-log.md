@@ -116,7 +116,8 @@ docs/dogfood/diagnostics.md (appended), .opencode/skills/mafia-usage/
 SKILL.md (refreshed — was stale re: wins/eliminations).
 
 **Foreman:** woken via scheduler PUT CooldownS=900 (was 21600 fleet.toml
-pin) — board has fresh P1/P2 work; self-pause logic will slow it back down.
+pin) — board has fresh P1/P2 work; self-pause logic will slow it back down.| 2026-09-09 | PROMISING-BUT-ROUGH | "Benchmark AI models' Mafia-playing ability via mafiactl / API :3004 / web :5174 with per-model win/cost stats" | (1) /benchmark/compare winRate 3.82 (382%) live — wins SUM over player rows vs COUNT(DISTINCT game_id), P0 reconfirmed 3rd cycle (DF-2 reopened); (2) DF-3 closure false — 18 benchmark_runs stuck RUNNING across server restart, no startup sweep (reopened P0); (3) fresh-install direct-run path broken ×3 (no `pnpm build` in QUICK_START, no data dir mkdir, cwd-relative path) — bunker-verified, game ENDED winner=TOWN 99s after manual repairs (DF-6) | clone→first game ~6 min incl. 3 undocumented repairs; pure install+build 32 s |
+
 2026-09-01 | PROMISING-BUT-ROUGH | 14s t2fs | friction 10 | 5 findings
 2026-09-04 | PROMISING-BUT-ROUGH | 43s t2fs | friction 9 | 5 findings
 

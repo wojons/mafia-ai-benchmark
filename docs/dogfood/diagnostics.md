@@ -260,3 +260,76 @@ MAF-GAP-057.
   `data` (not wrapped) — consistent with the list, fine once known.
 - The in-repo usage skill (.opencode/skills/mafia-usage) was stale about
   wins/eliminations — refreshed this run; keep it in sync with the board.
+
+---
+
+## 2026-09-09 — Fresh-install leg (why this run looked different)
+
+**How this project is built (the 60-second map).** A pnpm monorepo where
+the code that actually plays games is the legacy engine `game-engine.js`
+(5,303 lines, root) driven by `apps/server/src/services/legacy-game-adapter.ts`
+— every live game has `engineType:"legacy"`. The `apps/server/src/services/
+game-engine.ts` "new engine" is a create/join/roles shell that no live game
+uses, but it is the only writer of the `games.winner` column (a fact that
+caused several of the old report bugs). Stats live in
+`apps/server/src/services/stats-collector/` — `models.ts` holds
+`getCompareReport` (the /benchmark/compare endpoint). The CLI
+(`apps/cli`) is a thin commander client over the HTTP API; through
+`pnpm --filter` invocations a literal `--` reaches `main()` and is stripped
+there (`apps/cli/src/index.ts:83`) since dd63a31.
+
+**This run's method: prove installability, not runtime.** Runtime on the
+fleet stack was already known-good. The open question was the documented
+install path, tested in an ephemeral bunker agent (bare Debian 13, Node
+installed by hand per the docs' own prerequisites): clone the PUBLIC
+GitHub origin (works — no creds, no visibility changes), `pnpm install`
+(17 s), then exactly the QUICK_START steps. Three undocumented breakers
+followed, all in the direct-run path:
+
+1. `Cannot find module '@mafia/shared/dist/fsm/index.js'` — the workspace
+   package's main points at `dist/`, so tsx cannot run the server until
+   `pnpm build` has produced it. QUICK_START omits the build; README's
+   TL;DR has it. Lesson: when a monorepo package publishes `dist` as its
+   entry, every "run from source" doc must either build first or map to
+   src.
+2. `Cannot open database because the directory does not exist` —
+   better-sqlite3 throws unless `dirname(dbPath)` exists; `./data/mafia.db`
+   is created by nothing on a fresh clone. The Docker path masks this
+   (volume + WORKDIR), which is why CI never saw it. Lesson: any file
+   open should `mkdirSync(dirname, {recursive:true})` first — the
+   DB-open crash class is invisible to anyone who only tests via compose.
+3. The `./data` path is cwd-relative and the root `server` script sets
+   cwd to `apps/server` — so the dir that must exist is `apps/server/data`.
+   `mkdir data` at the repo root (the natural user guess) does nothing and
+   produces the same error. Lesson: relative paths in servers should be
+   resolved from a documented anchor, or the docs must state the anchor.
+
+After the three manual repairs, the full documented happy path worked
+FIRST TRY: server healthy, `run-game --players 5 --yes` exit 0, real LLM
+game ENDED in ~99 s, winner/roles/won correct via API, 12/12 non-empty
+SAYS dialogue, sane stats on a near-empty DB (no fabricated fallback —
+the MAF-GAP-012 trap stays closed).
+
+**Errors hit on the fleet stack while verifying board claims.**
+- `/api/v1/benchmark/compare` returned winRate 3.82/4.45 — the DF-2 P0 is
+  alive at HEAD (SUM over player rows vs COUNT(DISTINCT game_id)). It has
+  survived three dogfood cycles because fixes kept landing in the CLI
+  while the defect lives in the server's stats collector.
+- `benchmark_runs` carried 18 RUNNING rows all stale >30 min across a
+  server restart — proof that the run lifecycle is event-subscription
+  bound, not durable. The 09-07 "complete" row cited a commit that only
+  touched apps/cli; QA's false-completion challenge was right. Lesson:
+  closure citations must name a commit whose diff plausibly covers the
+  row's defect; reviewers (us, this run) must diff-check the citation
+  before accepting closure.
+- Deploy-lag lesson: the 08-25 live image ALREADY contains MAF-GAP-056
+  (detail returns winner/won) while the repo's own skill said otherwise —
+  docs rot faster than code here; that's why the skill got refreshed.
+
+**The right way (for the next agent/user):** fresh machine → install
+Node 20 + pnpm → `pnpm install && pnpm build` → `mkdir -p apps/server/data`
+→ `pnpm run server` → `pnpm --filter @mafia/cli dev -- run-game --players
+5 --yes`. Or use docker compose (the only path that needs zero repairs),
+which the docs currently never mention. Verify with
+`curl -s localhost:3004/api/v1/stats` and expect `winRate ≤ 1.0` on any
+per-model row you read — if you see more, you are looking at DF-2.
