@@ -75,3 +75,7 @@ mafia.config.json
 .coding-hermes/board/board.db.wal
 .coding-hermes/board/*.parquet
 .coding-hermes/board/*.duckdb
+.gitreins/config.yaml.bak
+.gitreins/usage.jsonl
+.gitreins/logs/
+.gitreins/qa-ledger.jsonl
