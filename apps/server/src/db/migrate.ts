@@ -23,6 +23,12 @@ export class DatabaseMigrator {
   private schemaPath: string;
   
   constructor(dbPath: string = ':memory:') {
+    // Fresh clones have no data/ dir (gitignored): better-sqlite3 throws
+    // "directory does not exist" unless we create the parent first.
+    // ':memory:' and bare filenames (dirname '.') need no directory.
+    if (dbPath !== ':memory:' && path.dirname(dbPath) !== '.') {
+      fs.mkdirSync(path.dirname(dbPath), { recursive: true });
+    }
     this.db = new Database(dbPath);
     this.db.pragma('journal_mode = WAL');
     this.schemaPath = path.join(__dirname, '..', '..', 'src', 'db', 'schema.sql');

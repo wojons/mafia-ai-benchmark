@@ -24,6 +24,11 @@ cd mafia-ai-benchmark
 # Install dependencies (all workspaces)
 pnpm install
 
+# Build all workspaces — the server imports @mafia/shared from its built
+# dist/ output, so this is required before the first `pnpm run server`
+# (and again after pulling changes that touch packages/shared)
+pnpm build
+
 # Set your API key — `>>` appends so any existing keys (MODEL, OPENAI_BASE_URL, ...)
 # are preserved. `cp .env.sample .env` gives you the full template to edit instead.
 echo 'OPENAI_API_KEY=sk-or-v1-YOUR-ACTUAL-KEY-HERE' >> .env

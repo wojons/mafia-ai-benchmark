@@ -1,5 +1,8 @@
-import { describe, it, expect, beforeEach } from 'vitest';
+import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import { DatabaseMigrator } from '../../db/migrate.js';
+import fs from 'fs';
+import os from 'os';
+import path from 'path';
 
 /**
  * MAF-GAP-005: legacy terminal STATE_CHANGE events were stored with type
@@ -59,5 +62,38 @@ describe('DatabaseMigrator — MAF-GAP-005 terminal event backfill', () => {
     migrator.initialize();
     expect(typeOf('e5')).toBe('GAME_ENDED');
     expect(typeOf('e6')).toBe('GAME_STARTED');
+  });
+});
+
+/**
+ * DF-MAFIA-AI-BENCHMARK-6: a fresh clone has no data/ dir (gitignored), so
+ * better-sqlite3 used to throw "Cannot open database because the directory
+ * does not exist". The migrator now creates the parent directory itself.
+ */
+describe('DatabaseMigrator — auto-creates missing DB directory', () => {
+  let tmpBase: string;
+  let migrator: DatabaseMigrator;
+
+  beforeEach(() => {
+    tmpBase = fs.mkdtempSync(path.join(os.tmpdir(), 'mafia-migrator-'));
+  });
+
+  afterEach(() => {
+    migrator?.close();
+    fs.rmSync(tmpBase, { recursive: true, force: true });
+  });
+
+  it('creates a nested missing directory and initializes successfully', () => {
+    const dbPath = path.join(tmpBase, 'nested', 'test.db');
+    migrator = new DatabaseMigrator(dbPath);
+    const result = migrator.initialize();
+    expect(result.success).toBe(true);
+    expect(fs.existsSync(dbPath)).toBe(true);
+  });
+
+  it('still initializes successfully with :memory:', () => {
+    migrator = new DatabaseMigrator(':memory:');
+    const result = migrator.initialize();
+    expect(result.success).toBe(true);
   });
 });
