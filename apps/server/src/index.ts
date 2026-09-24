@@ -73,6 +73,20 @@ async function main(): Promise<void> {
   bootstrapContext.benchmarkRunner = benchmarkRunner;
   const context: ServerContext = bootstrapContext;
 
+  // Recover benchmark runs stranded by a previous shutdown before serving
+  // traffic: run completion normally depends on in-process event
+  // subscriptions, which die with the process. This inspects persisted
+  // QUEUED/RUNNING runs and reconciles only runs whose durable game rows
+  // prove them terminal (durable-DB-evidence policy — see
+  // BenchmarkRunner.reconcileStrandedRuns). Idempotent: a second pass finds
+  // nothing to do. A genuinely active run is preserved as-is.
+  const reconcileSummary = benchmarkRunner.reconcileStrandedRuns();
+  console.log(
+    'Benchmark run reconciliation: ' +
+      `${reconcileSummary.reconciled} recovered, ${reconcileSummary.leftActive} left active, ` +
+      `${reconcileSummary.inspected} inspected`,
+  );
+
   const app = express();
   const httpServer = createServer(app);
 

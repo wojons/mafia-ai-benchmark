@@ -389,4 +389,168 @@ describe('BenchmarkRunner', () => {
       });
     });
   });
+
+  // ==========================================================================
+  // Startup reconciliation of stranded runs (QA-MAFIA-AI-BENCHMARK-2)
+  //
+  // Live finding: benchmark_runs marked RUNNING (or left QUEUED) survive a
+  // server restart forever, because the only thing that ever flips them to a
+  // terminal status is the in-process EventBus subscription installed by
+  // launchGame(). After a restart those subscriptions are gone and there is
+  // no way to re-attach (the engine has no durable claim of ownership), so
+  // the rows stay RUNNING forever.
+  //
+  // Policy (durable DB evidence only — never process state):
+  //   - every benchmark_games row has completed_at or error  -> the run's
+  //     games all reached a terminal state, so the run is COMPLETED (or
+  //     FAILED when at least one game recorded an error) and completed_at /
+  //     summary are persisted;
+  //   - every game is terminal AND at least one game recorded an error ->
+  //     FAILED;
+  //   - any non-terminal game row remains -> the run may genuinely still be
+  //     in flight, so it stays untouched (RUNNING stays RUNNING, QUEUED
+  //     stays QUEUED).
+  // ==========================================================================
+
+  describe('run recovery (reconcileStrandedRuns)', () => {
+    /** Seed one stranded run with the given games. */
+    function seedStrandedRun(
+      runId: string,
+      status: 'QUEUED' | 'RUNNING',
+      games: Array<{
+        game_id: string;
+        completed_at?: number | null;
+        error?: string | null;
+        winner?: string | null;
+      }>,
+    ): void {
+      repo.insertBenchmarkRun({
+        id: runId,
+        config: { models: ['openai/model-a', 'openai/model-b'], gamesPerPairing: games.length, numPlayers: 10 },
+        status,
+        created_at: 1_700_000_000_000,
+      });
+      for (const g of games) {
+        // benchmark_games.game_id has a FK to games.id — create the parent
+        // game row first (a benchmark game IS a game in the games table).
+        (repo as any).db
+          .prepare(
+            `INSERT OR IGNORE INTO games (id, status, config, created_at, started_at, ended_at, winner)
+             VALUES (?, ?, ?, ?, ?, ?, ?)`,
+          )
+          .run(
+            g.game_id,
+            g.completed_at || g.error ? 'ENDED' : 'IN_PROGRESS',
+            JSON.stringify({ numPlayers: 10 }),
+            1_700_000_000_000,
+            1_700_000_000_000,
+            g.completed_at ?? null,
+            g.winner ?? null,
+          );
+        repo.insertBenchmarkGame({
+          game_id: g.game_id,
+          run_id: runId,
+          pairing_id: 'openai/model-a__vs__openai/model-b',
+          model_a: 'openai/model-a',
+          model_b: 'openai/model-b',
+          seed: 0,
+          model_a_role: 'VILLAGER',
+          model_b_role: 'VILLAGER',
+          winner: g.winner ?? null,
+          completed_at: g.completed_at ?? null,
+        });
+        if (g.error) {
+          // The mock insert helper has no error column, so set it directly —
+          // same table the production runner reads.
+          (repo as any).db
+            .prepare('UPDATE benchmark_games SET error = ? WHERE game_id = ?')
+            .run(g.error, g.game_id);
+        }
+      }
+    }
+
+    it('marks a RUNNING run with every game terminal as COMPLETED', () => {
+      seedStrandedRun('run-all-done', 'RUNNING', [
+        { game_id: 'g-done-1', completed_at: 1_700_000_100_000, winner: 'MAFIA' },
+        { game_id: 'g-done-2', completed_at: 1_700_000_200_000, winner: 'TOWN' },
+      ]);
+
+      const summary = runner.reconcileStrandedRuns();
+
+      expect(summary.reconciled).toBe(1);
+      const status = runner.getStatus('run-all-done')!;
+      expect(status.status).toBe('COMPLETED');
+      expect(status.completedAt).not.toBeNull();
+      // Summary is persisted from durable game evidence.
+      expect(status.summary).toMatchObject({ totalGames: 2, completedGames: 2, failedGames: 0 });
+    });
+
+    it('also reconciles a stranded QUEUED run whose games are all terminal', () => {
+      seedStrandedRun('run-queued-done', 'QUEUED', [
+        { game_id: 'g-q-done', completed_at: 1_700_000_050_000, winner: 'TOWN' },
+      ]);
+
+      const summary = runner.reconcileStrandedRuns();
+
+      expect(summary.reconciled).toBe(1);
+      expect(runner.getStatus('run-queued-done')!.status).toBe('COMPLETED');
+    });
+
+    it('marks a run with a terminal error evidence as FAILED and persists the error', () => {
+      seedStrandedRun('run-failed', 'RUNNING', [
+        { game_id: 'g-fail-1', completed_at: 1_700_000_100_000, winner: 'MAFIA' },
+        { game_id: 'g-fail-2', error: 'provider exploded' },
+      ]);
+
+      const summary = runner.reconcileStrandedRuns();
+
+      expect(summary.reconciled).toBe(1);
+      const status = runner.getStatus('run-failed')!;
+      expect(status.status).toBe('FAILED');
+      expect(status.completedAt).not.toBeNull();
+      expect(status.error).toContain('provider exploded');
+      expect(status.summary).toMatchObject({ totalGames: 2, completedGames: 1, failedGames: 1 });
+    });
+
+    it('leaves a run with an unfinished game untouched (genuinely active)', () => {
+      seedStrandedRun('run-active', 'RUNNING', [
+        { game_id: 'g-done', completed_at: 1_700_000_100_000, winner: 'MAFIA' },
+        { game_id: 'g-live', completed_at: null },
+      ]);
+
+      const summary = runner.reconcileStrandedRuns();
+
+      expect(summary.reconciled).toBe(0);
+      const status = runner.getStatus('run-active')!;
+      expect(status.status).toBe('RUNNING');
+      expect(status.completedAt).toBeNull();
+      expect(status.summary).toBeNull();
+    });
+
+    it('is idempotent: reconciling twice reconciles nothing new', () => {
+      seedStrandedRun('run-once', 'RUNNING', [
+        { game_id: 'g-once', completed_at: 1_700_000_100_000, winner: 'TOWN' },
+      ]);
+
+      const first = runner.reconcileStrandedRuns();
+      expect(first.reconciled).toBe(1);
+
+      const second = runner.reconcileStrandedRuns();
+      expect(second.reconciled).toBe(0);
+      expect(runner.getStatus('run-once')!.status).toBe('COMPLETED');
+    });
+
+    it('ignores runs that are already terminal', () => {
+      seedStrandedRun('run-already', 'RUNNING', [
+        { game_id: 'g-already', completed_at: 1_700_000_100_000, winner: 'TOWN' },
+      ]);
+      (repo as any).db
+        .prepare("UPDATE benchmark_runs SET status = 'CANCELLED' WHERE id = 'run-already'")
+        .run();
+
+      const summary = runner.reconcileStrandedRuns();
+      expect(summary.reconciled).toBe(0);
+      expect(runner.getStatus('run-already')!.status).toBe('CANCELLED');
+    });
+  });
 });

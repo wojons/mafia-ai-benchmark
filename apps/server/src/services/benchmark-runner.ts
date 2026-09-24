@@ -68,6 +68,16 @@ export interface BenchmarkProgress {
   }>;
 }
 
+/** Aggregate result of one pass of {@link BenchmarkRunner.reconcileStrandedRuns}. */
+export interface ReconcileSummary {
+  /** Persisted QUEUED/RUNNING runs inspected. */
+  inspected: number;
+  /** Stranded runs flipped to a terminal status this pass. */
+  reconciled: number;
+  /** Stranded runs that could NOT be proven terminal (left untouched). */
+  leftActive: number;
+}
+
 interface BenchmarkRunRow {
   id: string;
   config: string;
@@ -295,6 +305,128 @@ export class BenchmarkRunner {
           .get(row.id) as { count: number }
       ).count,
     }));
+  }
+
+  /**
+   * Reconcile persisted QUEUED/RUNNING runs whose games are provably
+   * terminal, recovering runs stranded by a server restart.
+   *
+   * WHY THIS EXISTS (QA-MAFIA-AI-BENCHMARK-2): a run's terminal status is
+   * normally written by the in-process EventBus subscription installed in
+   * launchGame() — the subscription dies with the process and cannot be
+   * re-attached after a restart, so any run that was QUEUED/RUNNING at that
+   * moment stays non-terminal forever. This method is the durable-evidence
+   * fallback, safe to call at every server startup.
+   *
+   * OWNERSHIP POLICY — durable DB evidence only, never process state:
+   * process state (event subscriptions, in-memory engines, timers) is gone
+   * after a restart and proves nothing; the policy below therefore reads
+   * only persisted rows.
+   *
+   * A non-terminal run (QUEUED/RUNNING) is reconciled ONLY when the durable
+   * evidence proves it terminal:
+   *   1. Every benchmark_games row has completed_at or error — the games all
+   *      reached a terminal state, so the run is terminal too:
+   *        - any game error  -> FAILED (error + completed_at persisted;
+   *          see reconcileTerminalRun),
+   *        - otherwise       -> COMPLETED (summary + completed_at persisted).
+   *   2. Any other shape is NOT conclusive and the run is left untouched:
+   *      games without completed_at/error may genuinely still be in flight
+   *      (a live run keeps its RUNNING status, a not-yet-launched QUEUED run
+   *      stays QUEUED). A stranded run with a missing terminal row is
+   *      UNDETECTABLE here — the row's absence is indistinguishable from a
+   *      live game (documented limitation: the runner never deletes game
+   *      rows, so in practice the evidence is complete).
+   *
+   * IDEMPOTENT: the update targets only the stranded status values, so a
+   * second pass finds nothing to do; completed_at/summary/error are
+   * recomputed from the same durable rows on every pass.
+   */
+  reconcileStrandedRuns(): ReconcileSummary {
+    const stranded = this.db.prepare(
+      `SELECT id, created_at FROM benchmark_runs
+        WHERE status IN ('QUEUED', 'RUNNING')
+        ORDER BY created_at ASC`,
+    );
+    const rows = stranded.all() as Array<{ id: string; created_at: number }>;
+
+    const summary: ReconcileSummary = { inspected: rows.length, reconciled: 0, leftActive: 0 };
+
+    for (const row of rows) {
+      const games = this.db
+        .prepare('SELECT * FROM benchmark_games WHERE run_id = ?')
+        .all(row.id) as BenchmarkGameRow[];
+      if (this.reconcileTerminalRun(row.id, games)) {
+        summary.reconciled++;
+      } else {
+        summary.leftActive++;
+      }
+    }
+
+    if (summary.reconciled > 0) {
+      console.log(
+        `[BenchmarkRunner] Reconciled ${summary.reconciled} stranded benchmark run(s) after restart ` +
+          `(${summary.leftActive} left active, ${summary.inspected} inspected)`,
+      );
+    }
+
+    return summary;
+  }
+
+  /**
+   * Reconcile one run to a terminal status if its games prove it terminal.
+   * Returns true when the run was reconciled, false when it was left alone.
+   * See reconcileStrandedRuns() for the ownership policy.
+   */
+  private reconcileTerminalRun(runId: string, games: BenchmarkGameRow[]): boolean {
+    const terminal = (g: BenchmarkGameRow) => g.completed_at !== null || g.error !== null;
+    const allTerminal = games.length > 0 && games.every(terminal);
+    if (!allTerminal) return false;
+
+    const now = Date.now();
+    const failed = games.filter((g) => g.error !== null);
+    const errored = failed.length > 0;
+
+    const summaryPayload = {
+      totalGames: games.length,
+      completedGames: games.filter((g) => g.completed_at !== null).length,
+      failedGames: failed.length,
+      recovered: true,
+    };
+
+    if (errored) {
+      // FAILED: surface the durable error evidence; when several games
+      // failed, join their messages so the run row explains itself. The
+      // summary is persisted from the same game evidence as COMPLETED so a
+      // recovered FAILED run is as self-describing as a recovered
+      // COMPLETED one.
+      const messages = failed
+        .map((g) => `game ${g.game_id}: ${g.error}`)
+        .join('; ');
+      this.db
+        .prepare(
+          `UPDATE benchmark_runs
+             SET status = ?, error = ?, completed_at = ?, summary = ?, updated_at = ?
+           WHERE id = ? AND status IN ('QUEUED', 'RUNNING')`,
+        )
+        .run('FAILED', messages, now, JSON.stringify(summaryPayload), now, runId);
+    } else {
+      // COMPLETED: persist the summary from the same game evidence
+      // getProgress() reports.
+      this.db
+        .prepare(
+          `UPDATE benchmark_runs
+             SET status = ?, completed_at = ?, summary = ?, updated_at = ?
+           WHERE id = ? AND status IN ('QUEUED', 'RUNNING')`,
+        )
+        .run('COMPLETED', now, JSON.stringify(summaryPayload), now, runId);
+    }
+
+    console.log(
+      `[BenchmarkRunner] Run ${runId} recovered as ${errored ? 'FAILED' : 'COMPLETED'} ` +
+        `(${summaryPayload.completedGames} completed, ${summaryPayload.failedGames} failed game(s))`,
+    );
+    return true;
   }
 
   // ==================== Internal helpers ====================
