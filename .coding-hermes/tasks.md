@@ -26,3 +26,15 @@ Promise: A user can benchmark AI models' Mafia-playing ability via mafiactl / HT
 - [P1] Fresh-install direct-run path is broken in 3 places (bunker leg, Debian 13, Node 20, pnpm 9.15): (1) QUICK_START "5-minute setup" omits `pnpm build` — `pnpm run server` dies with "Cannot find module '@mafia/shared/dist/fsm/index.js'"; (2) server then dies on "Cannot open database because the directory does not exist" — better-sqlite3 opened at DB_PATH './data/mafia.db' with no mkdir; (3) the root `server` script runs with cwd apps/server, so the data dir must be apps/server/data (undocumented). Net: README's documented path ≠ working path.
 - [P1] Docker-based install path is untestable from the documented docs on a bare agent: Debian 13 agent = non-root, no sudo, no docker-compose plugin (Docker 26.1.5 present). QUICK_START/README never mention compose as the no-toolchain path. Docs finding, not a code fix.
 - [P2] Skill/docs staleness — skills/mafia-usage/SKILL.md still says (2026-08-24) that game detail hides winner/won; live :3004 now returns winner + per-player won/role (fresh install also OK). Refresh shipped with this run.
+
+## Dogfood Findings (2026-09-24) — web dashboard surface (first-time exercised) + P0 reverify
+Verdict: PROMISING-BUT-ROUGH
+Promise: A user manages and watches AI Mafia games from the browser (:5174), with per-model win/cost stats.
+
+- [P0] DF-MAFIA-AI-BENCHMARK-10 — Web Create Game -> /game/undefined, stuck 'Loading game...': store casts create payload {gameId} as Game with `id` (gameStore.ts:178, GameList.tsx:49-56); game is created server-side but orphaned from the UI.
+- [P1] DF-MAFIA-AI-BENCHMARK-11 — Finished-game spectator view empty (votes/discussion/events placeholders) despite 27 API events; GameWatcher.tsx:14-33 never calls existing api.games.getEvents (api.ts:153).
+- [P2] DF-MAFIA-AI-BENCHMARK-12 — Placeholder-key installs play canned-mock games (game-engine.js:714) into real stats tables unmarked; avgTokensPerGame=0 across /benchmark/compare.
+- [P2] DF-MAFIA-AI-BENCHMARK-13 — Card shape mismatch: players.length on a numeric field + currentState missing in list payload (GameList.tsx:151/144-146); sidebar 'New Game' /?action=new dead (Sidebar.tsx:11, no consumer).
+- [P2] DF-MAFIA-AI-BENCHMARK-14 — Web Stats leaderboard empty + Duration '—' on all rows despite 2457 completed games and a populated /benchmark/compare endpoint.
+- [P2] DF-MAFIA-AI-BENCHMARK-15 — DF-3 residual: 32/35-day-old runs still RUNNING after restart (reconciliation leaves them by policy); undocumented POST /benchmark/<id>/cancel is the only cleanup (retired both this tick).
+VERIFIED LIVE this tick: DF-2 winRate fix real (gpt-4o-mini 0.998, gpt-4o 0.75, no wins>gamesPlayed); bunker documented-install leg EXIT=0 167s (first clean pass in 4 runs; compose v5.5.0 present). Perf: nothing slow enough to file (API 3-130ms; browser TTFB 3ms, DCL 15ms, 0 longtasks).

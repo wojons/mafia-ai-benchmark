@@ -333,3 +333,55 @@ Node 20 + pnpm → `pnpm install && pnpm build` → `mkdir -p apps/server/data`
 which the docs currently never mention. Verify with
 `curl -s localhost:3004/api/v1/stats` and expect `winRate ≤ 1.0` on any
 per-model row you read — if you see more, you are looking at DF-2.
+
+---
+
+## 2026-09-24 — web dashboard surface (first-time exercised) + bunker install
+
+**What this run added to the trail:**
+
+- The winRate≤1.0 check above now PASSES: 7fba228 (COUNT(DISTINCT CASE WHEN
+  p.won=1 THEN p.game_id END)) was in main but the running container predated
+  it — the 09-09 "fix didn't work" cycle was actually deploy lag, diagnosed by
+  the foreman at tick 199 (rebuild+restart 12:51Z) and re-verified live by this
+  run (gpt-4o-mini 0.998). Lesson: a "fix verified against the running stack"
+  claim is really a claim about the DEPLOYED commit, not HEAD — check both.
+- Reconciliation policy is now understood precisely: `reconcileStrandedRuns`
+  (benchmark-runner.ts, wired apps/server/src/index.ts:84) recovers a QUEUED/
+  RUNNING run ONLY when its games have terminal proof; anything else stays
+  RUNNING by design ("0 recovered, 18 left active, 18 inspected" in boot log).
+  So "stale RUNNING rows" is no longer a bug class — it is an operator task,
+  and the operator tool is POST /api/v1/benchmark/<runId>/cancel (works,
+  undocumented). Two 32/35-day-old zombies retired this way this run.
+- The web UI's failure pattern is payload-shape drift, three times over:
+  create returns `{gameId}` but the store reads `id` (DF-10 P0), the /games
+  list returns `players` as a number but cards read `players.length` and a
+  `currentState` that isn't there (DF-13), and GameWatcher trusts the WS
+  subscription to carry history it never will (DF-11). Each layer's own tests
+  pass because each layer is self-consistent; the contract between layers is
+  what nothing tests. Same class as the 09-20 boardctl burndown lesson:
+  read the JSON the endpoint ACTUALLY returns, not the shape the template
+  assumes.
+- Benchmark integrity: a placeholder-key install plays complete canned-mock
+  games in seconds (engine fallback, game-engine.js:714) into the same tables
+  real games use (DF-12). On a benchmark product that is a stat-validity hole,
+  not just a nicety. Expected signal: avgTokensPerGame=0 for every model in
+  /benchmark/compare.
+
+**Bunker-host gotchas (las-bunker-03, agent e932a8a7, destroyed after):**
+
+- The agent's default docker context points at the HOST daemon
+  (`/var/run/docker.sock`, permission denied). The per-agent rootless socket
+  is `/run/bunker/<agent-id>/docker.sock`:
+  `export DOCKER_HOST=unix:///run/bunker/<id>/docker.sock` before compose.
+- `/tmp` is not writable by the agent user; keep scratch files in $HOME.
+- The documented install path (cp .env.sample .env; docker compose up -d
+  --build) ran UNMODIFIED to EXIT=0 in 167s on Docker 29.8.1/compose v5.5.0,
+  then smoke (health/dashboard/game lifecycle) passed — the 09-09
+  "compose untestable on bare agents" finding is stale on this host generation.
+
+**Right-way additions (web):** to watch a finished game today, read
+`GET /api/v1/games/<id>/events` directly (SSE with `Accept: text/event-stream`
+also returns the full list) — the dashboard's own finished-game view is
+empty until DF-11 is fixed. To create a game today, use the API or CLI —
+the dashboard's Create button loses the created game until DF-10 is fixed.

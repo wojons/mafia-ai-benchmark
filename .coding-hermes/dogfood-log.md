@@ -121,3 +121,5 @@ pin) — board has fresh P1/P2 work; self-pause logic will slow it back down.| 2
 2026-09-01 | PROMISING-BUT-ROUGH | 14s t2fs | friction 10 | 5 findings
 2026-09-04 | PROMISING-BUT-ROUGH | 43s t2fs | friction 9 | 5 findings
 
+
+2026-09-24 | PROMISING-BUT-ROUGH | web dashboard :5174 surface (first-time) + P0 reverify + bunker install | DF-2 winRate fix VERIFIED (0.998); DF-3 residual honest (2 stale RUNNING retired via undocumented cancel); web flagship broken: create->undefined (DF-10), finished-game spectate empty (DF-11); mock-key games pollute stats (DF-12); install_seconds=167 compose path OK (agent e932a8a7, destroyed); smoke=ok | t2fs ~4min; friction 6 | 6 findings DF-10..15
