@@ -224,8 +224,10 @@ See **[specs/correct-night-flow.md](specs/correct-night-flow.md)** for complete 
 | `pnpm --filter @mafia/cli dev -- benchmark` | **Run benchmark** | Automated model evaluation |
 | `pnpm --filter @mafia/cli stats` | **View stats** | Game and model statistics |
 | `pnpm --filter @mafia/cli list-games` | **List games** | Browse recent games |
-| `pnpm --filter @mafia/cli config show` | **View config** | Check current settings |
-| `pnpm --filter @mafia/cli config set` | **Configure** | Customize game params |
+| `pnpm --filter @mafia/cli run config show` | **View config** | Check current settings |
+| `pnpm --filter @mafia/cli run config set <key> <value>` | **Configure** | Customize game params |
+
+> **Note:** `pnpm --filter @mafia/cli config ...` is intercepted by pnpm's built-in `config` command (ERR_PNPM_RECURSIVE_RUN_NO_SCRIPT / "Unknown option"), so config subcommands use the `run config ...` form. `stats` and `list-games` work directly as scripts.
 
 ### Server Commands
 
