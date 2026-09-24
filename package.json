@@ -21,7 +21,7 @@
     "format": "prettier --write \"**/*.{ts,tsx,json,md}\"",
     "server": "pnpm --filter @mafia/server dev",
     "server:build": "pnpm --filter @mafia/server build",
-    "web": "pnpm --filter @mafia/web dev --port 5174",
+    "web": "pnpm --filter @mafia/web dev",
     "web:build": "pnpm --filter @mafia/web build",
     "cli": "pnpm --filter @mafia/cli dev",
     "shared": "pnpm --filter @mafia/shared build",
