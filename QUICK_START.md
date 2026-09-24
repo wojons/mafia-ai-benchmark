@@ -177,6 +177,24 @@ The game will:
 
 The repo ships a `docker-compose.yml` stack: `server` (API + WebSocket,
 host `:3004` → container `:3000`) and `web` (dashboard, host `:5174`).
+
+**No toolchain on the host?** Docker is the install path that skips the pnpm
+setup entirely — build and start the whole stack with one command:
+
+```bash
+# Build and start everything (server + web dashboard)
+docker compose up -d --build
+
+# Dashboard: http://localhost:5174   API health: http://localhost:3004/health
+```
+
+**Prerequisite:** Docker Engine **plus** the Docker Compose v2 plugin
+(`docker compose`, the subcommand — NOT the legacy `docker-compose` binary).
+On a bare Debian/Ubuntu host that means installing the `docker-compose-plugin`
+(or `docker-compose-v2`) package alongside Docker Engine. A host without the
+plugin has no compose path — and without root/sudo you cannot install it, so
+there is no compose route on that host at all.
+
 **The container runs the source at build time — after any code change you
 must rebuild, not just restart:**
 
