@@ -24,6 +24,7 @@ const GameList: React.FC = () => {
   const { games, fetchGames, createGame, connecting } = useGameStore();
   const { searchQuery, setSearchQuery, layout } = useUIStore();
   const [showNewGame, setShowNewGame] = useState(false);
+  const [createError, setCreateError] = useState<string | null>(null);
   const [newGameConfig, setNewGameConfig] = useState({
     numPlayers: 10,
     nightDuration: 60,
@@ -47,14 +48,21 @@ const GameList: React.FC = () => {
   });
   
   const handleCreateGame = async () => {
+    setCreateError(null);
     try {
       const game = await createGame({
         ...newGameConfig,
         roleModels,
       });
+      setShowNewGame(false);
       navigate(`/game/${game.id}`);
     } catch (error) {
       console.error('Failed to create game:', error);
+      const message =
+        error instanceof Error && error.message
+          ? error.message
+          : 'Failed to create game. Please try again.';
+      setCreateError(message);
     }
   };
   
@@ -95,7 +103,7 @@ const GameList: React.FC = () => {
             />
           </div>
           
-          <button className="btn btn-primary" onClick={() => setShowNewGame(true)}>
+          <button className="btn btn-primary" onClick={() => { setCreateError(null); setShowNewGame(true); }}>
             ➕ New Game
           </button>
         </div>
@@ -128,7 +136,7 @@ const GameList: React.FC = () => {
             <div className="empty-icon">🎮</div>
             <h3>No games found</h3>
             <p>Create a new game to get started</p>
-            <button className="btn btn-primary" onClick={() => setShowNewGame(true)}>
+            <button className="btn btn-primary" onClick={() => { setCreateError(null); setShowNewGame(true); }}>
               Create Game
             </button>
           </div>
@@ -216,6 +224,22 @@ const GameList: React.FC = () => {
             </div>
             
             <div className="modal-body">
+              {createError && (
+                <div
+                  role="alert"
+                  style={{
+                    color: 'var(--color-danger)',
+                    background: 'rgba(239, 68, 68, 0.08)',
+                    border: '1px solid var(--color-danger)',
+                    borderRadius: 'var(--radius-md, 8px)',
+                    padding: '10px 14px',
+                    marginBottom: '16px',
+                    fontSize: '14px',
+                  }}
+                >
+                  {createError}
+                </div>
+              )}
               <div className="form-group">
                 <label>Number of Players</label>
                 <input

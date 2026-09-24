@@ -4,6 +4,61 @@ import { Game, GameState, Player, GameEvent, PlayerStats } from '@mafia/shared/t
 import { api } from '../services/api';
 import { websocket } from '../services/websocket';
 
+/**
+ * True when a create-payload already carries the Game shape's `id` field
+ * (modern server adapter branch). False for the legacy POST /games shape
+ * `{ gameId, status, config }`, which has no `id` (DF-MAFIA-AI-BENCHMARK-10).
+ */
+function isGameLike(payload: unknown): payload is Game {
+  return (
+    typeof payload === 'object' &&
+    payload !== null &&
+    'id' in payload &&
+    typeof (payload as { id: unknown }).id === 'string' &&
+    (payload as { id: string }).id.length > 0
+  );
+}
+
+/**
+ * Normalize the games.create payload to the Game shape at this single
+ * choke point (DF-MAFIA-AI-BENCHMARK-10): the legacy POST /games route
+ * returns `{ gameId, status, config }` with no `id`, so the old lying cast
+ * produced `game.id === undefined` and navigated to /game/undefined.
+ * A modern branch that already returns a Game-like object passes through
+ * unchanged. A payload with neither `id` nor a non-empty `gameId` throws
+ * instead of fabricating the string 'undefined'.
+ */
+function normalizeCreatePayload(payload: unknown): Game {
+  if (isGameLike(payload)) {
+    return payload;
+  }
+
+  const raw = (payload ?? {}) as Record<string, unknown>;
+  const gameId = typeof raw.gameId === 'string' ? raw.gameId : '';
+  if (!gameId) {
+    throw new Error('Game creation response missing both id and gameId fields');
+  }
+
+  return {
+    id: gameId,
+    createdAt: new Date(),
+    status: (raw.status ?? 'SETUP') as Game['status'],
+    players: [],
+    config: (raw.config ?? {}) as Game['config'],
+    currentState: {
+      phase: 'SETUP',
+      dayNumber: 0,
+      turnNumber: 0,
+      timeRemaining: 0,
+      activePlayers: [],
+      eliminatedPlayers: [],
+      votes: [],
+      nightActions: [],
+    },
+    events: [],
+  };
+}
+
 interface GameStoreState {
   // Connection state
   connected: boolean;
@@ -177,7 +232,8 @@ export const useGameStore = create<GameStoreState>()(
     // Create game
     createGame: async (config) => {
       try {
-        const game = await api.games.create(config) as unknown as Game;
+        const payload = await api.games.create(config);
+        const game = normalizeCreatePayload(payload);
         await get().fetchGames();
         return game;
       } catch (error) {

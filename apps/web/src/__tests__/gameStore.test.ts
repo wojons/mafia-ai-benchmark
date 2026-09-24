@@ -35,6 +35,19 @@ vi.mock('../services/websocket', () => ({
 
 import { useGameStore } from '../stores/gameStore';
 import type { GameState, GameEvent } from '@mafia/shared/types';
+import { api } from '../services/api';
+
+// Typed handle on the mocked gamesAPI for per-test resolve/reject wiring.
+const mockedCreate = api.games.create as ReturnType<typeof vi.fn>;
+
+// The legacy POST /games payload shape (DF-MAFIA-AI-BENCHMARK-10):
+// the {success,data} envelope is already unwrapped by services/api.ts,
+// so createGame receives this object raw — note it has NO `id` field.
+const LEGACY_CREATE_PAYLOAD = {
+  gameId: 'test-uuid-123',
+  status: 'starting',
+  config: { engineType: 'legacy', numPlayers: 10 },
+};
 
 const stateInitial = {
   connected: false,
@@ -170,5 +183,53 @@ describe('GameStore', () => {
 
     useGameStore.getState().updateStats(stats);
     expect(useGameStore.getState().stats).toEqual(stats);
+  });
+
+  describe('createGame payload normalization (DF-MAFIA-AI-BENCHMARK-10)', () => {
+    it('maps legacy {gameId,...} payload to a Game with id === gameId', async () => {
+      mockedCreate.mockResolvedValueOnce(LEGACY_CREATE_PAYLOAD);
+
+      const game = await useGameStore.getState().createGame({ numPlayers: 10 });
+
+      expect(game.id).toBe('test-uuid-123');
+      expect(game.status).toBe('starting');
+      expect(game.config).toEqual({ engineType: 'legacy', numPlayers: 10 });
+      expect(api.games.create).toHaveBeenCalledWith({ numPlayers: 10 });
+    });
+
+    it('passes through a modern Game-like payload with id unchanged', async () => {
+      const modernPayload = {
+        id: 'modern-uuid-456',
+        createdAt: new Date('2026-01-01'),
+        status: 'SETUP',
+        players: [],
+        config: { numPlayers: 8 },
+        currentState: null,
+        events: [],
+      };
+      mockedCreate.mockResolvedValueOnce(modernPayload);
+
+      const game = await useGameStore.getState().createGame();
+
+      expect(game.id).toBe('modern-uuid-456');
+      expect(game).toBe(modernPayload);
+    });
+
+    it('does not fabricate the string "undefined" when payload has neither id nor gameId', async () => {
+      mockedCreate.mockResolvedValueOnce({ status: 'starting' });
+
+      await expect(useGameStore.getState().createGame()).rejects.toThrow(
+        /missing both id and gameId/
+      );
+    });
+
+    it('fetches the games list after a successful create', async () => {
+      mockedCreate.mockResolvedValueOnce(LEGACY_CREATE_PAYLOAD);
+      (api.games.getAll as ReturnType<typeof vi.fn>).mockResolvedValueOnce([]);
+
+      await useGameStore.getState().createGame();
+
+      expect(api.games.getAll).toHaveBeenCalled();
+    });
   });
 });
