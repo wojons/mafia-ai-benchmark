@@ -389,6 +389,253 @@ For `json` format:
 
 ### Benchmark Report
 
+#### Benchmark Run Lifecycle
+
+Managed benchmark runs are started through the API, persisted in the
+`benchmark_runs` / `benchmark_games` tables, and progressed through the status
+vocabulary `QUEUED → RUNNING → COMPLETED | CANCELLED | FAILED`. All timestamps
+(`createdAt`, `completedAt`) are **epoch milliseconds** (numbers), not ISO strings.
+
+##### Start a Benchmark Run
+
+**Endpoint:** `POST /api/v1/benchmark`
+
+**Request Body:** Optional. `{ config: {...} }` where the config accepts:
+
+- `models`: Required (in the config). Array of at least 2 unique, non-empty model
+  strings (provider-prefixed, e.g. `openai/gpt-4o-mini`). Duplicates are rejected.
+- `gamesPerPairing`: Optional. Positive integer (floored). Default `2`.
+- `numPlayers`: Optional. Integer ≥ 5 (floored). Default `10`.
+- `temperature`: Optional. Number. Default `0.7`.
+
+**Response (201 Created):**
+
+```json
+{
+  "success": true,
+  "data": {
+    "runId": "d2953e1e-8a81-4714-b37c-4640f6cc331b",
+    "totalGames": 1,
+    "pairings": [
+      {
+        "id": "openai/gpt-4o-mini__vs__openai/gpt-4o",
+        "modelA": "openai/gpt-4o-mini",
+        "modelB": "openai/gpt-4o",
+        "games": 1
+      }
+    ],
+    "message": "Benchmark started with 1 game(s)"
+  }
+}
+```
+
+**Errors:**
+
+- `500` — benchmark failed to start (invalid config, launch failure):
+
+```json
+{
+  "success": false,
+  "error": "Failed to start benchmark: Benchmark config must include at least 2 models"
+}
+```
+
+##### List Benchmark Runs
+
+**Endpoint:** `GET /api/v1/benchmark/runs`
+
+**Response (200 OK):** All runs, most recent first. Each entry carries the run's
+full status record.
+
+```json
+{
+  "success": true,
+  "data": [
+    {
+      "runId": "d2953e1e-8a81-4714-b37c-4640f6cc331b",
+      "status": "RUNNING",
+      "config": {
+        "models": ["openai/gpt-4o-mini", "openai/gpt-4o"],
+        "gamesPerPairing": 1,
+        "numPlayers": 10,
+        "temperature": 0.7
+      },
+      "createdAt": 1787446562060,
+      "completedAt": null,
+      "summary": null,
+      "error": null,
+      "totalGames": 1
+    },
+    {
+      "runId": "126203e9-bf8f-4dd3-938e-40d6d81f868f",
+      "status": "COMPLETED",
+      "config": {
+        "models": ["openai/gpt-4o-mini", "openai/gpt-4o"],
+        "gamesPerPairing": 1,
+        "numPlayers": 10,
+        "temperature": 0.7
+      },
+      "createdAt": 1788305422363,
+      "completedAt": 1788305684792,
+      "summary": null,
+      "error": null,
+      "totalGames": 1
+    }
+  ]
+}
+```
+
+**Field notes:**
+
+- `createdAt` / `completedAt` are **epoch milliseconds** (numbers), never ISO
+  strings. `completedAt` is `null` until the run reaches a terminal status.
+- `status` is one of `QUEUED`, `RUNNING`, `COMPLETED`, `CANCELLED`, `FAILED`.
+- `summary` is `null` while the run is active; on terminal status it is the
+  persisted run summary object (e.g. `{ "totalGames", "completedGames",
+  "failedGames", "recovered" }`). It is `null` in practice for most completed
+  runs persisted before the summary was recorded — do not treat non-`null` as
+  guaranteed.
+- `error` is `null` unless the run is `FAILED`, in which case it holds the
+  joined per-game failure messages.
+
+**Errors:**
+
+- `500` — `{"success": false, "error": "Failed to list benchmark runs"}`
+
+##### Get Benchmark Run Status
+
+**Endpoint:** `GET /api/v1/benchmark/runs/:runId`
+
+**Path Parameters:**
+
+- `runId`: The benchmark run UUID.
+
+**Response (200 OK):** Status record plus live progress for the run.
+
+```json
+{
+  "success": true,
+  "data": {
+    "status": {
+      "runId": "d2953e1e-8a81-4714-b37c-4640f6cc331b",
+      "status": "RUNNING",
+      "config": {
+        "models": ["openai/gpt-4o-mini", "openai/gpt-4o"],
+        "gamesPerPairing": 1,
+        "numPlayers": 10,
+        "temperature": 0.7
+      },
+      "createdAt": 1787446562060,
+      "completedAt": null,
+      "summary": null,
+      "error": null,
+      "totalGames": 1
+    },
+    "progress": {
+      "runId": "d2953e1e-8a81-4714-b37c-4640f6cc331b",
+      "status": "RUNNING",
+      "totalGames": 1,
+      "completedGames": 0,
+      "validGames": 1,
+      "failedGames": 0,
+      "pairings": [
+        {
+          "id": "openai/gpt-4o-mini__vs__openai/gpt-4o",
+          "modelA": "openai/gpt-4o-mini",
+          "modelB": "openai/gpt-4o",
+          "games": 1,
+          "completed": 0
+        }
+      ]
+    }
+  }
+}
+```
+
+**Errors:**
+
+- `404` — unknown run:
+
+```json
+{
+  "success": false,
+  "error": "Benchmark run does-not-exist not found"
+}
+```
+
+- `500` — `{"success": false, "error": "Failed to get benchmark run"}`
+
+##### Get Benchmark Run Status (short path)
+
+**Endpoint:** `GET /api/v1/benchmark/:runId`
+
+Alias of `GET /api/v1/benchmark/runs/:runId` with the same success shape. The
+only difference is the 404 error message:
+
+```json
+{
+  "success": false,
+  "error": "Run not found"
+}
+```
+
+**Errors:** `404` (as above), `500` — same `"Failed to get benchmark run"` shape.
+
+##### Cancel a Benchmark Run
+
+**Endpoint:** `POST /api/v1/benchmark/runs/:runId/cancel`
+
+**Path Parameters:**
+
+- `runId`: The benchmark run UUID.
+
+**Request Body:** None.
+
+**Response (200 OK):**
+
+```json
+{
+  "success": true,
+  "data": {
+    "runId": "d2953e1e-8a81-4714-b37c-4640f6cc331b",
+    "message": "Benchmark run cancelled"
+  }
+}
+```
+
+Cancellation marks the run `CANCELLED`; already-launched games are left to wind
+down naturally. `FAILED` runs can also be cancelled (only `COMPLETED` and
+`CANCELLED` runs refuse).
+
+**Errors:**
+
+- `404` — run not found or already in a terminal status the endpoint refuses:
+
+```json
+{
+  "success": false,
+  "error": "Benchmark run does-not-exist not found or already terminal"
+}
+```
+
+- `500` — `{"success": false, "error": "Failed to cancel benchmark run"}`
+
+##### Cancel a Benchmark Run (short path)
+
+**Endpoint:** `POST /api/v1/benchmark/:runId/cancel`
+
+Alias of the cancel route above with the same success shape. The only
+difference is the 404 error message:
+
+```json
+{
+  "success": false,
+  "error": "Run not found"
+}
+```
+
+**Errors:** `404` (as above), `500` — same `"Failed to cancel benchmark run"` shape.
+
 #### Get Benchmark Report
 
 **Endpoint:** `GET /api/v1/benchmark/report`
