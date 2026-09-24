@@ -249,7 +249,12 @@ describe("benchmark report (live server)", () => {
       signal: AbortSignal.timeout(30000),
     });
     expect(response.ok).toBe(true);
-    const serverReport = (await response.json()) as Record<string, any>;
+    const raw = (await response.json()) as Record<string, any>;
+    // DF-MAFIA-AI-BENCHMARK-5: the server wraps the report in the standard
+    // { success, data } envelope; unwrap for the comparison.
+    const serverReport = (
+      raw && raw.success === true && raw.data ? raw.data : raw
+    ) as Record<string, any>;
 
     expect(printed.summary.totalGames).toBe(serverReport.summary.totalGames);
     expect(printed.modelPerformance).toEqual(serverReport.modelPerformance);

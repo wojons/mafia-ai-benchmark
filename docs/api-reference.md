@@ -7,7 +7,9 @@ The DuckBrain sync-twin integration contract — per-tick /sync markers (`/sync/
 That document covers:
 
 - **Endpoints** — `/api/v1/games`, `/api/v1/players`, `/api/v1/agents`, `/api/v1/stats`, `/api/v1/benchmark`, `/api/v1/benchmark/report`, health checks
-- **WebSocket protocol** — `/ws` connection, event shapes, streaming
+- **WebSocket protocol** — `/ws` connection, event shapes, streaming (the
+  code-extracted reference for the live protocol is
+  [`api/websocket.md`](api/websocket.md))
 - **Request/response payloads** — game creation, player model assignment, report shapes
 - **Integration examples** — how to drive a game and read the benchmark report
 

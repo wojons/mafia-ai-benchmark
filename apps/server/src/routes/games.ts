@@ -289,10 +289,22 @@ export function createGamesRouter(
         ...legacyGames,
       ];
 
+      // DF-MAFIA-AI-BENCHMARK-5: a game the legacy adapter started is ALSO
+      // inserted into the repository (the adapter persists an IN_PROGRESS
+      // row so events satisfy their foreign key), so the merged DB +
+      // legacy list can carry the SAME id twice — one DB row, one legacy
+      // row. Dedupe by id, keeping the first (DB) occurrence.
+      const seen = new Set<string>();
+      const dedupedGames = allGames.filter((g) => {
+        if (seen.has(g.id)) return false;
+        seen.add(g.id);
+        return true;
+      });
+
       // MAF-GAP-013: the repository honors limit only for DB rows; legacy
       // games are appended after, so the merged result must be sliced here
       // for the limit to be enforced on the full response.
-      const limitedGames = allGames.slice(0, filters.limit);
+      const limitedGames = dedupedGames.slice(0, filters.limit);
 
       res.json({
         success: true,

@@ -20,6 +20,7 @@ import GameRepositoryDefault, { GameRepository } from './db/repository.js';
 import { createDatabase } from './db/migrate.js';
 import { setupRoutes } from './routes/index.js';
 import { setupWebSocket } from './websocket/index.js';
+import { bodyParseErrorHandler } from './middleware/body-parse-error.js';
 import { DEFAULT_PORT } from './config.js';
 
 dotenv.config();
@@ -116,6 +117,11 @@ async function main(): Promise<void> {
   });
 
   setupRoutes(app, context);
+
+  // Body-parse errors (e.g. malformed JSON) are CLIENT errors: answer 400
+  // with the standard error envelope instead of falling through to the
+  // generic 500 INTERNAL_ERROR handler below (DF-MAFIA-AI-BENCHMARK-5).
+  app.use(bodyParseErrorHandler());
 
   app.use((err: Error, req: express.Request, res: express.Response, _next: express.NextFunction) => {
     console.error('Server error:', err);

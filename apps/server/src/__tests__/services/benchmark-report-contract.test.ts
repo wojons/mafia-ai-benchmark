@@ -272,7 +272,11 @@ describe('GET /api/v1/benchmark/report — data-integrity contract (MAF-GAP-064)
       : `${baseUrl}/api/v1/benchmark/report`;
     const response = await fetch(url);
     expect(response.status).toBe(200);
-    return response.json();
+    const body = await response.json();
+    // DF-MAFIA-AI-BENCHMARK-5: the report now ships in the standard
+    // { success, data } envelope; the contract clauses below read .data.
+    expect(body.success).toBe(true);
+    return body.data;
   }
 
   async function fetchCompare(modelFilter?: string[]): Promise<any> {
