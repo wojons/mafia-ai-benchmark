@@ -1,0 +1,31 @@
+{
+  "scheduler_tick_id": "mafia-ai-benchmark-2026-09-24-08-40-56",
+  "created_at": "2026-09-24T08:52:00Z",
+  "board_tick_number": 195,
+  "wave_budget": 8,
+  "dispatched": 2,
+  "tasks": [
+    {
+      "task_id": "QA-MAFIA-AI-BENCHMARK-8",
+      "title": "[P3] Web UI probe via documented web script is harness-hostile: `npm run web -- --port` passes the flag to vite as a separate arg",
+      "priority": "P3",
+      "depends_on": null,
+      "premise_verified": "2026-09-24T08:47Z live: `npm run web -- --port 3111` emits `vite --port 5174 --port 3111` (flag passed as extra arg, shadowed); direct vite works; WS lives at /ws on HTTP port, WS_PORT=3001 in .env.sample is dead config",
+      "worktree": "/home/kara/worktrees/mafia-ai-benchmark-QA-MAFIA-AI-BENCHMARK-8",
+      "branch": "wt/QA-MAFIA-AI-BENCHMARK-8",
+      "base_sha": "b713a31"
+    },
+    {
+      "task_id": "DF-MAFIA-AI-BENCHMARK-5",
+      "title": "[dogfood:P2] Negative path, docs, and API-shape rough edges",
+      "priority": "P2",
+      "depends_on": null,
+      "premise_verified": "2026-09-24T08:47Z live: malformed JSON POST /api/v1/games -> 500 INTERNAL_ERROR (no body-parse error handler before the generic 500 handler, apps/server/src/index.ts:96,118-122); response-shape inconsistency (/stats wraps {success,data} vs /benchmark/report top-level); WS probe 'Unknown message type: undefined'",
+      "worktree": "/home/kara/worktrees/mafia-ai-benchmark-DF-MAFIA-AI-BENCHMARK-5",
+      "branch": "wt/DF-MAFIA-AI-BENCHMARK-5",
+      "base_sha": "b713a31"
+    }
+  ],
+  "merge_plan": "serial merge after both workers exit: DF-5 then QA-8, gate each merge (gitreins guard), push, then gitreins task complete each",
+  "dispatch_method": "hermes chat -q via /tmp launch script, terminal background=true pty=true"
+}
