@@ -76,3 +76,22 @@ gitreins judge persona-v2
 - Skip guards with `--no-verify` for code changes
 - Push if guards failed (let CI catch it if you must, but fix locally)
 - Commit `.gitreins/tasks.yaml` — it's local task state
+
+## Repo layout exceptions
+
+Documented by CLN-1 (2026-09-24), conservative root-hygiene pass:
+
+- **Root docs intentionally left at root.** README-linked docs stay: ARCHITECTURE.md,
+  CONFIG_GUIDE.md, GAME_MANAGEMENT.md, PROJECT_READY.md, POSTER.md, QUICK_REFERENCE.md,
+  FLEXIBLE_PLAYER_MODELS.md, PERSONALIZED_AI_MODELS.md (all referenced from README.md /
+  QUICK_START.md; moving them would break links). CHANGELOG.md and PROMPT.md have no
+  load-bearing reference scan hits but stay: CHANGELOG.md is a root convention, PROMPT.md
+  is listed in the project tree diagram in `specs/implementation-overview.md`.
+- **docs/SYSTEM_STATUS.md** was moved from the root (the only misplaced doc: zero
+  references anywhere outside itself).
+- **Tooling dirs stay at root by design**: `.memory-bank/`, `.opencode/`, `.axiom/`,
+  `.mafia-config`, `.graph-harness/`, `.vfs/`, `.worktrees/`, `.hermes/` — agent/tooling
+  state, not doc content.
+- **`.gitignore`** now covers Python cache dirs (`__pycache__/`, `.pytest_cache/`,
+  `.ruff_cache/`) as legacy-tooling hygiene; the repo's build/test pipeline is
+  TypeScript/pnpm only.
