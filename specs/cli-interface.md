@@ -1,15 +1,32 @@
 # CLI Interface Specifications
 
 ## Overview
-The CLI (`mafiactl`) provides command-line control for creating, monitoring, and managing Mafia AI games.
+The CLI (`mafiactl`) provides command-line control for running and watching Mafia AI games, listing games and statistics, managing local configuration, and running model benchmarks. It is implemented with Commander in `apps/cli/src/index.ts` (entry point; built to `apps/cli/dist/index.js`).
+
+The real command set (verified against `apps/cli/dist/index.js --help` after `pnpm --filter @mafia/cli build`):
+
+| Command | Purpose |
+|---|---|
+| `init` | Initialize `mafia.config.json` |
+| `run-game` | Run a Mafia game with AI agents |
+| `watch-game` | Watch a game in real-time (WebSocket) |
+| `list-games` | List recent and active games |
+| `config` | View and modify local configuration |
+| `stats` | Display game and model statistics |
+| `benchmark` | Show the accumulated benchmark report, or run a fresh benchmark |
 
 ## Installation
 ```bash
-npm install -g mafia-ai-benchmark-cli
-# or
+# From the repository root
 pnpm install
-pnpm build
+pnpm --filter @mafia/cli build
+
+# Run directly
+node apps/cli/dist/index.js --help
+
+# Or expose as `mafiactl`
 pnpm link
+mafiactl --help
 ```
 
 ## Global Options
@@ -17,561 +34,299 @@ pnpm link
 mafiactl [global-options] <command> [command-options]
 
 Global Options:
-  -h, --help          Show help
-  -v, --version       Show version
-  --verbose           Enable verbose logging
-  --json              Output JSON instead of formatted text
-  --api-url <url>     API server URL (default: http://localhost:3004)
+  -V, --version        Output the version number
+  --verbose            Enable verbose logging
+  --config <path>      Config file path (default: ./mafia.config.json)
+  -h, --help           Display help for command
 ```
+
+Running `mafiactl` with no arguments prints help. An unknown command exits with code 1 and an error message.
 
 ## Commands
 
-### `mafiactl new`
-Create and start a new game.
+### `mafiactl init`
+Initialize Mafia AI Benchmark configuration (`./mafia.config.json` in the current directory).
 
 **Usage:**
 ```bash
-mafiactl new [options]
+mafiactl init [options]
 ```
 
 **Options:**
 ```
-  -p, --players <number>    Number of players (default: 10)
-  -m, --mafia <number>      Number of mafia (default: 3)
-  -s, --seed <number>       Random seed (optional)
-  --names <names>           Comma-separated player names
-  --mode <mode>             Agent mode: scripted|llm (default: scripted)
-  --start                   Auto-start game after creation
-  --attach                  Auto-attach after creation
-  --json                    Output JSON
+  -f, --force   Overwrite existing configuration (default: false)
+  -q, --quiet   Skip interactive prompts (default: false)
+  --default     Use default configuration (default: false)
 ```
+
+Notes: with an existing config and no `--force`, the command asks interactively whether to overwrite. Either `--default` or `-q/--quiet` skips prompts and writes the default configuration.
 
 **Examples:**
 ```bash
-# Default setup (10 players, 3 mafia, scripted agents)
-mafiactl new
+# Interactive setup (prompts for name, players, roles, durations, provider/model)
+mafiactl init
 
-# Custom player count
-mafiactl new --players 12 --mafia 4 --seed 12345 --start
-
-# Custom names
-mafiactl new --names "Alice,Bob,Charlie,Diana,Eve,Frank,Grace,Henry,Iris,Jack"
-
-# With auto-attach
-mafiactl new --seed 42 --attach
-
-# Output game ID for scripting
-GAME_ID=$(mafiactl new --json | jq -r .gameId)
+# Non-interactive, defaults, overwriting any existing file
+mafiactl init --default --force
 ```
-
-**Output (formatted):**
-```
-✓ Game Created
-  
-📋 Game Details
-  ID:         game-abc123
-  Status:     CREATED
-  Players:    10 (3 Mafia, 1 Doctor, 1 Sheriff, 5 Villagers)
-  Seed:       12345
-  Mode:       scripted
-
-👥 Players
-  Alice      [Villager]  ✓ Alive
-  Bob        [Mafia]     ✓ Alive
-  Charlie    [Doctor]    ✓ Alive
-  Diana      [Sheriff]   ✓ Alive
-  ...
-
-🔗 Links
-  Status:    http://localhost:3004/api/games/game-abc123
-  Stream:    mafiactl attach game-abc123
-  UI:        http://localhost:5173/game/game-abc123
-
-💡 Next Steps
-  Start:     mafiactl start game-abc123
-  Attach:    mafiactl attach --follow game-abc123
-  UI:        Open browser to Web UI
-```
-
-**Output (JSON):**
-```json
-{
-  "gameId": "game-abc123",
-  "status": "CREATED",
-  "config": {
-    "players": 10,
-    "mafia": 3,
-    "seed": 12345,
-    "mode": "scripted"
-  },
-  "players": [
-    {"id": "p1", "name": "Alice", "role": "villager", "alive": true},
-    {"id": "p2", "name": "Bob", "role": "mafia", "alive": true}
-  ],
-  "links": {
-    "status": "http://localhost:3004/api/games/game-abc123",
-    "stream": "ws://localhost:3004/ws/game-abc123",
-    "ui": "http://localhost:5173/game/game-abc123"
-  }
-}
-```
-
-**Exit Codes:**
-- `0` - Success
-- `1` - Invalid configuration
-- `2` - API connection error
-- `3` - Internal error
 
 ---
 
-### `mafiactl attach`
-Attach to a running game and stream events.
+### `mafiactl run-game`
+Run a Mafia game with AI agents. Loads `mafia.config.json` if present (accepting both the flat and the nested `init`-generated shape), then POSTs the game to the server.
 
 **Usage:**
 ```bash
-mafiactl attach <game-id> [options]
+mafiactl run-game [options]
 ```
 
 **Options:**
 ```
-  -f, --follow          Follow game stream (live updates)
-  --poll <ms>           Poll interval for --no-stream mode (default: 1000)
-  --verbose             Show all events including THINK streams
-  --watch <player>      Highlight specific player events
-  --json                Output raw JSON events
+  -c, --config <path>  Configuration file path (default: ./mafia.config.json)
+  --players <n>        Number of players (default: 10)
+  --provider <name>    LLM provider (default: openai)
+  --model <name>       LLM model (default: openai/gpt-4o-mini)
+  --auto               Run without confirmation (default: false)
+  --yes                Skip confirmation prompt (alias for --auto)
+  --watch              Watch game in real-time (default: false)
+  --server <url>       Server base URL (default: http://localhost:3004)
 ```
 
 **Examples:**
 ```bash
-# Attach to running game (shows status once)
-mafiactl attach game-abc123
+# Run a game (asks for confirmation)
+mafiactl run-game
 
-# Follow live game
-mafiactl attach game-abc123 --follow
+# Non-interactive with overrides
+mafiactl run-game --yes --players 12 --provider openai --model openai/gpt-4o
 
-# Watch specific player
-mafiactl attach game-abc123 --follow --watch "Alice"
-
-# Full verbose mode (shows THINK)
-mafiactl attach game-abc123 --verbose
-
-# JSON mode for scripting
-mafiactl attach game-abc123 --follow --json > game-log.json
+# Watch while running
+mafiactl run-game --yes --watch
 ```
 
-**Output format:**
-
-When `--follow` is used, shows live stream with color-coding:
-
-```
-🔴 NIGHT 1
-   21:30:01  [Mafia] Bob targets Charlie
-   21:30:02  [Doctor] Charlie protects Alice
-   21:30:03  [Sheriff] Diana investigates Bob
-   
-🌅 MORNING 1
-   21:30:05  ☀️ No one died (Doctor protection!)
-   
-💬 DAY 1 - Discussion
-   Alice: "I think Bob is acting suspicious..."
-   Bob: "That's ridiculous! Diana is the real threat."
-   ...
-   
-🗳️ DAY 1 - Voting
-   Alice → Bob
-   Bob → Diana
-   Charlie → Bob
-   ...
-   
-⚰️ ELIMINATION
-   Bob (Mafia) eliminated by vote
-   
-🔴 NIGHT 2
-   ...
-```
-
-With `--watch Alice`:
-```
-💬 DAY 1 - Discussion
-   Alice: "I think Bob is acting suspicious..."
-                 ^^^^ highlighted
-```
-
-With `--verbose`:
-```
-💭 THINK (Alice): "Bob defended Charlie too strongly. 
-                   That looks like mafia protecting teammate."
-💬 SAYS (Alice): "I think Bob is acting suspicious..."
-```
-
-**Exit Codes:**
-- `0` - Normal exit (Ctrl+C or game ended)
-- `1` - Game not found
-- `2` - API connection error
-- `130` - Interrupted (Ctrl+C)
+On success it prints the game ID and the suggested follow-up (`mafiactl watch-game <game-id>`). Exit code 1 if the server cannot be reached or the game fails to start.
 
 ---
 
-### `mafiactl status`
-Get current game status (non-streaming).
+### `mafiactl watch-game`
+Watch a game in real-time via WebSocket.
 
 **Usage:**
 ```bash
-mafiactl status <game-id> [options]
+mafiactl watch-game <game-id> [options]
 ```
 
 **Options:**
 ```
-  --json        Output JSON
-  --roles       Show player roles (admin only)
-  --detailed    Show detailed stats
+  -s, --server <url>  Server URL (default: ws://localhost:3004/ws)
+  --no-color          Disable colors
 ```
+
+The command connects to the server's WebSocket endpoint, sends a `JOIN_GAME` message for the given game ID, and renders live messages (game state, phase changes, agent statements, votes, kills, lynchings, winner determination). Disconnects when the server closes the connection or on Ctrl+C (exit 0). Exit code 1 if the connection fails.
 
 **Examples:**
 ```bash
-# Quick status check
-mafiactl status game-abc123
+# Watch a game
+mafiactl watch-game game-abc123
 
-# With roles (admin view)
-mafiactl status game-abc123 --roles
+# Against a remote server
+mafiactl watch-game game-abc123 -s ws://myhost:3004/ws
+```
 
-# Full stats
-mafiactl status game-abc123 --detailed
+---
+
+### `mafiactl list-games`
+List recent and active games.
+
+**Usage:**
+```bash
+mafiactl list-games [options]
+```
+
+**Options:**
+```
+  --status <status>  Filter by status (setup, in_progress, ended)
+  --limit <n>        Maximum games to show (default: 10)
+  --json             Output as JSON
+  --server <url>     Server base URL (default: http://localhost:3004)
+```
+
+The `--status` filter value is uppercased before being sent to the API (`?status=<STATUS>&limit=<n>`).
+
+**Examples:**
+```bash
+# Recent games (formatted table)
+mafiactl list-games
+
+# Filter and limit
+mafiactl list-games --status in_progress --limit 20
 
 # JSON for scripting
-mafiactl status game-abc123 --json
+mafiactl list-games --json
 ```
 
-**Output (standard):**
-```
-🎮 Game: game-abc123
+---
 
-Status: RUNNING
-Phase:  DAY DISCUSSION (Day 2)
+### `mafiactl config`
+View and modify the local `mafia.config.json`.
 
-👥 Players (Alive: 6 / Dead: 4)
-  Alice      Villager  ✓ Alive
-  Bob        Mafia     ✗ Dead (Night 1)
-  Charlie    Doctor    ✓ Alive
-  Diana      Sheriff   ✗ Dead (Vote Day 1)
-  ...
-
-📊 Stats
-  Day:        2
-  Round:      6
-  Duration:   5m 23s
-
-Winner: Town (not yet decided)
+**Usage:**
+```bash
+mafiactl config [command]
 ```
 
-**Output (detailed):**
-```
-🎮 Game: game-abc123
+**Subcommands:**
 
-Status: RUNNING
-Phase:  DAY VOTING (Day 2)
+| Subcommand | Options | Behavior |
+|---|---|---|
+| `show` | `--json` | Print current configuration (JSON or formatted) |
+| `set <key> <value>` | — | Set a top-level key; `true`/`false` are parsed as booleans and numeric strings as numbers |
+| `reset` | `--force` | Reset the file to defaults; asks for confirmation unless `--force` |
 
-👥 Players
-  Alice [V]   Alive  Suspicion: 45%
-  Charlie [D] Alive  Suspicion: 20%
-  Eve [V]     Alive  Suspicion: 65% ← Leading Vote
-  ...
-
-🗳️ Current Vote (2/6 cast)
-  Alice     → Eve     ("Too defensive")
-  Charlie   → Not yet voted
-  ...
-
-🌙 Night Results
-  Night 1: No kill (Doctor protected Charlie)
-  Night 2: Sheriff (Diana) killed
-
-🎯 Sheriff's Investigation Log
-  Night 1: Bob (Mafia) ✓
-  Night 2: Eve (Unknown)
-```
-
-**Output (JSON):**
+The default config written by `reset`:
 ```json
 {
-  "gameId": "game-abc123",
-  "status": "RUNNING",
-  "phase": "DAY_VOTING",
-  "dayNumber": 2,
-  "roundNumber": 6,
-  "players": {
-    "alive": [/* 6 players */],
-    "dead": [/* 4 players */]
-  },
-  "currentVote": {
-    "cast": 2,
-    "total": 6,
-    "leader": "Eve",
-    "distribution": {"Eve": 1, "Frank": 1}
-  },
-  "createdAt": 1703774400000,
-  "durationMs": 323000
+  "numPlayers": 10,
+  "llmProvider": "openai",
+  "llmModel": "openai/gpt-4o-mini",
+  "nightDuration": 60,
+  "dayDuration": 120,
+  "votingDuration": 30
 }
 ```
 
-**Exit Codes:**
-- `0` - Success
-- `1` - Game not found
-
----
-
-### `mafiactl start`
-Start a created game.
-
-**Usage:**
-```bash
-mafiactl start <game-id> [options]
-```
-
 **Examples:**
 ```bash
-# Start game
-mafiactl start game-abc123
-
-# With follow
-mafiactl start game-abc123 && mafiactl attach game-abc123 --follow
-```
-
-**Output:**
-```
-✓ Started game-abc123
-Phase: NIGHT_ACTIONS (Day 0)
-```
-
-**Exit Codes:**
-- `0` - Success
-- `1` - Game not found
-- `2` - Already started
-
----
-
-### `mafiactl pause`
-Pause a running game.
-
-**Usage:**
-```bash
-mafiactl pause <game-id>
-```
-
-**Output:**
-```
-✓ Paused game-abc123
-Phase: DAY_VOTING (Day 2) - PAUSED
+mafiactl config show
+mafiactl config show --json
+mafiactl config set numPlayers 12
+mafiactl config set enable3D true
+mafiactl config reset --force
 ```
 
 ---
 
-### `mafiactl resume`
-Resume a paused game.
+### `mafiactl stats`
+Display game and model statistics fetched from the server.
 
 **Usage:**
 ```bash
-mafiactl resume <game-id>
-```
-
-**Output:**
-```
-✓ Resumed game-abc123
-Phase: DAY_VOTING (Day 2) - RUNNING
-```
-
----
-
-### `mafiactl step`
-Execute a single step (for debugging).
-
-**Usage:**
-```bash
-mafiactl step <game-id> [options]
+mafiactl stats [options]
 ```
 
 **Options:**
 ```
-  --count <n>     Number of steps (default: 1)
+  --json          Output as JSON
+  --games         Show game statistics
+  --models        Show model comparison
+  --verbose       Show detailed statistics (cost summary, API calls, latency, error rate)
+  --server <url>  Server base URL (default: http://localhost:3004)
 ```
+
+The formatted output always includes game statistics and the top-5 model performance table; `--verbose` adds the cost/performance sections. Model data is fetched best-effort from `/api/v1/stats/models` and may be absent.
 
 **Examples:**
 ```bash
-# Single step
-mafiactl step game-abc123
-
-# 5 steps
-mafiactl step game-abc123 --count 5
-
-# Keep stepping until next phase
-while true; do mafiactl step game-abc123; sleep 1; done
-```
-
-**Output:**
-```
-✓ Step executed
-Completed: NIGHT_ACTIONS → MORNING_REVEAL
-Next:      MORNING_REVEAL → DAY_DISCUSSION
+mafiactl stats
+mafiactl stats --models --verbose
+mafiactl stats --json
 ```
 
 ---
 
-### `mafiactl export`
-Export game event log.
+### `mafiactl benchmark`
+Show the accumulated benchmark report from the server, or run a fresh benchmark.
 
 **Usage:**
 ```bash
-mafiactl export <game-id> [options]
+mafiactl benchmark [options]
 ```
 
 **Options:**
 ```
-  -o, --output <file>   Output file (default: stdout)
-  -f, --format <fmt>    Format: jsonl|json (default: jsonl)
-  --include-private     Include THINK and private events
+  --quick              Show the accumulated benchmark report (default behavior)
+  --export <path>      Export results to file (JSON)
+  --json               Output results as JSON
+  --server <url>       Server base URL (default: http://localhost:3004)
+  --timeout <minutes>  Max minutes to wait for a fresh run (default: 30; 0 = wait indefinitely)
+  -g, --games <n>      Run N fresh benchmark games
+  --models <models>    Comma-separated models to benchmark (default:
+                       openai/gpt-4o-mini,openai/gpt-4o)
+  --parallel           Accepted for backward compatibility; ignored
 ```
+
+Behavior:
+- **Report mode** (no `--games`/`--models`): fetches and displays `GET /api/v1/benchmark/report` (summary, per-model results, recommendations).
+- **Fresh-run mode** (`--games` and/or `--models` given): `POST /api/v1/benchmark`, polls the run status every 2 s until a terminal status (COMPLETED/CANCELLED/FAILED), then fetches and displays the accumulated report. At least 2 models are required (benchmarks are pairwise). If the run does not finish within the wait window, the command exits 1 and suggests re-checking `mafiactl benchmark --json` later or a larger `--timeout`.
+- **Export**: `--export <path>` writes the fetched report as pretty-printed JSON to the given path (after display, in either mode).
 
 **Examples:**
 ```bash
-# Export to stdout
-mafiactl export game-abc123
+# Show the accumulated report
+mafiactl benchmark
+mafiactl benchmark --quick
 
-# Export to file
-mafiactl export game-abc123 --output game-abc123.jsonl
+# Run a fresh 2-game benchmark with specific models
+mafiactl benchmark --games 2 --models openai/gpt-4o-mini,openai/gpt-4o
 
-# Export with private events (full log)
-mafiactl export game-abc123 --include-private --output full-log.jsonl
+# Run and export the report as JSON
+mafiactl benchmark --games 2 --export benchmark-report.json
 
-# Export as JSON
-mafiactl export game-abc123 --format json > game.json
+# Wait up to 60 minutes for the run
+mafiactl benchmark --games 2 --timeout 60
 ```
 
-**Output file (jsonl format):**
-```
-{"eventType":"GAME_CREATED","gameId":"game-abc123","sequence":0,...}
-{"eventType":"PHASE_CHANGED","gameId":"game-abc123","sequence":1,...}
-{"eventType":"NIGHT_ACTION_SUBMITTED","gameId":"game-abc123","sequence":2,...}
-...
-```
+**Caveat:** `benchmark export` is listed as a subcommand in `--help` but currently does nothing (it is registered without an action handler and exits 0 with no output). Use `benchmark --export <path>` instead.
 
 ---
 
-### `mafiactl list`
-List games.
+## Ports
 
-**Usage:**
-```bash
-mafiactl list [options]
-```
-
-**Options:**
-```
-  --limit <n>       Number of games (default: 50)
-  --offset <n>      Offset for pagination (default: 0)
-  --status <status> Filter by status
-  --json            Output JSON
-```
-
-**Examples:**
-```bash
-# List recent games
-mafiactl list
-
-# List running games only
-mafiactl list --status RUNNING
-
-# Pagination
-mafiactl list --limit 10 --offset 50
-
-# JSON output
-mafiactl list --json | jq '.games[] | {id, status, phase}'
-```
-
-**Output:**
-```
-🎮 Recent Games (50 total)
-
-ID              Status    Phase         Day   Winner   Created
-─────────────   ────────  ────────────  ────  ──────   ────────────
-game-abc123     RUNNING   DAY_VOTING    2     -        1 hour ago
-game-def456     FINISHED  END           4     town     3 hours ago
-game-ghi789     PAUSED    DAY_DISCUSS   1     -        5 hours ago
-```
-
----
+Direct runs default to `--server http://localhost:3004` (HTTP commands) and `ws://localhost:3004/ws` (`watch-game`). The compose stack exposes the game server API on host port 3004 with the WebSocket at the `/ws` path on the same port — there is no separate WebSocket port. See `apps/cli/src/config.ts` (`DEFAULT_SERVER_URL`, `DEFAULT_WS_URL`).
 
 ## Configuration
 
 ### Config File
-CLI reads from `~/.mafiactl/config.json`:
+The CLI reads `./mafia.config.json` from the current working directory (overridable per-command with `-c/--config` on `run-game`, or the global `--config <path>`). Created by `mafiactl init`.
 
+`init` writes a nested shape (`game.numPlayers`, `game.roles`, `game.nightPhaseDuration`, ..., `llm.provider`, `llm.model`, ...); `config` and `run-game` also accept the flat shape (`numPlayers`, `llmProvider`, `llmModel`, `nightDuration`, `dayDuration`, `votingDuration`). `run-game` normalizes both and falls back to defaults for missing keys.
+
+Example (`init --default`):
 ```json
 {
-  "apiUrl": "http://localhost:3004",
-  "defaultOptions": {
-    "players": 10,
-    "mafia": 3,
-    "mode": "scripted"
-  }
+  "name": "Mafia Game",
+  "version": "1.0.0",
+  "game": {
+    "numPlayers": 10,
+    "roles": [
+      { "role": "MAFIA", "count": 3 },
+      { "role": "DOCTOR", "count": 1 },
+      { "role": "SHERIFF", "count": 1 },
+      { "role": "VIGILANTE", "count": 1 },
+      { "role": "VILLAGER", "count": 4 }
+    ],
+    "nightPhaseDuration": 60,
+    "dayPhaseDuration": 120,
+    "votingDuration": 30,
+    "tieBreaker": "RANDOM",
+    "allowSelfVote": false
+  },
+  "llm": {
+    "provider": "openai",
+    "model": "openai/gpt-4o-mini",
+    "temperature": 0.7,
+    "maxTokens": 2000
+  },
+  "visualization": { "enable3D": false, "enableVoice": false },
+  "logging": { "level": "INFO", "file": "./logs/mafia.log" }
 }
 ```
 
 ### Environment Variables
-- `MAFIACTL_API_URL`: API server URL
-- `MAFIACTL_VERBOSE`: Enable verbose mode (1/0)
-- `MAFIACTL_JSON`: Output JSON format (1/0)
-
----
+- `MAFIA_SERVER_URL`: server base URL used by all server-facing commands when `--server` is not given. For `watch-game`, the value is converted to a WebSocket URL (`http(s)://host` → `ws(s)://host/ws`; `ws://`/`wss://` pass through). Precedence for every command: explicit `--server` flag > `MAFIA_SERVER_URL` > built-in default.
 
 ## Exit Codes
 
-Standard exit codes:
-- `0` - Success
-- `1` - General error (invalid args, API error)
-- `2` - Connection error
-- `3` - Permission denied
-- `130` - Interrupted (Ctrl+C)
-
----
-
-## Interactive Mode
-
-Future enhancement: Interactive mode for debugging.
-
-```bash
-mafiactl interactive game-abc123
-```
-
-Shows TUI with:
-- Live event feed
-- Player roster
-- Control buttons (pause, resume, step)
-- Filter options
-- Search functionality
-
-Uses `blessed` or similar library.
-
----
-
-## Testing
-
-### CLI Tests
-```bash
-# Run CLI tests
-pnpm test:cli
-
-# Test specific command
-pnpm test:cli -- --grep "mafiactl new"
-```
-
-### Example Test
-```typescript
-test('mafiactl new creates game', async () => {
-  const result = await runCli(['new', '--seed', '123', '--json']);
-  expect(result.exitCode).toBe(0);
-  
-  const game = JSON.parse(result.stdout);
-  expect(game.gameId).toMatch(/^game-/);
-  expect(game.config.seed).toBe(123);
-});
-```
+The CLI uses simple exit codes; per-command exit-code tables beyond these are not guaranteed:
+- `0` — success (including clean disconnect / Ctrl+C on `watch-game`)
+- `1` — general error: fatal error, command failure (server unreachable, game failed to start), or unknown command
