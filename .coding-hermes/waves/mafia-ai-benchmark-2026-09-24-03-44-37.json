@@ -1,0 +1,39 @@
+{
+  "tick_id": "mafia-ai-benchmark-2026-09-24-03-44-37",
+  "project": "mafia-ai-benchmark",
+  "board_tick": 192,
+  "wave_budget": 6,
+  "workers": 3,
+  "base_sha": "fd40f7c",
+  "composed_at": "2026-09-24T03:44:37Z",
+  "mode": "wave",
+  "model": "glm-5.3-flash",
+  "provider": "ollama-cloud",
+  "tasks": [
+    {
+      "task_id": "DF-MAFIA-AI-BENCHMARK-7",
+      "title": "Install docs never mention the Docker path; bare-agent compose is undocumented",
+      "worktree": "~/worktrees/mafia-ai-benchmark-DF-MAFIA-AI-BENCHMARK-7",
+      "branch": "wt/DF-MAFIA-AI-BENCHMARK-7",
+      "base_sha": "fd40f7c",
+      "files": ["README.md", "QUICK_START.md"]
+    },
+    {
+      "task_id": "DOC-1",
+      "title": "specs/cli-interface.md: rewrite the stale CLI reference to the real mafiactl commands",
+      "worktree": "~/worktrees/mafia-ai-benchmark-DOC-1",
+      "branch": "wt/DOC-1",
+      "base_sha": "fd40f7c",
+      "files": ["specs/cli-interface.md"]
+    },
+    {
+      "task_id": "DOC-2",
+      "title": "specs/api-specs.md: add benchmark run-lifecycle endpoints",
+      "worktree": "~/worktrees/mafia-ai-benchmark-DOC-2",
+      "branch": "wt/DOC-2",
+      "base_sha": "fd40f7c",
+      "files": ["specs/api-specs.md"]
+    }
+  ],
+  "notes": "Middle-out: three disjoint doc files, no depends_on edges, no shared import chain. DF-MAFIA-AI-BENCHMARK-5 (P2 code) excluded because its board id is duplicated (lines 82/97) and boardctl refuses ambiguous updates."
+}
