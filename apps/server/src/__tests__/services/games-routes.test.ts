@@ -108,6 +108,69 @@ describe('GET /api/v1/games limit enforcement', () => {
 });
 
 /**
+ * DF-MAFIA-AI-BENCHMARK-5 (sub-task D): the legacy adapter ALSO inserts an
+ * IN_PROGRESS row into the repository when it starts a game, so the merged
+ * DB + legacy list previously carried the SAME id twice (one DB row, one
+ * legacy row) — the live API returned 7 rows for 5 unique active ids. The
+ * list must dedupe by id.
+ */
+describe('GET /api/v1/games dedupes ids shared by DB and legacy rows', () => {
+  let repo: FakeRepo;
+  let server: Server;
+  let baseUrl: string;
+
+  beforeEach(async () => {
+    repo = createSqliteBackedRepository() as unknown as FakeRepo;
+    // The shared id exists BOTH as a DB row (inserted by the legacy adapter
+    // at startGame) and in the legacy adapter's active set.
+    repo.seedGame({ id: 'g-shared', status: 'IN_PROGRESS' });
+    repo.seedGame({ id: 'g-other', status: 'ENDED' });
+    // created_at DESC ordering: g-other, g-shared — keep DB order stable.
+
+    const app = express();
+    app.use(express.json());
+    app.use(
+      '/',
+      createGamesRouter(
+        { gameEngine: {}, gameRepository: repo, eventBus: createFakeEventBus() } as any,
+        createLegacyAdapterWithGames(['g-shared']),
+      ),
+    );
+
+    await new Promise<void>((resolve) => {
+      server = app.listen(0, '127.0.0.1', () => resolve());
+    });
+    const address = server.address() as { port: number };
+    baseUrl = `http://127.0.0.1:${address.port}`;
+  });
+
+  afterEach(async () => {
+    await new Promise<void>((resolve, reject) => {
+      server.close((err) => (err ? reject(err) : resolve()));
+    });
+  });
+
+  it('returns each id exactly once when a game exists in both DB and legacy adapter', async () => {
+    const response = await fetch(`${baseUrl}/api/v1/games?limit=50`);
+    expect(response.status).toBe(200);
+    const body = await response.json();
+    expect(body.success).toBe(true);
+    const ids = body.data.map((g: { id: string }) => g.id);
+    expect(ids).toHaveLength(2);
+    expect(new Set(ids).size).toBe(ids.length);
+    expect(ids).toContain('g-shared');
+  });
+
+  it('applies the status filter AFTER dedupe (IN_PROGRESS keeps one g-shared row)', async () => {
+    const response = await fetch(`${baseUrl}/api/v1/games?status=IN_PROGRESS&limit=50`);
+    expect(response.status).toBe(200);
+    const body = await response.json();
+    const ids = body.data.map((g: { id: string }) => g.id);
+    expect(ids).toEqual(['g-shared']);
+  });
+});
+
+/**
  * MAF-GAP-049: status filter validation + application to legacy games.
  *
  * Seeds DB games in mixed statuses and a fake legacy adapter with mixed

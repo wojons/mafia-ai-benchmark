@@ -709,6 +709,14 @@ Per-model wins are games the model's side won, attributed from real per-game mod
 
 ## WebSocket API
 
+> **Note (DF-MAFIA-AI-BENCHMARK-5):** the sections below describe the
+> originally *planned* per-game `/ws/:gameId` protocol (sequence numbers,
+> heartbeats, `since`-based replay). The **live** server today implements a
+> simpler single-endpoint protocol at `ws://host:3004/ws` — message types
+> `PING`, `SUBSCRIBE`, `UNSUBSCRIBE`, `JOIN_GAME`, `LEAVE_GAME`,
+> `SEND_ACTION`, `REQUEST_STATE`. The accurate, code-extracted reference is
+> **[`docs/api/websocket.md`](../docs/api/websocket.md)**.
+
 ### Connection
 
 **Endpoint:** `ws://localhost:3004/ws/:gameId`

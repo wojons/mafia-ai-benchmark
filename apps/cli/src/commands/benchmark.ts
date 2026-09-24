@@ -346,7 +346,27 @@ export class BenchmarkCommand extends Command {
       throw new Error(`Server returned ${response.status}: ${errorText}`);
     }
 
-    return await response.json() as BenchmarkReport;
+    const body = (await response.json()) as
+      | { success: true; data: BenchmarkReport }
+      | { success: false; error?: string };
+
+    // DF-MAFIA-AI-BENCHMARK-5: the server now wraps the report in the
+    // standard { success, data } envelope. Unwrap it; a bare top-level
+    // report (older server) still works.
+    if (
+      'success' in body &&
+      body.success === true &&
+      'data' in body &&
+      body.data &&
+      typeof body.data === 'object'
+    ) {
+      return body.data;
+    }
+    if ('success' in body && body.success === false) {
+      throw new Error(`Server refused report: ${body.error ?? 'unknown error'}`);
+    }
+
+    return body as unknown as BenchmarkReport;
   }
 
   private displayResults(report: BenchmarkReport): void {

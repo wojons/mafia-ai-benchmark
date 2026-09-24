@@ -48,7 +48,9 @@ export function createBenchmarkRouter(context: ServerContext): Router {
         res.setHeader('Content-Type', 'text/csv');
         res.send(statsCollector.exportCSV(gameId));
       } else {
-        res.json(report);
+        // Standard { success, data } envelope (DF-MAFIA-AI-BENCHMARK-5):
+        // every pre-envelope field stays available under .data.
+        res.json({ success: true, data: report });
       }
     } catch {
       res
