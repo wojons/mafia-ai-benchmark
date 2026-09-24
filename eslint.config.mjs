@@ -53,4 +53,16 @@ export default [
       'no-debugger': 'warn',
     },
   },
+  {
+    // Root-level ESM scripts (e.g. scripts/sync-test-counts.mjs) are linted by
+    // the whole-tree scan but fall outside the ts-scoped block above, so they
+    // need explicit Node globals for no-undef.
+    files: ['**/*.mjs'],
+    languageOptions: {
+      globals: {
+        ...globals.node,
+        ...globals.es2022,
+      },
+    },
+  },
 ];
