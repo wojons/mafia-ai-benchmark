@@ -23,6 +23,9 @@
  *   5. avgTokens/avgCost average ONLY over games the model played (036/043)
  *   6. gamesPlayed/wins count DISTINCT games (MAF-GAP-048)
  *   7. report.game.players is a non-null array when ?gameId is passed
+ *   8. /compare wins count DISTINCT won games (QA-MAFIA-AI-BENCHMARK-1):
+ *      multiple winning player rows in one game collapse to ONE win, and
+ *      winRate never exceeds 1
  */
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import express from 'express';
@@ -272,6 +275,15 @@ describe('GET /api/v1/benchmark/report — data-integrity contract (MAF-GAP-064)
     return response.json();
   }
 
+  async function fetchCompare(modelFilter?: string[]): Promise<any> {
+    const url = modelFilter
+      ? `${baseUrl}/api/v1/benchmark/compare?models=${modelFilter.map(encodeURIComponent).join(',')}`
+      : `${baseUrl}/api/v1/benchmark/compare`;
+    const response = await fetch(url);
+    expect(response.status).toBe(200);
+    return response.json();
+  }
+
   // ======================================================================
   // Clause 1 — row uniqueness after normalization (MAF-GAP-045)
   // ======================================================================
@@ -434,5 +446,55 @@ describe('GET /api/v1/benchmark/report — data-integrity contract (MAF-GAP-064)
     expect(report.summary.completedGames).toBe(8); // all except CANCELLED g3
     expect(report.summary.failedGames).toBe(1); // g3
     expect(report.summary.activeGames).toBe(0);
+  });
+
+  // ======================================================================
+  // Clause 8 — /compare distinct-game win aggregation
+  // (QA-MAFIA-AI-BENCHMARK-1: win rate could exceed 100%)
+  // ======================================================================
+  describe('GET /api/v1/benchmark/compare — distinct-game win contract (QA-MAFIA-AI-BENCHMARK-1)', () => {
+    it('counts multiple winning player rows in ONE game as a single win', async () => {
+      const { data } = await fetchCompare();
+      const rows = data.models as any[];
+
+      const mini = rows.find((r) => r.model === 'gpt-4o-mini');
+      expect(mini).toBeDefined();
+      // Seeded: g7 (TWO same-model winners), g8, g9 — 3 games played and
+      // exactly 3 DISTINCT won games. Player-row counting inflates wins
+      // to 4 (winRate 4/3 > 1); distinct-game counting must yield 3/3.
+      expect(mini.gamesPlayed).toBe(3);
+      expect(mini.wins).toBe(3);
+      expect(mini.winRate).toBe(1);
+
+      // The per-role sub-aggregate follows the same rule: g7 contributes
+      // ONE VILLAGER win, not two winning player rows.
+      const villager = mini.rolePerformance.VILLAGER;
+      expect(villager).toBeDefined();
+      expect(villager.gamesPlayed).toBe(3);
+      expect(villager.wins).toBe(3);
+      expect(villager.winRate).toBe(1);
+    });
+
+    it('never reports wins > gamesPlayed or winRate > 1 on any model row', async () => {
+      const { data } = await fetchCompare();
+      const rows = data.models as any[];
+      expect(rows.length).toBeGreaterThanOrEqual(3);
+      for (const row of rows) {
+        expect(row.wins).toBeLessThanOrEqual(row.gamesPlayed);
+        expect(row.winRate).toBeGreaterThanOrEqual(0);
+        expect(row.winRate).toBeLessThanOrEqual(1);
+      }
+    });
+
+    it('keeps distinct-game win counting under the ?models filter', async () => {
+      const { data } = await fetchCompare(['gpt-4o-mini']);
+      const rows = data.models as any[];
+
+      const mini = rows.find((r) => r.model === 'gpt-4o-mini');
+      expect(mini).toBeDefined();
+      expect(mini.gamesPlayed).toBe(3);
+      expect(mini.wins).toBe(3);
+      expect(mini.winRate).toBe(1);
+    });
   });
 });

@@ -752,7 +752,7 @@ export function getCompareReport(
         ${pProvExpr} as provider,
         ${pModelExpr} as model,
         COUNT(DISTINCT p.game_id) as games_played,
-        SUM(CASE WHEN p.won = 1 THEN 1 ELSE 0 END) as wins,
+        COUNT(DISTINCT CASE WHEN p.won = 1 THEN p.game_id END) as wins,
         COALESCE(AVG(p.tokens_used), 0) as avg_tokens,
         COALESCE(AVG(p.role_performance), 0) as avg_role_perf
       FROM players p
@@ -779,7 +779,7 @@ export function getCompareReport(
         ${pModelExpr} as model,
         p.role,
         COUNT(DISTINCT p.game_id) as games_played,
-        SUM(CASE WHEN p.won = 1 THEN 1 ELSE 0 END) as wins
+        COUNT(DISTINCT CASE WHEN p.won = 1 THEN p.game_id END) as wins
       FROM players p
       WHERE p.provider IS NOT NULL AND p.model IS NOT NULL
         AND p.role != 'UNASSIGNED'
