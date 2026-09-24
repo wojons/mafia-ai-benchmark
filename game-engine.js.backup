@@ -16,7 +16,7 @@ console.log('7. Vigilante → Optional Shoot (one-time only)');
 console.log('8. Night Resolution → Day Discussion → Voting');
 console.log('='.repeat(70) + '\n');
 
-const API_KEY = process.env.OPENAI_API_KEY || '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';
+const API_KEY = process.env.OPENAI_API_KEY;
 
 const roleEmojis = {
   'MAFIA': '😈',
