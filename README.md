@@ -59,6 +59,36 @@ pnpm --filter @mafia/cli dev -- benchmark
 pnpm --filter @mafia/cli dev -- benchmark --models openai/gpt-4o-mini,openai/gpt-4o
 ```
 
+### Docker Quick Path
+
+No Node.js or pnpm on the host? The compose stack builds everything inside
+Docker — the only install path that skips the fresh-clone pnpm setup entirely:
+
+```bash
+# 1. Copy the sample env and add your API key (required!)
+cp .env.sample .env
+nano .env
+# OPENAI_API_KEY=sk-or-...HERE
+
+# 2. Build and start the full stack (server + web dashboard)
+docker compose up -d --build
+
+# 3. Open the dashboard and check the API
+#    Dashboard: http://localhost:5174
+#    API health: http://localhost:3004/health
+```
+
+**Prerequisite:** Docker Engine **plus** the Docker Compose v2 plugin
+(`docker compose`, the subcommand — NOT the legacy `docker-compose` binary).
+On a bare Debian/Ubuntu host that means installing the `docker-compose-plugin`
+(or `docker-compose-v2`) package alongside Docker Engine. If you have no
+root/sudo access on the host, there is no compose path — fall back to the pnpm
+steps above.
+
+Already have the stack up and just pulled code changes? The container only
+runs what it was built with — see the **Docker Deployment** section of
+[QUICK_START.md](QUICK_START.md) for the rebuild-after-code-change rule.
+
 ### What You'll See
 
 ```
