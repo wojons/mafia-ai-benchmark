@@ -1,8 +1,8 @@
 import React, { useEffect, useState } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate, useSearchParams } from 'react-router-dom';
 import { useGameStore } from '../stores/gameStore';
 import { useUIStore } from '../stores/uiStore';
-import { formatDistanceToNow } from 'date-fns';
+import GameCard, { type GameListRow } from './GameCard';
 
 const AVAILABLE_MODELS = [
   { label: 'DeepSeek V4 Flash (fast)', value: 'deepseek-v4-flash', provider: 'openrouter' },
@@ -21,9 +21,14 @@ const MAFIA_ROLES: Array<{ role: string; label: string; icon: string }> = [
 
 const GameList: React.FC = () => {
   const navigate = useNavigate();
+  const [searchParams, setSearchParams] = useSearchParams();
   const { games, fetchGames, createGame, connecting } = useGameStore();
   const { searchQuery, setSearchQuery, layout } = useUIStore();
-  const [showNewGame, setShowNewGame] = useState(false);
+  // '/?action=new' (sidebar Quick Action) opens the same create-game modal the
+  // header button opens — no second modal. The initializer covers a fresh
+  // mount (including SSR), the effect covers an in-place navigation from an
+  // already-mounted GameList.
+  const [showNewGame, setShowNewGame] = useState(() => searchParams.get('action') === 'new');
   const [createError, setCreateError] = useState<string | null>(null);
   const [newGameConfig, setNewGameConfig] = useState({
     numPlayers: 10,
@@ -41,7 +46,14 @@ const GameList: React.FC = () => {
   useEffect(() => {
     fetchGames({ limit: 50 });
   }, [fetchGames]);
-  
+
+  // Open the create-game modal when navigated to '/?action=new' while the
+  // GameList is already mounted (a fresh mount is handled by the initializer).
+  useEffect(() => {
+    if (searchParams.get('action') === 'new') {
+      setShowNewGame(true);
+    }
+  }, [searchParams]);
   const filteredGames = games.filter((game) => {
     if (!searchQuery) return true;
     return game.id.toLowerCase().includes(searchQuery.toLowerCase());
@@ -54,7 +66,7 @@ const GameList: React.FC = () => {
         ...newGameConfig,
         roleModels,
       });
-      setShowNewGame(false);
+      closeNewGameModal();
       navigate(`/game/${game.id}`);
     } catch (error) {
       console.error('Failed to create game:', error);
@@ -66,15 +78,16 @@ const GameList: React.FC = () => {
     }
   };
   
-  const getStatusColor = (status: string) => {
-    switch (status) {
-      case 'SETUP': return 'blue';
-      case 'IN_PROGRESS': return 'green';
-      case 'ENDED': return 'gray';
-      default: return 'gray';
+  const closeNewGameModal = () => {
+    setShowNewGame(false);
+    // Drop ?action=new from the URL so a later re-mount / refresh does not
+    // re-open the modal on its own.
+    if (searchParams.get('action') === 'new') {
+      searchParams.delete('action');
+      setSearchParams(searchParams, { replace: true });
     }
   };
-  
+
   if (connecting) {
     return (
       <div className="loading-container">
@@ -143,70 +156,12 @@ const GameList: React.FC = () => {
         ) : (
           <div className={`games-grid ${layout}`}>
             {filteredGames.map((game) => (
-              <div
+              <GameCard
                 key={game.id}
-                className="game-card"
-                onClick={() => navigate(`/game/${game.id}`)}
-              >
-                <div className="game-card-header">
-                  <span className={`status-badge ${getStatusColor(game.status)}`}>
-                    {game.status.replace('_', ' ')}
-                  </span>
-                  <span className="game-id">{game.id.substring(0, 8)}...</span>
-                </div>
-                
-                <div className="game-card-body">
-                  <div className="player-count">
-                    <span className="count">{game.players.length}</span>
-                    <span className="label">Players</span>
-                  </div>
-                  
-                  <div className="game-info">
-                    <div className="info-row">
-                      <span>Created:</span>
-                      <span>{formatDistanceToNow(new Date(game.createdAt), { addSuffix: true })}</span>
-                    </div>
-                    <div className="info-row">
-                      <span>Phase:</span>
-                      <span>{game.currentState?.phase || 'N/A'}</span>
-                    </div>
-                  </div>
-                </div>
-                
-                <div className="game-card-footer">
-                  {game.status === 'IN_PROGRESS' ? (
-                    <button
-                      className="btn btn-small btn-green"
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        navigate(`/watch/${game.id}`);
-                      }}
-                    >
-                      👀 Watch
-                    </button>
-                  ) : game.status === 'SETUP' ? (
-                    <button
-                      className="btn btn-small btn-blue"
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        navigate(`/game/${game.id}`);
-                      }}
-                    >
-                      ➕ Join
-                    </button>
-                  ) : (
-                    <button
-                      className="btn btn-small"
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        navigate(`/game/${game.id}`);
-                      }}
-                    >
-                      📊 View
-                    </button>
-                  )}
-                </div>
-              </div>
+                game={game as unknown as GameListRow}
+                onOpen={(id) => navigate(`/game/${id}`)}
+                onWatch={(id) => navigate(`/watch/${id}`)}
+              />
             ))}
           </div>
         )}
@@ -214,11 +169,11 @@ const GameList: React.FC = () => {
       
       {/* New Game Modal */}
       {showNewGame && (
-        <div className="modal-overlay" onClick={() => setShowNewGame(false)}>
+        <div className="modal-overlay" onClick={closeNewGameModal}>
           <div className="modal" onClick={(e) => e.stopPropagation()}>
             <div className="modal-header">
               <h2>Create New Game</h2>
-              <button className="close-btn" onClick={() => setShowNewGame(false)}>
+              <button className="close-btn" onClick={closeNewGameModal}>
                 ✕
               </button>
             </div>
@@ -349,7 +304,7 @@ const GameList: React.FC = () => {
             </div>
             
             <div className="modal-footer">
-              <button className="btn" onClick={() => setShowNewGame(false)}>
+              <button className="btn" onClick={closeNewGameModal}>
                 Cancel
               </button>
               <button className="btn btn-primary" onClick={handleCreateGame}>
