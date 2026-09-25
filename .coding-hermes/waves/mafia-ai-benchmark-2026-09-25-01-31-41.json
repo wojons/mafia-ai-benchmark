@@ -1,0 +1,55 @@
+{
+  "scheduler_tick_id": "mafia-ai-benchmark-2026-09-25-01-31-41",
+  "created_at": "2026-09-25T01:45:00Z",
+  "board_tick_number": 202,
+  "wave_budget": 7,
+  "dispatched": 4,
+  "tasks": [
+    {
+      "task_id": "DF-MAFIA-AI-BENCHMARK-11",
+      "title": "[dogfood:P1] Finished-game spectator view is empty: votes/discussion/events show placeholders despite 27 recorded events",
+      "priority": "P1",
+      "depends_on": null,
+      "premise_verified": "2026-09-25T01:36Z live: GET /api/v1/games/a4a9d149-08b8-4888-adae-6e35669a4e02/events returns 27 events (rows: id/gameId/type/timestamp/visibility/actorId/targetId/data/metadata; AGENT_SAYS_BROADCASTED + VOTE_CAST + NIGHT_ACTION_SUBMITTED present); GameWatcher.tsx:14-33 WS-only; api.games.getEvents (api.ts:153) unused",
+      "worktree": "~/worktrees/mafia-ai-benchmark-DF-MAFIA-AI-BENCHMARK-11",
+      "branch": "wt/DF-MAFIA-AI-BENCHMARK-11",
+      "base_sha": "ff5d378"
+    },
+    {
+      "task_id": "DF-MAFIA-AI-BENCHMARK-13",
+      "title": "[dogfood:P2] Game list card shape mismatch (no player count, 'Phase: N/A') + dead sidebar 'New Game' link",
+      "priority": "P2",
+      "depends_on": null,
+      "premise_verified": "2026-09-25T01:36Z live: GET /api/v1/games?limit=2 rows carry keys [config, createdAt, id, players, status] — players is a NUMBER (10), currentState null; GameList.tsx:151 renders game.players.length; :144-146 reads game.currentState?.phase; Sidebar.tsx:11 links /?action=new with 0 consumers (App.tsx routes 44-50)",
+      "worktree": "~/worktrees/mafia-ai-benchmark-DF-MAFIA-AI-BENCHMARK-13",
+      "branch": "wt/DF-MAFIA-AI-BENCHMARK-13",
+      "base_sha": "ff5d378"
+    },
+    {
+      "task_id": "DF-MAFIA-AI-BENCHMARK-14",
+      "title": "[dogfood:P2] Web Stats page: Model Leaderboard renders empty and per-game Duration is '—' despite 2457 completed games",
+      "priority": "P2",
+      "depends_on": null,
+      "premise_verified": "2026-09-25T01:36Z live: GET /api/v1/benchmark/compare envelope {success, data:{headToHead, models, trends}}, models[] rows carry provider/model/gamesPlayed/wins/winRate/avgTokensPerGame/avgCostPerGame/avgLatency/rolePerformance; BenchmarkDashboard.tsx:329-331 Model Leaderboard section; ended-game detail rows carry createdAt + endedAt (gameOverAt/startedAt null)",
+      "worktree": "~/worktrees/mafia-ai-benchmark-DF-MAFIA-AI-BENCHMARK-14",
+      "branch": "wt/DF-MAFIA-AI-BENCHMARK-14",
+      "base_sha": "ff5d378"
+    },
+    {
+      "task_id": "DF-MAFIA-AI-BENCHMARK-15",
+      "title": "[dogfood:P2] DF-3 residual: 2 runs still RUNNING after restart; cancel path undocumented",
+      "priority": "P2",
+      "depends_on": null,
+      "premise_verified": "2026-09-25T01:36Z live: apps/server/src/index.ts:84 calls benchmarkRunner.reconcileStrandedRuns() (apps/server/src/services/benchmark-runner.ts); POST /api/v1/benchmark/<runId>/cancel exists and worked in dogfood; README/QUICK_START/GAME_MANAGEMENT grep 'cancel' = 0 hits",
+      "worktree": "~/worktrees/mafia-ai-benchmark-DF-MAFIA-AI-BENCHMARK-15",
+      "branch": "wt/DF-MAFIA-AI-BENCHMARK-15",
+      "base_sha": "ff5d378"
+    }
+  ],
+  "deferred": [
+    {"task_id": "DF-MAFIA-AI-BENCHMARK-12", "reason": "integrity fix spans engine+server+web incl. benchmark/compare consumers — overlaps DF-14's StatsPage band (middle-out test); serial next tick"},
+    {"task_id": "DEPS-001", "reason": "lockfile churn conflicts with any concurrent worker running pnpm install; serial next tick"}
+  ],
+  "merge_plan": "serial merge in dispatch order (DF-11, DF-13, DF-14, DF-15), gitreins guard on each merged tree, full vitest battery on final tree, then push; gitreins task create+start+complete per task post-commit (fleet rule: worker guard restore wipes pre-dispatch tasks)",
+  "dispatch_method": "hermes chat -q via /tmp/maf202_launch.sh <taskid>, terminal background=true pty=true, worker glm-5.3-flash@ollama-cloud"
+}
