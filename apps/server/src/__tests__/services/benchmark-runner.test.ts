@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach } from 'vitest';
-import { BenchmarkRunner } from '../../services/benchmark-runner.js';
+import { BenchmarkRunner, STALE_RUN_MAX_MS } from '../../services/benchmark-runner.js';
 import { createSqliteBackedRepository, createFakeEventBus, createFakeStatsCollector, createFakeAgentCoordinator, createFakeLegacyGameAdapter } from './mocks.js';
 import type { GameEngine } from '../../services/game-engine.js';
 import type { GameEvent } from '@mafia/shared/events';
@@ -413,7 +413,12 @@ describe('BenchmarkRunner', () => {
   // ==========================================================================
 
   describe('run recovery (reconcileStrandedRuns)', () => {
-    /** Seed one stranded run with the given games. */
+    /**
+     * Seed one stranded run with the given games.
+     * `created_at` defaults to "now" so seeded non-terminal runs are FRESH
+     * (inside the max-age window); stale-run tests pass an old timestamp
+     * explicitly.
+     */
     function seedStrandedRun(
       runId: string,
       status: 'QUEUED' | 'RUNNING',
@@ -423,12 +428,13 @@ describe('BenchmarkRunner', () => {
         error?: string | null;
         winner?: string | null;
       }>,
+      createdAt: number = Date.now(),
     ): void {
       repo.insertBenchmarkRun({
         id: runId,
         config: { models: ['openai/model-a', 'openai/model-b'], gamesPerPairing: games.length, numPlayers: 10 },
         status,
-        created_at: 1_700_000_000_000,
+        created_at: createdAt,
       });
       for (const g of games) {
         // benchmark_games.game_id has a FK to games.id — create the parent
@@ -513,6 +519,8 @@ describe('BenchmarkRunner', () => {
     });
 
     it('leaves a run with an unfinished game untouched (genuinely active)', () => {
+      // FRESH run (created_at defaults to now): inside the max-age window,
+      // so the non-terminal shape keeps the leave-active behavior.
       seedStrandedRun('run-active', 'RUNNING', [
         { game_id: 'g-done', completed_at: 1_700_000_100_000, winner: 'MAFIA' },
         { game_id: 'g-live', completed_at: null },
@@ -521,10 +529,98 @@ describe('BenchmarkRunner', () => {
       const summary = runner.reconcileStrandedRuns();
 
       expect(summary.reconciled).toBe(0);
+      expect(summary.staleFailed).toBe(0);
+      expect(summary.leftActive).toBe(1);
       const status = runner.getStatus('run-active')!;
       expect(status.status).toBe('RUNNING');
       expect(status.completedAt).toBeNull();
       expect(status.summary).toBeNull();
+    });
+
+    // =========================================================================
+    // Stale-run sweep (DF-MAFIA-AI-BENCHMARK-15): a non-terminal run with no
+    // terminal game evidence is abandoned once it ages past STALE_RUN_MAX_MS
+    // — the restart killed the only writer that could ever finish its games.
+    // =========================================================================
+
+    it('flips a stale RUNNING run with no live game evidence to FAILED with a reason', () => {
+      // Older than STALE_RUN_MAX_MS, and its unfinished game row can never
+      // gain terminal evidence (the writing subscription died with the old
+      // process) — the durable-evidence reconcile leaves it, the age sweep
+      // retires it.
+      seedStrandedRun(
+        'run-stale',
+        'RUNNING',
+        [
+          { game_id: 'g-stale-done', completed_at: 1_700_000_100_000, winner: 'MAFIA' },
+          { game_id: 'g-stale-live', completed_at: null },
+        ],
+        Date.now() - (STALE_RUN_MAX_MS + 60_000),
+      );
+
+      const summary = runner.reconcileStrandedRuns();
+
+      expect(summary.reconciled).toBe(0);
+      expect(summary.staleFailed).toBe(1);
+      expect(summary.leftActive).toBe(0);
+      const status = runner.getStatus('run-stale')!;
+      expect(status.status).toBe('FAILED');
+      expect(status.error).toContain('abandoned');
+      expect(status.completedAt).not.toBeNull();
+    });
+
+    it('leaves a fresh RUNNING run with an unfinished game active (inside the max-age window)', () => {
+      seedStrandedRun('run-fresh', 'RUNNING', [
+        { game_id: 'g-fresh-live', completed_at: null },
+      ]);
+
+      const summary = runner.reconcileStrandedRuns();
+
+      expect(summary.reconciled).toBe(0);
+      expect(summary.staleFailed).toBe(0);
+      expect(summary.leftActive).toBe(1);
+      const status = runner.getStatus('run-fresh')!;
+      expect(status.status).toBe('RUNNING');
+      expect(status.error).toBeNull();
+      expect(status.completedAt).toBeNull();
+    });
+
+    it('is idempotent for the stale sweep: a second pass does not re-flip or double-count', () => {
+      seedStrandedRun(
+        'run-stale-once',
+        'RUNNING',
+        [{ game_id: 'g-stale-once', completed_at: null }],
+        Date.now() - (STALE_RUN_MAX_MS + 60_000),
+      );
+
+      const first = runner.reconcileStrandedRuns();
+      expect(first.staleFailed).toBe(1);
+      const statusAfterFirst = runner.getStatus('run-stale-once')!;
+      expect(statusAfterFirst.status).toBe('FAILED');
+      const errorAfterFirst = statusAfterFirst.error;
+
+      const second = runner.reconcileStrandedRuns();
+      expect(second.staleFailed).toBe(0);
+      expect(second.inspected).toBe(0);
+      expect(second.reconciled).toBe(0);
+      const statusAfterSecond = runner.getStatus('run-stale-once')!;
+      expect(statusAfterSecond.status).toBe('FAILED');
+      expect(statusAfterSecond.error).toBe(errorAfterFirst);
+    });
+
+    it('terminal evidence wins over age: a stale run whose games are all terminal still recovers COMPLETED', () => {
+      seedStrandedRun(
+        'run-stale-terminal',
+        'RUNNING',
+        [{ game_id: 'g-stale-done', completed_at: 1_700_000_100_000, winner: 'TOWN' }],
+        Date.now() - (STALE_RUN_MAX_MS + 60_000),
+      );
+
+      const summary = runner.reconcileStrandedRuns();
+
+      expect(summary.reconciled).toBe(1);
+      expect(summary.staleFailed).toBe(0);
+      expect(runner.getStatus('run-stale-terminal')!.status).toBe('COMPLETED');
     });
 
     it('is idempotent: reconciling twice reconciles nothing new', () => {

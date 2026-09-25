@@ -171,7 +171,27 @@ The game will:
 | `/api/v1/games/:id`      | GET    | Get game details   |
 | `/api/v1/games/:id/start`| POST   | Start a game       |
 | `/api/v1/benchmark`      | POST   | Run benchmarks     |
+| `/api/v1/benchmark/:runId/cancel` | POST | Cancel a benchmark run |
 | `/api/v1/stats`          | GET    | View statistics    |
+
+### Managing Benchmark Runs
+
+**Cancel a run** (abandon a stuck/unfinished run — the operator action):
+
+```bash
+curl -X POST http://localhost:3004/api/v1/benchmark/<runId>/cancel
+```
+
+Marks the run CANCELLED; its games are left to wind down naturally. Cancel
+fails (404/409-style error) for an unknown or already-terminal run.
+
+**Stale-run sweep:** a run left QUEUED/RUNNING (e.g. the server was
+restarted mid-run) is retired automatically at startup — terminal game
+evidence recovers it as COMPLETED/FAILED, and a run with no terminal game
+evidence older than 7 days (`STALE_RUN_MAX_MS` in
+`apps/server/src/services/benchmark-runner.ts`) is marked FAILED with the
+reason recorded on the run. CANCELLED is never chosen automatically — it is
+yours to set via the cancel endpoint above.
 
 ## Docker Deployment
 
