@@ -11,9 +11,16 @@ import {
   LineElement,
   Filler,
 } from 'chart.js';
-import { Doughnut, Bar, Line } from 'react-chartjs-2';
-import { statsAPI, gamesAPI } from '../services/api';
-import { formatDistanceToNow } from 'date-fns';
+import { Doughnut, Line } from 'react-chartjs-2';
+import { statsAPI, gamesAPI, benchmarkAPI } from '../services/api';
+import BenchmarkLeaderboard, {
+  normalizeCompareModels,
+  type CompareModelRow,
+} from './BenchmarkLeaderboard';
+import GameHistoryTable, {
+  formatDuration,
+  type GameHistoryRow,
+} from './GameHistoryTable';
 
 ChartJS.register(
   ArcElement,
@@ -36,16 +43,6 @@ interface GameStats {
   townWins: number;
 }
 
-interface ModelData {
-  provider: string;
-  model: string;
-  gamesPlayed: number;
-  wins: number;
-  winRate: number;
-  avgTokens: number;
-  avgCost: number;
-}
-
 interface MatchupData {
   modelA: string;
   modelB: string;
@@ -55,47 +52,17 @@ interface MatchupData {
   ties: number;
 }
 
-interface GameRecord {
-  id: string;
-  status: string;
-  players: number;
-  createdAt: string;
+interface GameRecord extends GameHistoryRow {
   config: Record<string, unknown>;
-}
-
-const providerColors: Record<string, string> = {
-  neuralwatt: '#60a5fa',
-  openrouter: '#a78bfa',
-};
-
-function getProviderColor(provider: string): string {
-  const key = provider.toLowerCase();
-  return providerColors[key] || '#9ca3af';
-}
-
-function formatDuration(ms: number): string {
-  if (!ms || isNaN(ms) || ms <= 0) return '\u2014';
-  const seconds = Math.floor(ms / 1000);
-  const minutes = Math.floor(seconds / 60);
-  return `${minutes}m ${seconds % 60}s`;
-}
-
-function getWinner(game: GameRecord): string {
-  const cfg = game.config || {};
-  return (cfg.winner as string) || 'Unknown';
-}
-
-function getPlayers(game: GameRecord): string {
-  const cfg = game.config || {};
-  const names = cfg.playerNames as string[] | undefined;
-  if (names && names.length > 0) return names.join(', ');
-  return `${game.players} players`;
+  /** Detail-endpoint-only fields (present when this row was enriched). */
+  startedAt?: string | null;
+  gameOverAt?: string | null;
 }
 
 const BenchmarkDashboard: React.FC = () => {
   const [stats, setStats] = useState<GameStats | null>(null);
   const [loading, setLoading] = useState(true);
-  const [models, setModels] = useState<ModelData[]>([]);
+  const [models, setModels] = useState<CompareModelRow[]>([]);
   const [modelsLoading, setModelsLoading] = useState(true);
   const [matchups, setMatchups] = useState<MatchupData[]>([]);
   const [matchupsLoading, setMatchupsLoading] = useState(true);
@@ -106,13 +73,14 @@ const BenchmarkDashboard: React.FC = () => {
     statsAPI.getGameStats().then((res) => setStats((res as Record<string, unknown>).data as GameStats || res as GameStats)).catch(console.error).finally(() => setLoading(false));
   }, []);
 
+  // DF-MAFIA-AI-BENCHMARK-14: the leaderboard is fed by the benchmark compare
+  // endpoint, not /stats/models — the live list endpoint returns empty while
+  // /benchmark/compare carries the real per-model aggregates.
   useEffect(() => {
-    statsAPI
-      .getModelComparison()
-      .then((res) => {
-        const data = (res as unknown as Record<string, unknown>).data || res;
-        const arr = Array.isArray(data) ? data : ((data as unknown as Record<string, unknown>).data as ModelData[]) || [];
-        setModels(arr);
+    benchmarkAPI
+      .compare()
+      .then((report) => {
+        setModels(normalizeCompareModels(report));
       })
       .catch(console.error)
       .finally(() => setModelsLoading(false));
@@ -135,8 +103,41 @@ const BenchmarkDashboard: React.FC = () => {
       .getAll({ limit: 50 })
       .then((res) => {
         const data = (res as unknown as Record<string, unknown>).data || res;
-        const arr = Array.isArray(data) ? data : [];
-        setGames(arr);
+        const arr = Array.isArray(data) ? (data as GameRecord[]) : [];
+        // DF-MAFIA-AI-BENCHMARK-14: list rows carry createdAt only — an ended
+        // game's endedAt comes from its detail endpoint (startedAt/gameOverAt
+        // stay null on ended rows, so they are never the duration source).
+        const ended = arr.filter((g) => g.status === 'ENDED');
+        if (ended.length === 0) {
+          setGames(arr);
+          return;
+        }
+        return Promise.all(
+          ended.map((g) =>
+            gamesAPI
+              .get(g.id)
+              .then((detail) => {
+                const d = detail as unknown as {
+                  createdAt?: string | Date;
+                  endedAt?: string | Date | null;
+                };
+                return {
+                  id: g.id,
+                  createdAt: d.createdAt ? new Date(d.createdAt).toISOString() : g.createdAt,
+                  endedAt: d.endedAt ? new Date(d.endedAt).toISOString() : null,
+                };
+              })
+              .catch(() => ({ id: g.id, createdAt: g.createdAt, endedAt: null })),
+          ),
+        ).then((details) => {
+          const byId = new Map(details.map((d) => [d.id, d]));
+          setGames(
+            arr.map((g) => {
+              const d = byId.get(g.id);
+              return d ? { ...g, createdAt: d.createdAt, endedAt: d.endedAt } : g;
+            }),
+          );
+        });
       })
       .catch(console.error)
       .finally(() => setGamesLoading(false));
@@ -172,19 +173,6 @@ const BenchmarkDashboard: React.FC = () => {
     ],
   };
 
-  const sortedModels = [...models].sort((a, b) => b.winRate - a.winRate);
-  const barData = {
-    labels: sortedModels.map((m) => m.model.length > 22 ? m.model.substring(0, 20) + '…' : m.model),
-    datasets: [
-      {
-        label: 'Win Rate %',
-        data: sortedModels.map((m) => m.winRate),
-        backgroundColor: sortedModels.map((m) => getProviderColor(m.provider)),
-        borderRadius: 4,
-      },
-    ],
-  };
-
   const hasMatchups = matchups.length > 0;
   const matchupLabels = matchups.map((m) => `${m.modelA} vs ${m.modelB}`);
   const lineData = {
@@ -215,33 +203,6 @@ const BenchmarkDashboard: React.FC = () => {
     plugins: {
       legend: {
         labels: { color: 'var(--color-text-secondary)', font: { size: 12 } },
-      },
-    },
-  };
-
-  const barOptions = {
-    ...chartOptions,
-    indexAxis: 'y' as const,
-    scales: {
-      x: {
-        max: 100,
-        ticks: { color: 'var(--color-text-muted)', callback: (v: unknown) => `${v}%` },
-        grid: { color: 'var(--color-border)' },
-      },
-      y: {
-        ticks: { color: 'var(--color-text-secondary)', font: { size: 11 } },
-        grid: { display: false },
-      },
-    },
-    plugins: {
-      ...chartOptions.plugins,
-      tooltip: {
-        callbacks: {
-          label: (ctx: { raw: unknown; dataIndex: number }) => {
-            const m = sortedModels[ctx.dataIndex];
-            return [`Win Rate: ${(ctx.raw as number).toFixed(1)}%`, `Games: ${m.gamesPlayed}`, `Wins: ${m.wins}`];
-          },
-        },
       },
     },
   };
@@ -326,22 +287,10 @@ const BenchmarkDashboard: React.FC = () => {
           )}
         </div>
 
-        {/* Model Leaderboard */}
+        {/* Model Leaderboard — fed by GET /api/v1/benchmark/compare (DF-MAFIA-AI-BENCHMARK-14) */}
         <div className="bg-[var(--color-bg)] rounded-xl p-6">
           <h2 className="text-lg font-semibold mb-4">Model Leaderboard</h2>
-          {modelsLoading ? (
-            <div className="flex items-center justify-center py-12">
-              <div className="w-8 h-8 border-3 border-[var(--color-border)] border-t-[var(--color-primary)] rounded-full animate-spin" />
-            </div>
-          ) : sortedModels.length > 0 ? (
-            <div className="h-[280px]">
-              <Bar data={barData} options={barOptions} />
-            </div>
-          ) : (
-            <div className="text-center text-[var(--color-text-muted)] py-12">
-              No model data available
-            </div>
-          )}
+          <BenchmarkLeaderboard payload={models} loading={modelsLoading} />
         </div>
       </div>
 
@@ -366,72 +315,7 @@ const BenchmarkDashboard: React.FC = () => {
       {/* Game History Table */}
       <div className="bg-[var(--color-bg)] rounded-xl p-6">
         <h2 className="text-lg font-semibold mb-4">Game History</h2>
-        {gamesLoading ? (
-          <div className="flex items-center justify-center py-12">
-            <div className="w-8 h-8 border-3 border-[var(--color-border)] border-t-[var(--color-primary)] rounded-full animate-spin" />
-          </div>
-        ) : completedGames.length > 0 ? (
-          <div className="overflow-x-auto -mx-6 px-6">
-            <table className="w-full border-collapse text-sm">
-              <thead>
-                <tr>
-                  <th className="text-left py-3 px-2 font-semibold border-b-2 border-[var(--color-border)] whitespace-nowrap">
-                    Game ID
-                  </th>
-                  <th className="text-left py-3 px-2 font-semibold border-b-2 border-[var(--color-border)] whitespace-nowrap">
-                    Players
-                  </th>
-                  <th className="text-center py-3 px-2 font-semibold border-b-2 border-[var(--color-border)] whitespace-nowrap">
-                    Winner
-                  </th>
-                  <th className="text-right py-3 px-2 font-semibold border-b-2 border-[var(--color-border)] whitespace-nowrap">
-                    Duration
-                  </th>
-                  <th className="text-right py-3 px-2 font-semibold border-b-2 border-[var(--color-border)] whitespace-nowrap">
-                    Date
-                  </th>
-                </tr>
-              </thead>
-              <tbody>
-                {completedGames.map((g) => {
-                  const winner = getWinner(g);
-                  const duration = (g.config?.duration as number) || 0;
-                  return (
-                    <tr key={g.id} className="border-b border-[var(--color-border)]">
-                      <td className="py-3 px-2 font-mono text-xs text-[var(--color-text-muted)]">
-                        {g.id.substring(0, 8)}
-                      </td>
-                      <td className="py-3 px-2 text-[var(--color-text-secondary)]">{getPlayers(g)}</td>
-                      <td className="py-3 px-2 text-center">
-                        <span
-                          className={`inline-block px-2 py-0.5 rounded-full text-xs font-medium ${
-                            winner === 'Mafia'
-                              ? 'bg-[rgba(239,68,68,0.1)] text-[var(--color-danger)]'
-                              : winner === 'Town'
-                              ? 'bg-[rgba(34,197,94,0.1)] text-[var(--color-success)]'
-                              : 'bg-[var(--color-bg-tertiary)] text-[var(--color-text-muted)]'
-                          }`}
-                        >
-                          {winner}
-                        </span>
-                      </td>
-                      <td className="py-3 px-2 text-right text-[var(--color-text-secondary)]">
-                        {duration > 0 ? formatDuration(duration) : '\u2014'}
-                      </td>
-                      <td className="py-3 px-2 text-right text-xs text-[var(--color-text-muted)]">
-                        {formatDistanceToNow(new Date(g.createdAt), { addSuffix: true })}
-                      </td>
-                    </tr>
-                  );
-                })}
-              </tbody>
-            </table>
-          </div>
-        ) : (
-          <div className="text-center text-[var(--color-text-muted)] py-12">
-            No completed games yet
-          </div>
-        )}
+        <GameHistoryTable games={completedGames} loading={gamesLoading} />
       </div>
     </div>
   );

@@ -237,6 +237,45 @@ export const statsAPI = {
 };
 
 // Benchmark API
+export interface CompareModel {
+  provider: string;
+  model: string;
+  gamesPlayed: number;
+  wins: number;
+  winRate: number;
+  avgTokensPerGame: number;
+  avgCostPerGame: number;
+  avgLatency: number;
+  avgRolePerformance: number;
+  rolePerformance: Record<
+    string,
+    {
+      gamesPlayed: number;
+      wins: number;
+      winRate: number;
+    }
+  >;
+}
+
+export interface CompareReport {
+  models: CompareModel[];
+  headToHead: Array<{
+    modelA: string;
+    modelB: string;
+    gamesPlayed: number;
+    modelAWins: number;
+    modelBWins: number;
+    ties: number;
+  }>;
+  trends: Array<{
+    model: string;
+    games: Array<{
+      gameId: string;
+      won: boolean;
+    }>;
+  }>;
+}
+
 export const benchmarkAPI = {
   run: (config: {
     games?: number;
@@ -250,6 +289,16 @@ export const benchmarkAPI = {
       method: 'POST',
       body: config,
     });
+  },
+
+  // DF-MAFIA-AI-BENCHMARK-14: typed access to GET /api/v1/benchmark/compare.
+  // fetchAPI unwraps the { success, data } envelope, so this resolves to the
+  // bare CompareReport. An optional model filter narrows the comparison.
+  compare: (modelFilter?: string[]) => {
+    const query = modelFilter && modelFilter.length > 0
+      ? `?models=${modelFilter.map((m) => encodeURIComponent(m.trim())).filter(Boolean).join(',')}`
+      : '';
+    return fetchAPI<CompareReport>(`/benchmark/compare${query}`);
   },
 };
 
