@@ -47,8 +47,8 @@ won-game count; winRate ≤1 verified live; token/cost fields still 0).
 |---------|---------------|--------|
 | REST API | `http://localhost:3004` | ✅ works (`/health` and `/api/v1/health` both live) |
 | SSE stream | `GET /api/v1/games/<id>/events` with `Accept: text/event-stream` | ✅ works |
-| WebSocket | `ws://localhost:3004/ws` — protocol is `JOIN_GAME` (no `subscribe`) | ✅ works |
-| Web dashboard | `http://localhost:5174` | ✅ serves; API+WS proxied at `/api/v1` and `/ws` |
+| WebSocket | `ws://localhost:3004/ws` — protocol is `JOIN_GAME` (no `subscribe`) | ❌ DF-16 P0 (2026-09-25): connects + acks but delivers ZERO game events server-side — join registers a `game:<id>` EventBus topic nothing publishes to (EventBus is event-type-keyed) and broadcasts with `excludeClientId` on the joiner (websocket/index.ts:186). Poll REST/SSE instead. SUBSCRIBE {gameId} silently no-ops too (DF-19) |
+| Web dashboard | `http://localhost:5174` | ⚠️ serves, but STALE as of 2026-09-25: container still runs the Aug-10 bundle — all tick-202 fixes (DF-11/13/14) + DF-10 fix are merged-but-undeployed (DF-17); symptoms below persist until `docker compose build web server && docker compose up -d web server` |
 | CLI run-game | `pnpm --filter @mafia/cli dev -- run-game --players 5 --yes` | ✅ works (exit 0, ~1 s to create) |
 | CLI watch-game | `… dev -- watch-game <gid>` | ✅ works |
 | CLI benchmark | `… dev -- benchmark --games 1 --models openai/gpt-4o-mini,openai/gpt-4o` | ✅ works; `--timeout <min>` (default 30, 0=∞) |
@@ -106,13 +106,20 @@ GAME_ENDED` (`data.winner`). Dialogue text lives in
 `event.data.{think,says}` — **there is no `payload` key** on events
 (a probe reading `payload` sees "empty" dialogue that is actually there).
 
-## Pitfalls (verified 2026-09-24 unless noted)
+## Pitfalls (verified 2026-09-25 unless noted)
 
 - **Placeholder API key = canned-mock games in your stats (DF-12)** — a fresh
   install with `.env.sample`'s `sk-or-...HERE` key plays complete games in
   seconds via the engine's canned-mock fallback (game-engine.js:714). They land
   in the same games/players/events tables and feed /benchmark/compare. Put a
   REAL key in `.env` before generating any stats you care about.
+- **A REAL key does not save the default model (DF-18, 2026-09-25)** — with the
+  real key, the create-modal default `deepseek-v4-flash` still played a FULL
+  canned-mock game (every THINK canned, every SAYS empty, 85 parse-retries
+  across 3 games) that completed ENDED in 81s and fed real stats unmarked.
+  Pass explicit `roleModels` (e.g. `qwen/qwen3-coder-next`) — and even that
+  "✅ Reliable" model hit a parse retry on EVERY turn this tick (real dialogue,
+  degraded; docs' reliability table is stale).
 - **`/benchmark/compare` winRates are now trustworthy** (fix 7fba228, deployed
   2026-09-24): winRate ≤1, wins=COUNT(DISTINCT won game). The old "never quote
   compare" advice is retired. Note `avgTokensPerGame=0` — token/cost fields are
