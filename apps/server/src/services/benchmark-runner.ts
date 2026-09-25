@@ -76,7 +76,28 @@ export interface ReconcileSummary {
   reconciled: number;
   /** Stranded runs that could NOT be proven terminal (left untouched). */
   leftActive: number;
+  /** Stale non-terminal runs flipped to FAILED this pass (see STALE_RUN_MAX_MS). */
+  staleFailed: number;
 }
+
+/**
+ * Maximum age (ms) a QUEUED/RUNNING benchmark run may sit without terminal
+ * game evidence before the startup reconciliation sweeps it to FAILED
+ * (DF-MAFIA-AI-BENCHMARK-15).
+ *
+ * WHY THIS EXISTS: the durable-evidence reconcile only retires runs whose
+ * benchmark_games rows all carry completed_at/error. A run abandoned
+ * mid-flight (its unfinished game rows can never gain terminal evidence —
+ * the writing subscription died with the old process) would stay RUNNING
+ * forever, one per restart. No game can legitimately stay in flight for
+ * this long, so a non-terminal run older than the max age is by definition
+ * not live and is marked FAILED with a reason recorded. Runs younger than
+ * the max age keep the existing leave-active behavior.
+ *
+ * Plain constant on purpose: this file has no config/env plumbing, and the
+ * value is a policy backstop, not an operator tuning knob.
+ */
+export const STALE_RUN_MAX_MS = 7 * 24 * 60 * 60 * 1000;
 
 interface BenchmarkRunRow {
   id: string;
@@ -309,7 +330,10 @@ export class BenchmarkRunner {
 
   /**
    * Reconcile persisted QUEUED/RUNNING runs whose games are provably
-   * terminal, recovering runs stranded by a server restart.
+   * terminal, recovering runs stranded by a server restart. Additionally,
+   * non-terminal runs older than {@link STALE_RUN_MAX_MS} are swept to
+   * FAILED (stale-run policy, DF-MAFIA-AI-BENCHMARK-15) — see the second
+   * pass below.
    *
    * WHY THIS EXISTS (QA-MAFIA-AI-BENCHMARK-2): a run's terminal status is
    * normally written by the in-process EventBus subscription installed in
@@ -330,12 +354,19 @@ export class BenchmarkRunner {
    *        - any game error  -> FAILED (error + completed_at persisted;
    *          see reconcileTerminalRun),
    *        - otherwise       -> COMPLETED (summary + completed_at persisted).
-   *   2. Any other shape is NOT conclusive and the run is left untouched:
+   *   2. Any other shape is NOT conclusive and the run is left untouched —
    *      games without completed_at/error may genuinely still be in flight
    *      (a live run keeps its RUNNING status, a not-yet-launched QUEUED run
-   *      stays QUEUED). A stranded run with a missing terminal row is
-   *      UNDETECTABLE here — the row's absence is indistinguishable from a
-   *      live game (documented limitation: the runner never deletes game
+   *      stays QUEUED) — UNTIL the run ages past STALE_RUN_MAX_MS. No real
+   *      game stays in flight for anything close to 7 days, so a run this
+   *      old with unfinished game rows is abandoned (the restart killed the
+   *      only writer that could ever give those rows terminal evidence).
+   *      The second pass below flips it to FAILED — deliberately not
+   *      CANCELLED, which is the operator's action via
+   *      POST /api/v1/benchmark/:runId/cancel — with the reason recorded in
+   *      the run's error column. A stranded run with a missing terminal row
+   *      is UNDETECTABLE here — the row's absence is indistinguishable from
+   *      a live game (documented limitation: the runner never deletes game
    *      rows, so in practice the evidence is complete).
    *
    * IDEMPOTENT: the update targets only the stranded status values, so a
@@ -350,7 +381,14 @@ export class BenchmarkRunner {
     );
     const rows = stranded.all() as Array<{ id: string; created_at: number }>;
 
-    const summary: ReconcileSummary = { inspected: rows.length, reconciled: 0, leftActive: 0 };
+    const summary: ReconcileSummary = {
+      inspected: rows.length,
+      reconciled: 0,
+      leftActive: 0,
+      staleFailed: 0,
+    };
+
+    const now = Date.now();
 
     for (const row of rows) {
       const games = this.db
@@ -358,15 +396,38 @@ export class BenchmarkRunner {
         .all(row.id) as BenchmarkGameRow[];
       if (this.reconcileTerminalRun(row.id, games)) {
         summary.reconciled++;
+      } else if (now - row.created_at >= STALE_RUN_MAX_MS) {
+        // Stale-run sweep (DF-MAFIA-AI-BENCHMARK-15): no terminal proof AND
+        // past the max age. Age is measured from the run's persisted
+        // created_at, the only durable timestamp a stranded run carries.
+        this.db
+          .prepare(
+            `UPDATE benchmark_runs
+               SET status = 'FAILED', error = ?, completed_at = ?, updated_at = ?
+             WHERE id = ? AND status IN ('QUEUED', 'RUNNING')`,
+          )
+          .run(
+            `Run abandoned: still non-terminal with no completed game evidence after ` +
+              `${Math.floor(STALE_RUN_MAX_MS / 86_400_000)} days (swept by startup reconciliation)`,
+            now,
+            now,
+            row.id,
+          );
+        summary.staleFailed++;
+        console.log(
+          `[BenchmarkRunner] Run ${row.id} marked FAILED: no terminal game evidence after ` +
+            `${Math.floor(STALE_RUN_MAX_MS / 86_400_000)} days (stale-run sweep)`,
+        );
       } else {
         summary.leftActive++;
       }
     }
 
-    if (summary.reconciled > 0) {
+    if (summary.reconciled > 0 || summary.staleFailed > 0) {
       console.log(
         `[BenchmarkRunner] Reconciled ${summary.reconciled} stranded benchmark run(s) after restart ` +
-          `(${summary.leftActive} left active, ${summary.inspected} inspected)`,
+          `(${summary.staleFailed} stale FAILED, ${summary.leftActive} left active, ` +
+          `${summary.inspected} inspected)`,
       );
     }
 
