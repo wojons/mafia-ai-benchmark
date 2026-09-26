@@ -1,0 +1,51 @@
+{
+  "tick_id": "mafia-ai-benchmark-2026-09-26-11-23-45",
+  "project": "mafia-ai-benchmark",
+  "board_tick": 208,
+  "base_sha": "c2f3a9c",
+  "base": "origin/main",
+  "wave_budget": 8,
+  "dispatched_workers": 3,
+  "created_at": "2026-09-26T06:48:00-05:00",
+  "mode": "wave",
+  "tasks": [
+    {
+      "task_id": "INT-CI-001",
+      "priority": "P1",
+      "worktree": "~/worktrees/mafia-ai-benchmark-INT-CI-001",
+      "branch": "wt/INT-CI-001",
+      "brief": "/tmp/mafia208_msg_INT-CI-001.txt",
+      "model": "glm-5.3-flash",
+      "provider": "ollama-cloud",
+      "files": ["apps/web/package.json", "pnpm-lock.yaml"]
+    },
+    {
+      "task_id": "MAF-GAP-071",
+      "priority": "P2",
+      "worktree": "~/worktrees/mafia-ai-benchmark-MAF-GAP-071",
+      "branch": "wt/MAF-GAP-071",
+      "brief": "/tmp/mafia208_msg_MAF-GAP-071.txt",
+      "model": "glm-5.3-flash",
+      "provider": "ollama-cloud",
+      "files": ["mafia.sh", "QUICK_REFERENCE.md", "CONFIG_GUIDE.md"]
+    },
+    {
+      "task_id": "MAF-GAP-073",
+      "priority": "P1",
+      "worktree": "~/worktrees/mafia-ai-benchmark-MAF-GAP-073",
+      "branch": "wt/MAF-GAP-073",
+      "brief": "/tmp/mafia208_msg_MAF-GAP-073.txt",
+      "model": "glm-5.3-flash",
+      "provider": "ollama-cloud",
+      "files": ["specs/api-specs.md", "docs/api-reference.md", "apps/server/src/index.ts"]
+    }
+  ],
+  "deferred": [
+    {"task_id": "MAF-GAP-072", "reason": "CONFIG_GUIDE.md overlaps MAF-GAP-071 file set; serial next tick"},
+    {"task_id": "MAF-GAP-074", "reason": "port-or-archive judgment on 910 lines of orphaned tests; serial next tick"},
+    {"task_id": "DEPS-001", "reason": "work merged (5b819e6) but CI red is INT-CI-001 scope; closeout after CI green"},
+    {"task_id": "DF-MAFIA-AI-BENCHMARK-24", "reason": "needs bunker-las-03 reachability, not code work"}
+  ],
+  "outcomes": null,
+  "finished_at": null
+}
