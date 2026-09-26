@@ -334,6 +334,9 @@ describe('StatsCollector', () => {
         avgDuration: 0,
         mafiaWins: 0,
         townWins: 0,
+        // DF-MAFIA-AI-BENCHMARK-18: degenerate-games count is part of the
+        // summary contract (0 when nothing is excluded).
+        degenerateGames: 0,
       });
     });
 

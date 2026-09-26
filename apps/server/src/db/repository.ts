@@ -26,6 +26,44 @@ export interface PlayerModelAssignmentRow {
 
 export class GameRepository {
   private db: Database.Database;
+
+  /**
+   * SQL expression classifying a game as DEGENERATE (DF-MAFIA-AI-BENCHMARK-18).
+   *
+   * Degenerate = the LLM never actually played: EVERY broadcast in the game
+   * is empty (the canned-mock fallback at game-engine.js:714 + say-quality
+   * gate leave zero non-empty SAYS) AND the game finished in < 120 s (real
+   * multiplayer LLM games take minutes; the canned-mock run completes in
+   * seconds). Returns 1 (degenerate), 0 (healthy), or NULL (not applicable —
+   * not an ended game). The explicit-flag form is ORed with the event-based
+   * detection so games marked at write time by the legacy adapter and
+   * historical unmarked games share one predicate.
+   */
+  static readonly DEGENERATE_GAME_SQL = `(CASE
+    WHEN g.status != 'ENDED' THEN NULL
+    WHEN COALESCE(json_extract(g.config, '$.degenerate'), 0) = 1 THEN 1
+    WHEN (
+      SELECT COUNT(*)
+      FROM events e
+      WHERE e.game_id = g.id
+        AND e.type = 'AGENT_SAYS_BROADCASTED'
+        AND (
+          COALESCE(json_extract(e.data, '$.says'), '') != ''
+          OR COALESCE(json_extract(e.data, '$.statement'), '') != ''
+          OR COALESCE(json_extract(e.data, '$.message'), '') != ''
+        )
+    ) = 0
+    AND (
+      SELECT COUNT(*)
+      FROM events e
+      WHERE e.game_id = g.id
+        AND e.type = 'AGENT_SAYS_BROADCASTED'
+    ) >= 3
+    AND g.duration IS NOT NULL
+    AND g.duration < 120000
+    THEN 1
+    ELSE 0
+  END)`;
   
   constructor(db: Database.Database) {
     this.db = db;
@@ -525,6 +563,7 @@ export class GameRepository {
     avgDuration: number;
     mafiaWins: number;
     townWins: number;
+    degenerateGames: number;
   } {
     const total = this.db.prepare('SELECT COUNT(*) as count FROM games').get() as { count: number };
     const active = this.db.prepare("SELECT COUNT(*) as count FROM games WHERE status = 'IN_PROGRESS'").get() as { count: number };
@@ -536,9 +575,21 @@ export class GameRepository {
     // by construction, so the summary always reconciles.
     const failed = this.db.prepare("SELECT COUNT(*) as count FROM games WHERE status NOT IN ('IN_PROGRESS','ENDED')").get() as { count: number };
     const avgDuration = this.db.prepare("SELECT AVG(duration) as avg FROM games WHERE status = 'ENDED' AND duration IS NOT NULL").get() as { avg: number | null };
-    const mafiaWins = this.db.prepare("SELECT COUNT(*) as count FROM games WHERE winner = 'MAFIA'").get() as { count: number };
-    const townWins = this.db.prepare("SELECT COUNT(*) as count FROM games WHERE winner = 'TOWN'").get() as { count: number };
-    
+
+    // DF-MAFIA-AI-BENCHMARK-18: degenerate games (all-empty SAYS + short
+    // duration, or explicitly flagged by the legacy adapter) must not count
+    // as wins — the LLM never actually played. Exclusion is at AGGREGATION
+    // time; no rows are deleted. DegenerateGames is surfaced so the API can
+    // report how many games were excluded rather than silently dropping them.
+    const degenerateFilter = `AND COALESCE((${GameRepository.DEGENERATE_GAME_SQL}), 0) = 0`;
+    const mafiaWins = this.db.prepare(`SELECT COUNT(*) as count FROM games g WHERE winner = 'MAFIA' ${degenerateFilter}`).get() as { count: number };
+    const townWins = this.db.prepare(`SELECT COUNT(*) as count FROM games g WHERE winner = 'TOWN' ${degenerateFilter}`).get() as { count: number };
+    const degenerateGames = this.db.prepare(
+      `SELECT COUNT(*) as count FROM games g
+       WHERE g.status = 'ENDED'
+         AND COALESCE((${GameRepository.DEGENERATE_GAME_SQL}), 0) = 1`,
+    ).get() as { count: number };
+
     return {
       totalGames: total.count,
       activeGames: active.count,
@@ -549,6 +600,7 @@ export class GameRepository {
       avgDuration: Math.round((avgDuration.avg || 0) / 1000),
       mafiaWins: mafiaWins.count,
       townWins: townWins.count,
+      degenerateGames: degenerateGames.count,
     };
   }
 
@@ -708,6 +760,8 @@ export class GameRepository {
             AND ac.latency >= 50
         )), 0) as avg_latency
       FROM players p
+      JOIN games gdeg ON gdeg.id = p.game_id
+        AND COALESCE((${GameRepository.DEGENERATE_GAME_SQL.replace(/\bg\./g, 'gdeg.')}), 0) = 0
       WHERE p.provider IS NOT NULL
       GROUP BY ${pProvExpr}, ${pModelExpr}
       ORDER BY games_played DESC

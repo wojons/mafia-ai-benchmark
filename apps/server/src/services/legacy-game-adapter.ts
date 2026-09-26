@@ -353,6 +353,41 @@ export class LegacyGameAdapter extends EventEmitter {
               winner === 'MAFIA' || winner === 'TOWN' ? winner : null;
             db.prepare(`UPDATE games SET status = 'ENDED', ended_at = ?, duration = ?, winner = ?, config = json_set(config, '$.winner', ?) WHERE id = ?`)
               .run(Date.now(), duration, columnWinner, winner, gameId);
+            // DF-MAFIA-AI-BENCHMARK-18: FLAG degenerate games at completion
+            // (never delete rows — data preservation). A canned-mock game
+            // (game-engine.js fallback) leaves zero non-empty SAYS across
+            // the whole event stream and finishes in seconds. The stats
+            // aggregator excludes games carrying this marker from win
+            // counts; the same event-signature test is applied read-time
+            // for historical unflagged games. Threshold (documented):
+            //   degenerate := (zero non-empty SAYS events across the whole
+            //   game, min 3 broadcast events) AND duration < 120_000 ms.
+            try {
+              const saysRows = db.prepare(
+                `SELECT
+                   SUM(CASE WHEN COALESCE(json_extract(data, '$.says'), '') != ''
+                         OR COALESCE(json_extract(data, '$.statement'), '') != ''
+                         OR COALESCE(json_extract(data, '$.message'), '') != ''
+                        THEN 1 ELSE 0 END) AS nonEmpty,
+                   COUNT(*) AS total
+                 FROM events
+                 WHERE game_id = ? AND type = 'AGENT_SAYS_BROADCASTED'`,
+              ).get(gameId) as { nonEmpty: number | null; total: number };
+              const nonEmpty = saysRows?.nonEmpty ?? 0;
+              const total = saysRows?.total ?? 0;
+              const isDegenerate = total >= 3 && nonEmpty === 0 && duration < 120_000;
+              if (isDegenerate) {
+                db.prepare(
+                  `UPDATE games SET config = json_set(config, '$.degenerate', 1) WHERE id = ?`,
+                ).run(gameId);
+                console.warn(
+                  `[LegacyAdapter:${gameId}] DEGENERATE GAME FLAGGED: ${nonEmpty} non-empty SAYS across ${total} broadcasts, duration ${duration}ms — excluded from win stats (DF-MAFIA-AI-BENCHMARK-18).`,
+                );
+              }
+            // eslint-disable-next-line @typescript-eslint/no-explicit-any
+            } catch (e: any) {
+              console.error(`[LegacyAdapter] Failed to evaluate degenerate flag: ${e?.message || e}`);
+            }
             // MAF-GAP-043: persist per-player won (1 winning side / 0
             // losing side) so model win rates read real data. Only when the
             // bridge reported a real winner; games without players rows
