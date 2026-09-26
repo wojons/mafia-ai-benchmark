@@ -438,3 +438,70 @@ parse failed" warnings + 50 empty SAYS across 3 fresh games). Fix shape:
   IN_PROGRESS games whose `started_at` is within 24h (`ACTIVE_FRESHNESS_MS`); NULL
   started_at never counts. The 97 zombie rows remain in the games table untouched —
   the counter just stops reporting them.
+
+## 2026-09-26 — the two headline stat endpoints contradict each other (DF-25) and the summary stands on a hole (DF-26)
+
+Angle this tick: the CLI benchmark campaign (first run to drive
+`benchmark --games 2 --models A,B` end-to-end and cross-check its output).
+The campaign mechanism itself is solid — run a3f14f3d: 2 games, both ENDED
+winner=TOWN, usage persisted (~100K tokens, ~$0.019/game), CLI exit 0 in
+233 s. What broke was everything downstream of "ENDED":
+
+**How the report builds its numbers (models.ts:503-612):** three sources are
+merged per normalized model key — `getModelStats` (players rows),
+`getModelComparisonFromAssignments` (player_model_assignments), and
+`getModelComparisonFromUsage` (token_usage/api_calls). On merge,
+gamesPlayed = dominant-source max, but wins = Math.max across sources. The
+dominant source for gpt-4o-mini is token_usage (2398 distinct game_ids —
+any game the model was ever billed in), while wins can only come from
+players rows (~1743 games). Result: 2400 games / 1745 wins / 72.7% — a
+fraction whose numerator and denominator cover different game sets.
+`/benchmark/compare` takes a different path entirely (role-level player
+rows) and reports 99.8% — which is the P(any of ~4.8 seats on the winning
+side) ≈ 1−0.2^4.8, i.e. "team win share", not skill.
+
+**The lesson (third recurrence of the DF-2 class):** a benchmark product is
+a stats product; every headline fraction must have numerator and denominator
+from the SAME rows, and the two endpoints that claim to describe the same
+reality must be derivable from one shared query. Wins must never be maxed
+across sources — a win set from table A placed over a game count from table
+B is fabricated arithmetic even when both inputs are individually real.
+
+**DF-26 lesson:** `mafiaWinRate=0.08` in the report summary survives because
+the winner column is empty on 56% of ENDED rows (only the legacy-engine path
+writes config.winner → the column was backfilled only for a subset) and the
+event-derived fallback (GAME_OVER events: zero rows in store; GAME_ENDED
+payloads carry the winner instead) lands at a number nobody can corroborate.
+The store's own benchmark_games.team_winner says ~36% mafia. Lesson: a
+derived aggregate must agree with any independent record of the same
+quantity, or the report must say "not derivable" — an implausible number
+with no error is worse than a hole (same lesson as the 97 Active ghost, now
+recurred at the winner level).
+
+**Also this tick:** the CLI's closing "🏆 Winner" banner quotes the global
+accumulated report — so every fresh benchmark run inherits the report's
+pollution as its "verdict" (DF-28); run-scoped truth lives in
+benchmark_games/benchmark_runs (summary column NULL everywhere — never
+populated).
+
+**Verification trail (reproducible):**
+- `curl -s localhost:3004/api/v1/benchmark/report | jq '.data.modelPerformance[0]'`
+  → `{"model":"gpt-4o-mini","gamesPlayed":2400,"wins":1745,"winRate":0.7271}`
+- `curl -s 'localhost:3004/api/v1/benchmark/compare?models=openai/gpt-4o-mini,openai/gpt-4o'`
+  → same model `{"gamesPlayed":1729,"wins":1726,"winRate":0.9983}`
+- Ground truth: `docker cp mafia-ai-benchmark-server-1:/app/data/mafia.db /tmp/x.db`
+  then `SELECT COUNT(DISTINCT game_id) FROM players WHERE model LIKE '%gpt-4o-mini'`
+  → 1746 (1743 ENDED); token_usage distinct → 2398.
+- Campaign run: `node apps/cli/dist/index.js benchmark --games 2 --models openai/gpt-4o-mini,openai/gpt-4o`
+  → 2/2 valid, 233 s. Games c2a6e6ef…, df0fa7a1… both ENDED winner=TOWN.
+- Trap avoided: a `docker cp` of a live SQLite file mid-write reads STALE
+  pages (WAL not copied) — my first snapshot showed the finished games as
+  IN_PROGRESS; the live API + adapter logs ("Game completed. Winner: TOWN,
+  Database updated") corrected it before filing. Copy `-wal`/`-shm` too, or
+  verify through the API.
+
+**pnpm non-TTY trap (DF-27):** pnpm 11's verify-deps-before-run wants to
+recreate node_modules; without a TTY it aborts
+(ERR_PNPM_ABORTED_REMOVE_MODULES_DIR_NO_TTY, exit 1) — deterministic, hits
+every cron/CI/agent user of the documented `pnpm --filter @mafia/cli dev --`
+form. `CI=true` or the built dist binary avoids it.
