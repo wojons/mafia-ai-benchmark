@@ -1,0 +1,49 @@
+{
+  "tick_id": "mafia-ai-benchmark-2026-09-26-04-58-38",
+  "project": "mafia-ai-benchmark",
+  "kind": "wave",
+  "dispatched_at": "2026-09-26T04:58:38Z",
+  "board_tick": 205,
+  "wave_budget": 1,
+  "workers": [
+    {
+      "task": "DEPS-001",
+      "branch": "wt/DEPS-001",
+      "worktree": "~/worktrees/mafia-ai-benchmark-DEPS-001",
+      "base_sha": "541cc46",
+      "brief": "/tmp/brief_df_dep.txt",
+      "log": "/tmp/df_dep.log",
+      "model": "deepseek-v4-flash",
+      "provider": "deepseek-foreman"
+    },
+    {
+      "task": "MAF-GAP-006",
+      "branch": "wt/MAF-GAP-006",
+      "worktree": "~/worktrees/mafia-ai-benchmark-MAF-GAP-006",
+      "base_sha": "541cc46",
+      "brief": "/tmp/brief_df06.txt",
+      "log": "/tmp/df06.log",
+      "model": "deepseek-v4-flash",
+      "provider": "deepseek-foreman"
+    }
+  ],
+  "serial_fallback": "",
+  "finished_at": "2026-09-26T09:00:00Z",
+  "recovery": {
+    "DEPS-001": {
+      "worker_commit": "b5f52da",
+      "branch_tip": "b5f52da",
+      "status": "merged",
+      "merge_commit": "5b819e6",
+      "gate": "PASS after ruff format + pnpm install --frozen-lockfile + build + shared 410/410 + server 363/363 + gitreins full 4/4",
+      "remote": "origin/wt/DEPS-001 b5f52da; merge on origin/main via 5b819e6"
+    },
+    "MAF-GAP-006": {
+      "worker_commit": "1918376",
+      "status": "already_complete_on_main",
+      "gate": "PASS criteria verified: no localhost:3000 in QUICK_START.md, SYSTEM_STATUS.md, ARCHITECTURE.md, README.md, specs; existing commit 1918376 is not an ancestor only because recovery merge base was 541cc46 and later main history already superseded it",
+      "judge": "gitreins verdict 848579d PASS"
+    },
+    "blocked_new_work": "CI is red on the recovered TypeScript 6 dependency tree; normal dispatch deferred."
+  }
+}
