@@ -13,6 +13,12 @@ Configuration lives in **two places**, both repo-local:
 > file is gone — nothing in the monorepo reads it. Messaging limits and
 > role counts are fixed inside the game engine; the tunable surface is
 > players, models, and phase timing.
+>
+> Environment variables are audited against real readers (MAF-GAP-072):
+> every uncommented entry in `.env.sample` has a verified reader, and the
+> old never-read names (`WS_PORT`, `DEFAULT_PLAYERS`, role/message counts,
+> `RATE_LIMIT_PER_MINUTE`, `TOKENS_PER_MINUTE`, `TRACK_COSTS`, …) were
+> removed. The full matrix is below.
 
 ---
 
@@ -202,22 +208,82 @@ curl -X POST localhost:3004/api/v1/games \
   -d '{"numPlayers": 5, "personaSeeds": ["A quiet accountant who loves puzzles", "..."]}'
 ```
 
-The old `PERSONA_ENABLED` / `--personas` flags no longer exist.
+The old `PERSONA_ENABLED` / `--personas` flags no longer exist — personas
+cannot be turned off (confirmed by the MAF-GAP-072 audit: nothing reads
+`PERSONA_ENABLED`).
 
 ---
 
-## 🖥️ Server Settings (`.env`)
+## 💻 Environment Variables (`.env`)
 
-| Variable | Description | Default |
-|----------|-------------|---------|
-| `PORT` | HTTP port for direct `pnpm run server` runs | 3004 |
-| `WS_PORT` | WebSocket port | 3001 |
-| `DB_PATH` | SQLite database path (repo-local) | ./data/mafia.db |
-| `MAFIA_SERVER_URL` | Server URL the CLI/wrapper targets | http://localhost:3004 |
+Copy `.env.sample` to `.env` and fill in your values. Every uncommented
+entry below was audited against the source tree (MAF-GAP-072): each has a
+verified reader; removed names are listed in the
+**Removed (dead) variables** section.
 
-`MAFIA_SERVER_URL` is read by **all** mafiactl commands (run-game,
-list-games, watch-game, stats, benchmark) — export it once to point the
-whole toolchain at a remote server.
+**Scope: server process vs legacy engine child process.** The server
+(`apps/server`) reads its variables itself. Games are actually played by
+the legacy engine (`game-engine.js`), which
+`apps/server/src/services/legacy-game-adapter.ts` spawns as a child
+process; the bridge (`apps/server/src/services/legacy-bridge.js`) loads
+`.env` again inside that child, so engine variables take effect there —
+changing them requires a new game, not a server restart.
+
+| Variable | Scope | Reader | Default |
+|----------|-------|--------|---------|
+| `OPENAI_API_KEY` | engine child | `game-engine.js:688` (legacy engine LLM calls) | — |
+| `OPENAI_BASE_URL` | engine child | `game-engine.js:689` (OpenAI-compatible endpoint, default OpenRouter) | `https://openrouter.ai/api/v1` |
+| `DEFAULT_MODEL` | engine child | `game-engine.js:752` (+ `legacy-game-adapter.ts:612` fallback) | `openai/gpt-4o-mini` |
+| `MAFIA_MODEL` | engine child | `game-engine.js:760` via `ROLE_ENV_MAP` (also set per-game from `config.roleModels` by the adapter) | inherits `DEFAULT_MODEL` |
+| `DOCTOR_MODEL` | engine child | `game-engine.js:761` via `ROLE_ENV_MAP` | inherits `DEFAULT_MODEL` |
+| `SHERIFF_MODEL` | engine child | `game-engine.js:762` via `ROLE_ENV_MAP` | inherits `DEFAULT_MODEL` |
+| `VIGILANTE_MODEL` | engine child | `game-engine.js:763` via `ROLE_ENV_MAP` | inherits `DEFAULT_MODEL` |
+| `VILLAGER_MODEL` | engine child | `game-engine.js:764` via `ROLE_ENV_MAP` (TOWN config keys alias to it) | inherits `DEFAULT_MODEL` |
+| `PERSONA_TEMPERATURE` | engine child | `game-engine.js:1740` | `1.0` |
+| `MAX_CONTEXT_CHARS` | engine child | `game-engine.js:1726` | `100000` |
+| `MAX_RETRIES` | engine child | `game-engine.js:1732` | `3` |
+| `RETRY_DELAY_MS` | engine child | `game-engine.js:1735` | `1000` |
+| `ALLOW_MULTI_ROLE` | engine child | `game-engine.js:1744` (`"true"` enables) | `false` |
+| `LOG_LEVEL` | engine child | `game-engine.js:21` (pino structured logging; inert when `LOG_STRUCTURED=false`) | `info` |
+| `PORT` | server | `apps/server/src/index.ts:28` (container port pinned to 3000 by compose) | 3000 (`DEFAULT_PORT`) |
+| `DB_PATH` | server | `apps/server/src/index.ts:43` (SQLite database path) | `./data/mafia.db` |
+| `NODE_ENV` | server | `apps/server/src/index.ts:128` (`production` hides internal error details in API error responses) | — |
+
+Notes:
+- The engine child also inherits `OPENAI_API_KEY`/`DEFAULT_MODEL` from the
+  server's own environment via `{...process.env}` in the adapter, so values
+  exported in the shell reach the engine even without `.env`.
+- Per-role models can be set per game through `config.roleModels`
+  (mafiactl); the adapter then sets exactly those `*_MODEL` variables in
+  the child environment. An empty value inherits `DEFAULT_MODEL`.
+
+### Removed (dead) variables
+
+These names appeared in `.env.sample` (and sometimes `specs/`) but **no
+non-test source reads them** — verified by scanning `apps/`, `packages/`,
+`game-engine.js` and the game-engine modules for `process.env` readers
+(MAF-GAP-072):
+
+| Variable | Why it is dead |
+|----------|----------------|
+| `WS_PORT` | WebSocket rides the server's HTTP port (`/ws`); no separate WS listener exists |
+| `DEFAULT_PLAYERS` | player count comes from `mafia.config.json` (`numPlayers`) / CLI args |
+| `MAFIA_COUNT`, `DOCTOR_COUNT`, `SHERIFF_COUNT`, `VIGILANTE_COUNT` | role distribution is fixed by the engine |
+| `MAFIA_MESSAGES_PER_PLAYER`, `MAFIA_MAX_MESSAGES`, `TOWN_MESSAGES_PER_PLAYER`, `TOWN_MAX_MESSAGES` | messaging limits are engine-fixed constants |
+| `DAY_DISCUSSION_ROUNDS` | day-discussion flow is engine-fixed |
+| `VOTING_ENABLED`, `NIGHT_PHASE_ENABLED` | phase flow is engine-fixed |
+| `PERSONA_ENABLED` | personas are always on (old `--personas` flag is gone too) |
+| `DEFAULT_TEMPERATURE` | engine pins temperature in code (0.7 default) |
+| `DEFAULT_MAX_TOKENS` | engine pins `maxTokens: 800` in code |
+| `RATE_LIMIT_PER_MINUTE`, `TOKENS_PER_MINUTE` | no rate limiter reads environment; provider modules handle 429s |
+| `TRACK_COSTS` | cost tracking has no on/off switch; usage is always collected |
+| `ANTHROPIC_BASE_URL`, `GOOGLE_BASE_URL`, `DEEPSEEK_BASE_URL`, `GROQ_BASE_URL`, `META_BASE_URL`, `MISTRAL_BASE_URL`, `XAI_BASE_URL`, `QWEN_BASE_URL` | provider modules pin their endpoints (e.g. `anthropic.ts:37`); only `OPENAI_BASE_URL` is read |
+| `DEBUG` | the `DEBUG` token appears in the shared logging enum (`LogLevel.DEBUG`), but no `process.env.DEBUG` reader exists |
+
+`MAX_CONTEXT_CHARS` is intentionally **not** in the removed table: it is
+live (engine context budget, `game-engine.js:1726`). `MAFIA_SERVER_URL`
+is also not `.env`-scoped — mafiactl (`apps/cli/src/config.ts`) and
+`mafia.sh` read it from your shell export.
 
 ---
 
@@ -330,5 +396,5 @@ Or benchmark two models head-to-head:
 ---
 
 *Last Updated: September 2026 (rewritten against the pnpm monorepo —
-MAF-GAP-071)*
-*Version: 4.0*
+MAF-GAP-071; env sample audited against real readers — MAF-GAP-072)*
+*Version: 4.1*
