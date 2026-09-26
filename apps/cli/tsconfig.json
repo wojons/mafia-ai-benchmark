@@ -22,7 +22,6 @@
     "noFallthroughCasesInSwitch": true,
     "allowSyntheticDefaultImports": true,
     "types": ["node"],
-    "baseUrl": ".",
     "paths": {
       "@mafia/shared/*": ["../packages/shared/src/*"]
     }

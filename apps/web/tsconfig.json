@@ -17,9 +17,8 @@
     "sourceMap": true,
     "allowSyntheticDefaultImports": true,
     "types": ["vite/client"],
-    "baseUrl": ".",
     "paths": {
-      "@mafia/shared/*": ["../../packages/shared/src/*"]
+      "@mafia/shared/*": ["../../packages/shared/dist/*"]
     }
   },
   "include": ["src"],
