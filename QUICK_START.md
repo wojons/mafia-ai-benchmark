@@ -5,7 +5,8 @@ Get up and running in 5 minutes!
 ## Prerequisites
 
 - **Node.js** v20 or higher
-- **pnpm** (install with `npm install -g pnpm`)
+- **pnpm** — dev box with Node+npm: `npm install -g pnpm` (or `corepack enable pnpm`). Bare/minimal box (no sudo, no npm — Debian containers, CI images): install to your home dir with
+  `curl -fsSL https://get.pnpm.io/install.sh | sh -` then reopen your shell (the installer appends the pnpm dir to your PATH profile). Verify with `pnpm --version`; without this step every later command fails with `pnpm: command not found`.
 - **OpenRouter API Key** (free at https://openrouter.ai/keys)
 
 ## Step 1: Get an API Key
