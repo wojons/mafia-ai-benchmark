@@ -30,6 +30,22 @@ attributed to models that did not play. See [`specs/api-specs.md`](../specs/api-
 
 - `GET /health` and `GET /api/v1/health` — identical payload (`status`, `timestamp`, `uptime`, `memory`)
 
+## WebSocket protocol
+
+Real-time game events stream over `/ws` (server :3004). The per-game channel
+is **`JOIN_GAME {gameId}`**: the client is registered on that game's event
+stream and receives `GAME_EVENT` frames for every event the game publishes
+(`LEAVE_GAME` ends the stream). The legacy
+**`SUBSCRIBE {gameId}`** (or `game_id`) now aliases to that same
+`JOIN_GAME` registration — it replies `SUBSCRIBED` with
+`{ eventTypes: ["GAME_EVENT"], gameId }` and the client really receives the
+game's frames; it previously acked while registering nothing (silent no-op,
+DF-MAFIA-AI-BENCHMARK-19). **`SUBSCRIBE {eventTypes: [...]}`** (no gameId)
+is unchanged: it registers event-type subscriptions and echoes
+`{ eventTypes }`. The full code-extracted protocol reference (all message
+types, envelopes, error cases) lives in
+[`api/websocket.md`](api/websocket.md).
+
 ## Quick links
 
 | Document | Purpose |
