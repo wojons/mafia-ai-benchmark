@@ -11,6 +11,28 @@ export interface CompareModelRow {
   avgLatency?: number;
 }
 
+/**
+ * DF-MAFIA-AI-BENCHMARK-12: the count of mock-flagged games the compare
+ * report excluded from the model aggregates. Reads it off any accepted
+ * payload shape (envelope / bare report); undefined when the server did
+ * not send it (older backend) so the UI hides the note instead of lying.
+ */
+export function extractMockGamesCount(payload: unknown): number | undefined {
+  const candidates: unknown[] = [];
+  if (payload && typeof payload === 'object') {
+    candidates.push(payload);
+    const obj = payload as Record<string, unknown>;
+    if ('data' in obj && obj.data && typeof obj.data === 'object') {
+      candidates.push(obj.data);
+    }
+  }
+  for (const c of candidates) {
+    const v = (c as Record<string, unknown>).mockGames;
+    if (typeof v === 'number' && Number.isFinite(v) && v >= 0) return v;
+  }
+  return undefined;
+}
+
 const providerColors: Record<string, string> = {
   neuralwatt: '#60a5fa',
   openrouter: '#a78bfa',
@@ -73,10 +95,18 @@ const BenchmarkLeaderboard: React.FC<BenchmarkLeaderboardProps> = ({ payload, lo
   }
 
   const rows = sortLeaderboardRows(normalizeCompareModels(payload));
+  // DF-MAFIA-AI-BENCHMARK-12: mock games the report EXCLUDED — flagged
+  // here so a placeholder-key install cannot pass as real benchmark data.
+  const mockGames = extractMockGamesCount(payload);
 
   if (rows.length === 0) {
     return (
       <div className="text-center text-[var(--color-text-muted)] py-12">
+        {mockGames !== undefined && mockGames > 0 ? (
+          <p data-testid="mock-games-note">
+            {mockGames} mock game(s) excluded (every provider call fell back to canned mock)
+          </p>
+        ) : null}
         No model data available
       </div>
     );
@@ -84,6 +114,14 @@ const BenchmarkLeaderboard: React.FC<BenchmarkLeaderboardProps> = ({ payload, lo
 
   return (
     <div className="overflow-x-auto">
+      {mockGames !== undefined && mockGames > 0 ? (
+        <p
+          className="text-[var(--color-text-muted)] text-xs mb-2"
+          data-testid="mock-games-note"
+        >
+          {mockGames} mock game(s) excluded (every provider call fell back to canned mock)
+        </p>
+      ) : null}
       <table className="w-full border-collapse text-sm" data-testid="model-leaderboard">
         <thead>
           <tr>

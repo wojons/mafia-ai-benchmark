@@ -204,6 +204,8 @@ export const statsAPI = {
       avgDuration: number;
       mafiaWins: number;
       townWins: number;
+      degenerateGames?: number;
+      mockGames?: number;
     }>('/stats');
   },
   
@@ -267,6 +269,12 @@ export interface CompareReport {
     modelBWins: number;
     ties: number;
   }>;
+  /**
+   * DF-MAFIA-AI-BENCHMARK-12: count of games excluded from the model
+   * aggregates as mock (every provider call fell back to the canned-mock
+   * fallback). Surfaced so the exclusion is honest, not silent.
+   */
+  mockGames?: number;
   trends: Array<{
     model: string;
     games: Array<{

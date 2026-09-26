@@ -64,7 +64,28 @@ export class GameRepository {
     THEN 1
     ELSE 0
   END)`;
-  
+
+  /**
+   * SQL expression classifying a game as MOCK (DF-MAFIA-AI-BENCHMARK-12).
+   *
+   * Mock = every provider call fell back to the engine's canned-mock
+   * responses (game-engine.js getMockResponse — e.g. an invalid or
+   * placeholder API key). Unlike degenerate (DF-18), these games carry
+   * real-looking SAYS/VOTE/ACTION events — the mock phrases pass the
+   * say-quality gate — so the event signature alone cannot catch them.
+   * The honest signal is the usage data the bridge reports at done:
+   * a real game records real token counts from actual provider responses,
+   * a mock game records ZERO real tokens. The legacy adapter flags that
+   * at write time (games.config.$.mock = 1) and every aggregate that
+   * excludes mock games uses THIS shared expression so the surfaces
+   * cannot drift. Returns 1 (mock), 0 (not mock), or NULL (not applicable
+   * — not an ended game).
+   */
+  static readonly MOCK_GAME_SQL = `(CASE
+    WHEN g.status != 'ENDED' THEN NULL
+    WHEN COALESCE(json_extract(g.config, '$.mock'), 0) = 1 THEN 1
+    ELSE 0
+  END)`;
   constructor(db: Database.Database) {
     this.db = db;
   }
@@ -564,6 +585,7 @@ export class GameRepository {
     mafiaWins: number;
     townWins: number;
     degenerateGames: number;
+    mockGames: number;
   } {
     const total = this.db.prepare('SELECT COUNT(*) as count FROM games').get() as { count: number };
     const active = this.db.prepare("SELECT COUNT(*) as count FROM games WHERE status = 'IN_PROGRESS'").get() as { count: number };
@@ -581,13 +603,27 @@ export class GameRepository {
     // as wins — the LLM never actually played. Exclusion is at AGGREGATION
     // time; no rows are deleted. DegenerateGames is surfaced so the API can
     // report how many games were excluded rather than silently dropping them.
-    const degenerateFilter = `AND COALESCE((${GameRepository.DEGENERATE_GAME_SQL}), 0) = 0`;
+    // DF-MAFIA-AI-BENCHMARK-12: mock games (canned-mock fallback for every
+    // provider call — zero real tokens) are excluded with the same rule.
+    const degenerateFilter = `AND COALESCE((${GameRepository.DEGENERATE_GAME_SQL}), 0) = 0
+       AND COALESCE((${GameRepository.MOCK_GAME_SQL}), 0) = 0`;
     const mafiaWins = this.db.prepare(`SELECT COUNT(*) as count FROM games g WHERE winner = 'MAFIA' ${degenerateFilter}`).get() as { count: number };
     const townWins = this.db.prepare(`SELECT COUNT(*) as count FROM games g WHERE winner = 'TOWN' ${degenerateFilter}`).get() as { count: number };
     const degenerateGames = this.db.prepare(
       `SELECT COUNT(*) as count FROM games g
        WHERE g.status = 'ENDED'
          AND COALESCE((${GameRepository.DEGENERATE_GAME_SQL}), 0) = 1`,
+    ).get() as { count: number };
+
+    // DF-MAFIA-AI-BENCHMARK-12: mock games (every provider call fell back
+    // to the canned-mock fallback — zero real tokens) must not count as
+    // wins either. Same shape as degenerate: excluded at AGGREGATION time,
+    // rows preserved, and the count is SURFACED so the exclusion is
+    // auditable rather than silent.
+    const mockGames = this.db.prepare(
+      `SELECT COUNT(*) as count FROM games g
+       WHERE g.status = 'ENDED'
+         AND COALESCE((${GameRepository.MOCK_GAME_SQL}), 0) = 1`,
     ).get() as { count: number };
 
     return {
@@ -601,6 +637,7 @@ export class GameRepository {
       mafiaWins: mafiaWins.count,
       townWins: townWins.count,
       degenerateGames: degenerateGames.count,
+      mockGames: mockGames.count,
     };
   }
 
@@ -762,6 +799,7 @@ export class GameRepository {
       FROM players p
       JOIN games gdeg ON gdeg.id = p.game_id
         AND COALESCE((${GameRepository.DEGENERATE_GAME_SQL.replace(/\bg\./g, 'gdeg.')}), 0) = 0
+        AND COALESCE((${GameRepository.MOCK_GAME_SQL.replace(/\bg\./g, 'gdeg.')}), 0) = 0
       WHERE p.provider IS NOT NULL
       GROUP BY ${pProvExpr}, ${pModelExpr}
       ORDER BY games_played DESC

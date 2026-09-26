@@ -8,6 +8,7 @@ import type { GameRepository } from '../../db/repository.js';
 import { GameRepository as GameRepositoryClass } from '../../db/repository.js';
 import { getGameWinnerFromEvents } from './wins.js';
 import { getDegenerateGameIds } from './degenerate.js';
+import { getMockGameIds, getMockGameCounts } from './mock.js';
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 type AnyRecord = Record<string, any>;
@@ -139,8 +140,14 @@ function getModelComparisonFromAssignments(
   // DF-MAFIA-AI-BENCHMARK-18: degenerate games (all-empty SAYS + short
   // duration / flagged) never enter per-model aggregates — the LLM never
   // played them, so gamesPlayed/wins/winRate must not count them.
+  // DF-MAFIA-AI-BENCHMARK-12: mock games (canned-mock fallback for every
+  // provider call, write-time flagged) are excluded with the same rule —
+  // the mock phrases pass the say gate, so the event signature alone
+  // cannot catch them; the write-time usage marker can.
   const degenerateGames = new Set(getDegenerateGameIds(gameRepository));
-  const isCounted = (gameId: string): boolean => !degenerateGames.has(gameId);
+  const mockGames = new Set(getMockGameIds(gameRepository));
+  const isCounted = (gameId: string): boolean =>
+    !degenerateGames.has(gameId) && !mockGames.has(gameId);
 
   const byModel = new Map<
     string,
@@ -316,7 +323,9 @@ function getSideAttributedWinGames(
   try {
     // DF-MAFIA-AI-BENCHMARK-18: degenerate games carry no real play — a
     // "win" there must not be side-attributed to any model.
+    // DF-MAFIA-AI-BENCHMARK-12: same for mock games (write-time flag).
     const degenerateGames = new Set(getDegenerateGameIds(gameRepository));
+    const mockGames = new Set(getMockGameIds(gameRepository));
     const pProvExpr = normalizedProviderSql('p');
     const pModelExpr = normalizedModelSql('p');
     const rows = db.prepare(`
@@ -340,6 +349,7 @@ function getSideAttributedWinGames(
     for (const row of rows) {
       if (!row.provider || !row.model) continue;
       if (degenerateGames.has(row.game_id)) continue;
+      if (mockGames.has(row.game_id)) continue;
       if (isObjectObjectSentinel(row.provider) || isObjectObjectSentinel(row.model)) continue;
       let winner: 'MAFIA' | 'TOWN' | null = null;
       if (row.winner === 'MAFIA' || row.winner === 'TOWN') {
@@ -401,6 +411,9 @@ function getModelComparisonFromUsage(
   // DF-MAFIA-AI-BENCHMARK-18: degenerate games never enter per-model usage
   // aggregates — the model never really played them. The shared predicate
   // (aliased on games g) is applied in-SQL so no per-game re-walk is needed.
+  // DF-MAFIA-AI-BENCHMARK-12: mock games (write-time $.mock flag) are
+  // excluded with the same rule — their zero-token usage rows must not
+  // fabricate "played" model rows.
   const rows = db.prepare(`
     SELECT ${tuProvExpr} as provider, ${tuModelExpr} as model,
            COUNT(DISTINCT tu.game_id) as games,
@@ -410,6 +423,7 @@ function getModelComparisonFromUsage(
     JOIN games g ON g.id = tu.game_id
     WHERE g.status = 'ENDED'
       AND COALESCE((${GameRepositoryClass.DEGENERATE_GAME_SQL}), 0) = 0
+      AND COALESCE((${GameRepositoryClass.MOCK_GAME_SQL}), 0) = 0
     GROUP BY ${tuProvExpr}, ${tuModelExpr}
   `).all() as Array<{
     provider: string;
@@ -655,8 +669,10 @@ function getHonestReportFallbackModels(
   // DF-MAFIA-AI-BENCHMARK-18: shared degenerate exclusion for the fallback
   // player/usage queries below (games alias gdeg on the players queries;
   // the token_usage query filters directly on its own games alias g).
+  // DF-MAFIA-AI-BENCHMARK-12: mock games are excluded with the same rule.
   const degenerateJoin = `JOIN games gdeg ON gdeg.id = p.game_id
-        AND COALESCE((${GameRepositoryClass.DEGENERATE_GAME_SQL.replace(/\bg\./g, 'gdeg.')}), 0) = 0`;
+        AND COALESCE((${GameRepositoryClass.DEGENERATE_GAME_SQL.replace(/\bg\./g, 'gdeg.')}), 0) = 0
+        AND COALESCE((${GameRepositoryClass.MOCK_GAME_SQL.replace(/\bg\./g, 'gdeg.')}), 0) = 0`;
 
   // 1. players-table rows (any role) — wins from players.won per row.
   try {
@@ -712,6 +728,7 @@ function getHonestReportFallbackModels(
       WHERE g.status = 'ENDED'
         AND tu.provider IS NOT NULL AND tu.model IS NOT NULL
         AND COALESCE((${GameRepositoryClass.DEGENERATE_GAME_SQL}), 0) = 0
+        AND COALESCE((${GameRepositoryClass.MOCK_GAME_SQL}), 0) = 0
       GROUP BY ${tuProvExpr}, ${tuModelExpr}
     `).all() as Array<{
       provider: string;
@@ -779,6 +796,12 @@ export function getCompareReport(
     modelBWins: number;
     ties: number;
   }>;
+  /**
+   * DF-MAFIA-AI-BENCHMARK-12: count of ENDED games excluded from the
+   * model aggregates as mock (every provider call fell back to the
+   * canned-mock fallback). Surfaced so the exclusion is auditable.
+   */
+  mockGames: number;
   trends: Array<{
     model: string;
     games: Array<{
@@ -793,6 +816,11 @@ export function getCompareReport(
 } {
   const db = gameRepository.getDatabase();
 
+  // DF-MAFIA-AI-BENCHMARK-12: count of mock games excluded from the
+  // aggregates below — surfaced on the report so the exclusion is
+  // auditable rather than silent.
+  const mockGamesCount = getMockGameCounts(gameRepository);
+
   const modelList =
     modelFilter && modelFilter.length > 0 ? modelFilter : null;
 
@@ -806,8 +834,10 @@ export function getCompareReport(
   // DF-MAFIA-AI-BENCHMARK-18: exclude degenerate games (all-empty SAYS +
   // short duration / flagged) from every per-model aggregate in the report.
   // The players alias is p and games alias g in all queries below.
+  // DF-MAFIA-AI-BENCHMARK-12: mock games are excluded with the same rule.
   const degenerateJoin = `JOIN games gdeg ON gdeg.id = p.game_id
-        AND COALESCE((${GameRepositoryClass.DEGENERATE_GAME_SQL.replace(/\bg\./g, 'gdeg.')}), 0) = 0`;
+        AND COALESCE((${GameRepositoryClass.DEGENERATE_GAME_SQL.replace(/\bg\./g, 'gdeg.')}), 0) = 0
+        AND COALESCE((${GameRepositoryClass.MOCK_GAME_SQL.replace(/\bg\./g, 'gdeg.')}), 0) = 0`;
   let modelQuery = `
       SELECT
         ${pProvExpr} as provider,
@@ -896,9 +926,12 @@ export function getCompareReport(
                tu.game_id,
                SUM(tu.cost) as cost_sum
         FROM token_usage tu
+        JOIN games gmock ON gmock.id = tu.game_id
         WHERE tu.provider IS NOT NULL AND tu.model IS NOT NULL
           AND tu.provider != '${OBJECT_OBJECT_SENTINEL}'
           AND tu.model != '${OBJECT_OBJECT_SENTINEL}'
+          AND COALESCE((${GameRepositoryClass.DEGENERATE_GAME_SQL.replace(/\bg\./g, 'gmock.')}), 0) = 0
+          AND COALESCE((${GameRepositoryClass.MOCK_GAME_SQL.replace(/\bg\./g, 'gmock.')}), 0) = 0
     `;
   const costParams: string[] = [];
   if (modelList) {
@@ -1090,6 +1123,8 @@ export function getCompareReport(
       WHERE g.status = 'ENDED'
         AND pma.provider != '${OBJECT_OBJECT_SENTINEL}'
         AND pma.model != '${OBJECT_OBJECT_SENTINEL}'
+        AND COALESCE((${GameRepositoryClass.DEGENERATE_GAME_SQL}), 0) = 0
+        AND COALESCE((${GameRepositoryClass.MOCK_GAME_SQL}), 0) = 0
     `).all() as Array<{
       provider: string;
       model: string;
@@ -1153,6 +1188,7 @@ export function getCompareReport(
     return {
       models: normalizedModels,
       headToHead,
+      mockGames: mockGamesCount,
       trends: fallbackTrends,
     };
   }
@@ -1195,7 +1231,7 @@ export function getCompareReport(
     return { model, games, cumulativeWinRate };
   });
 
-  return { models, headToHead, trends };
+  return { models, headToHead, mockGames: mockGamesCount, trends };
 }
 
 /**

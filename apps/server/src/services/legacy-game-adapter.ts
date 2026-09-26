@@ -388,6 +388,54 @@ export class LegacyGameAdapter extends EventEmitter {
             } catch (e: any) {
               console.error(`[LegacyAdapter] Failed to evaluate degenerate flag: ${e?.message || e}`);
             }
+            // DF-MAFIA-AI-BENCHMARK-12: FLAG mock games at completion
+            // (never delete rows — data preservation). A canned-mock game
+            // (game-engine.js getMockResponse fallback — every LLM call
+            // failed, e.g. an invalid/placeholder key) completes with
+            // real-looking VOTE/ACTION/SAYS events, so the DF-18 event
+            // signature does NOT catch the common case where the mock
+            // phrases pass the say-quality gate. The honest signal lives
+            // in the usage data the bridge reports at done: a real game
+            // records real token counts from actual provider responses;
+            // a mock game has NONE (every per-model usage row carries
+            // totalTokens 0 — the tracker's config-derived fallback rows
+            // — or there are no usage rows at all), unless REAL per-player
+            // usage (usageByPlayer with tokens > 0) proves play.
+            // Threshold (documented): zero real tokens across the whole
+            // game. Detection lives HERE, in the adapter — game-engine.js
+            // stays untouched (per the row's constraint).
+            try {
+              // eslint-disable-next-line @typescript-eslint/no-explicit-any
+              const doneUsage = Array.isArray(message.usage) ? (message.usage as any[]) : [];
+              // eslint-disable-next-line @typescript-eslint/no-explicit-any
+              const donePlayerUsage = Array.isArray(message.usageByPlayer) ? (message.usageByPlayer as any[]) : [];
+              // The usage signal must be PRESENT (the bridge's collectUsage
+              // always returns at least the config-derived rows — never an
+              // empty array in production). An absent/empty usage payload
+              // carries no signal and stays unflagged (conservative: we
+              // never flag on missing data, mirroring the DF-18 rule that
+              // never flags on missing events).
+              const perModelTokens = doneUsage.reduce(
+                (sum, u) => sum + (typeof u?.totalTokens === 'number' ? u.totalTokens : 0),
+                0,
+              );
+              const perPlayerTokens = donePlayerUsage.reduce(
+                (sum, u) => sum + (typeof u?.totalTokens === 'number' ? u.totalTokens : 0),
+                0,
+              );
+              const isMock = doneUsage.length > 0 && perModelTokens <= 0 && perPlayerTokens <= 0;
+              if (isMock) {
+                db.prepare(
+                  `UPDATE games SET config = json_set(config, '$.mock', 1) WHERE id = ?`,
+                ).run(gameId);
+                console.warn(
+                  `[LegacyAdapter:${gameId}] MOCK GAME FLAGGED: zero real tokens across ${doneUsage.length} per-model + ${donePlayerUsage.length} per-player usage row(s) — every provider call fell back to canned mock (DF-MAFIA-AI-BENCHMARK-12); excluded from win stats.`,
+                );
+              }
+            // eslint-disable-next-line @typescript-eslint/no-explicit-any
+            } catch (e: any) {
+              console.error(`[LegacyAdapter] Failed to evaluate mock flag: ${e?.message || e}`);
+            }
             // MAF-GAP-043: persist per-player won (1 winning side / 0
             // losing side) so model win rates read real data. Only when the
             // bridge reported a real winner; games without players rows
@@ -413,6 +461,28 @@ export class LegacyGameAdapter extends EventEmitter {
                 // eslint-disable-next-line @typescript-eslint/no-explicit-any
                 } catch (e: any) {
                   console.error(`[LegacyAdapter] Failed to backfill player model for ${u.playerId}: ${e?.message || e}`);
+                }
+              }
+            }
+            // DF-MAFIA-AI-BENCHMARK-12: backfill the players.tokens_used
+            // column from the real per-player usage rows (COALESCE — a
+            // recorded value is never overwritten). The report's
+            // avgTokensPerGame reads AVG(players.tokens_used), so without
+            // this backfill real-model games whose request config could
+            // not name the model report avgTokensPerGame stuck at 0 even
+            // though the engine recorded real token usage.
+            if (Array.isArray(message.usageByPlayer)) {
+              for (const u of message.usageByPlayer as PlayerUsageAggregate[]) {
+                if (!u || !u.playerId) continue;
+                const totalTokens = typeof u.totalTokens === 'number' && u.totalTokens > 0 ? u.totalTokens : null;
+                if (totalTokens === null) continue;
+                try {
+                  db.prepare(
+                    `UPDATE players SET tokens_used = COALESCE(tokens_used, 0) + ? WHERE game_id = ? AND id = ? AND (tokens_used IS NULL OR tokens_used = 0)`,
+                  ).run(totalTokens, gameId, u.playerId);
+                // eslint-disable-next-line @typescript-eslint/no-explicit-any
+                } catch (e: any) {
+                  console.error(`[LegacyAdapter] Failed to backfill player tokens for ${u.playerId}: ${e?.message || e}`);
                 }
               }
             }

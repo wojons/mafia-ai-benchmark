@@ -103,6 +103,8 @@ const StatsPanel: React.FC = () => {
     mafiaWins: number;
     townWins: number;
     avgDuration: number;
+    degenerateGames?: number;
+    mockGames?: number;
   };
 
   const formatDuration = (ms: number) => {
@@ -220,6 +222,24 @@ const StatsPanel: React.FC = () => {
       {/* Win Rates */}
       <div className="stats-section">
         <h2>Win Rates</h2>
+        {/* DF-MAFIA-AI-BENCHMARK-12 + DF-18: excluded games are flagged,
+            never silently hidden — the win rates above already exclude
+            them, so the numbers stay honest and auditable. */}
+        {(s.mockGames !== undefined && s.mockGames > 0) ||
+        (s.degenerateGames !== undefined && s.degenerateGames > 0) ? (
+          <p className="section-hint" data-testid="excluded-games-note">
+            {s.mockGames !== undefined && s.mockGames > 0
+              ? `${s.mockGames} mock game(s) excluded (every provider call fell back to canned mock)`
+              : ''}
+            {s.mockGames !== undefined && s.mockGames > 0 &&
+            s.degenerateGames !== undefined && s.degenerateGames > 0
+              ? ' · '
+              : ''}
+            {s.degenerateGames !== undefined && s.degenerateGames > 0
+              ? `${s.degenerateGames} degenerate game(s) excluded (no real LLM play)`
+              : ''}
+          </p>
+        ) : null}
         <div className="win-rate-bars">
           {s.completedGames > 0 && (
             <>

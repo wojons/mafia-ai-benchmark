@@ -15,6 +15,9 @@ import {
   getDegenerateGameIds,
 } from './degenerate.js';
 import {
+  getMockGameIds,
+} from './mock.js';
+import {
   getModelComparison,
   getCompareReport,
   generateRecommendations,
@@ -26,6 +29,7 @@ import { getPlayersFromEvents, calculateRolePerformance } from './players.js';
 export { getAggregatedWins } from './wins.js';
 export { getGameWinnerFromEvents, computeDurationFromEvents } from './wins.js';
 export { getDegenerateGameCounts, getDegenerateGameIds } from './degenerate.js';
+export { getMockGameCounts, getMockGameIds } from './mock.js';
 export { getModelComparison, getCompareReport, generateRecommendations } from './models.js';
 export { getMatchups } from './matchups.js';
 export { getPlayersFromEvents, calculateRolePerformance } from './players.js';
@@ -91,6 +95,13 @@ export interface GameStats {
    * duration, or flagged by the legacy adapter). Data stays in the DB.
    */
   degenerateGames: number;
+  /**
+   * DF-MAFIA-AI-BENCHMARK-12: count of ENDED games flagged mock (every
+   * provider call fell back to the canned-mock fallback — zero real
+   * tokens). Excluded from win counts, data stays in the DB, surfaced
+   * so the exclusion is auditable rather than silent.
+   */
+  mockGames: number;
 }
 
 export interface PlayerStatsSummary {
@@ -471,8 +482,19 @@ export class StatsCollector {
         if (winner === 'MAFIA') degenerateMafia += 1;
         else if (winner === 'TOWN') degenerateTown += 1;
       }
-      mafiaWins = Math.max(0, mafiaWins - degenerateMafia);
-      townWins = Math.max(0, townWins - degenerateTown);
+      // DF-MAFIA-AI-BENCHMARK-12: mock games are excluded from the
+      // event-derived side with the same subtraction rule — the mock
+      // marker is the write-time flag, so read it back per game.
+      const mockExcluded = new Set(getMockGameIds(this.gameRepository));
+      let mockMafia = 0;
+      let mockTown = 0;
+      for (const id of mockExcluded) {
+        const winner = getGameWinnerFromEvents(this.gameRepository, id);
+        if (winner === 'MAFIA') mockMafia += 1;
+        else if (winner === 'TOWN') mockTown += 1;
+      }
+      mafiaWins = Math.max(0, mafiaWins - degenerateMafia - mockMafia);
+      townWins = Math.max(0, townWins - degenerateTown - mockTown);
       void eventDegenerate;
     }
 
@@ -514,6 +536,7 @@ export class StatsCollector {
       mafiaWins,
       townWins,
       degenerateGames: stats.degenerateGames,
+      mockGames: stats.mockGames,
     };
   }
   

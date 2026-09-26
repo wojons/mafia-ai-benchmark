@@ -167,6 +167,9 @@ describe('degenerate-game exclusion from win stats (DF-MAFIA-AI-BENCHMARK-18)', 
         mafiaWins: 0,
         townWins: 0,
         degenerateGames: 0,
+        // DF-MAFIA-AI-BENCHMARK-12: mock-games count joins the summary
+        // contract (0 when nothing is excluded).
+        mockGames: 0,
       });
     });
   });

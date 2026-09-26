@@ -337,6 +337,9 @@ describe('StatsCollector', () => {
         // DF-MAFIA-AI-BENCHMARK-18: degenerate-games count is part of the
         // summary contract (0 when nothing is excluded).
         degenerateGames: 0,
+        // DF-MAFIA-AI-BENCHMARK-12: mock-games count is part of the same
+        // summary contract (0 when nothing is excluded).
+        mockGames: 0,
       });
     });
 
