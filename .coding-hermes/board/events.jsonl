@@ -567,3 +567,7 @@
 {"id":567,"timestamp":"2026-09-26 22:29:13.960148","event_type":"task_created","task_id":"README-1","actor":"foreman","detail":"{\"id\":\"README-1\",\"status\":\"pending\"}","tick_number":null}
 {"id":568,"timestamp":"2026-09-26 22:29:24.037452","event_type":"task_created","task_id":"README-2","actor":"foreman","detail":"{\"id\":\"README-2\",\"status\":\"pending\"}","tick_number":null}
 {"id":569,"timestamp":"2026-09-26 22:29:30.536603","event_type":"task_created","task_id":"README-3","actor":"foreman","detail":"{\"id\":\"README-3\",\"status\":\"pending\"}","tick_number":null}
+{"id":570,"timestamp":"2026-09-26 17:48:15.097943","event_type":"task_created","task_id":"DOC-4","actor":"foreman","detail":"{\"source\": \"docs-audit-lane-2026-09-26\", \"tick\": 214}","tick_number":214}
+{"id":571,"timestamp":"2026-09-26 17:48:15.097943","event_type":"task_created","task_id":"DOC-5","actor":"foreman","detail":"{\"source\": \"docs-audit-lane-2026-09-26\", \"tick\": 214}","tick_number":214}
+{"id":572,"timestamp":"2026-09-26 17:48:15.097943","event_type":"task_created","task_id":"DOC-6","actor":"foreman","detail":"{\"source\": \"docs-audit-lane-2026-09-26\", \"tick\": 214}","tick_number":214}
+{"id":573,"timestamp":"2026-09-26 17:48:15.097943","event_type":"task_created","task_id":"DOC-7","actor":"foreman","detail":"{\"source\": \"docs-audit-lane-2026-09-26\", \"tick\": 214}","tick_number":214}
