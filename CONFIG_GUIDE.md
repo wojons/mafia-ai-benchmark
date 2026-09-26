@@ -1,8 +1,18 @@
-# 🎮 Mafia AI Benchmark - Complete Configuration Guide
+# 🎮 Mafia AI Benchmark — Configuration Guide
 
 ## Overview
 
-The Mafia AI Benchmark now features a comprehensive configuration system that gives you full control over every aspect of the game. From player counts to messaging limits to AI models, you can customize the experience to your exact specifications.
+Configuration lives in **two places**, both repo-local:
+
+| File | What it configures | Created by |
+|------|--------------------|------------|
+| `mafia.config.json` (repo root) | Default game settings for the CLI: players, LLM provider/model, phase durations | `mafiactl init` / `mafiactl config` (or `./mafia.sh config`) |
+| `.env` (repo root) | API keys, per-role model overrides, server ports, engine tuning | You (copy `.env.sample` for the full template) |
+
+> The legacy `~/.mafia-config` / `/config/workspace/mafia/.mafia-config`
+> file is gone — nothing in the monorepo reads it. Messaging limits and
+> role counts are fixed inside the game engine; the tunable surface is
+> players, models, and phase timing.
 
 ---
 
@@ -11,387 +21,240 @@ The Mafia AI Benchmark now features a comprehensive configuration system that gi
 ### Basic Commands
 
 ```bash
-# Run a demo game with defaults
-./mafia.sh demo
+# Start the server (needed by everything below)
+pnpm run server                     # or: ./mafia.sh server
 
-# Create a game with custom configuration
-./mafia.sh new
+# Write a default config file (mafia.config.json, repo-local)
+./mafia.sh config --reset
 
 # View current configuration
 ./mafia.sh config --show
 
-# Reset to defaults
-./mafia.sh config --reset
+# Interactive setup (prompts for players, roles, provider, model, timings)
+pnpm --filter @mafia/cli dev -- init
 ```
 
 ---
 
 ## 🎛️ Configuration Options
 
-### 👥 Player & Role Settings
+### 👥 Game Settings (mafia.config.json)
 
-| Option | Short | Description | Default | Example |
-|--------|-------|-------------|---------|---------|
-| `--players` | `-p` | Total players in game | 10 | `--players 8` |
-| `--mafia` | `-M` | Number of mafia members | auto (floor(n/4)) | `--mafia 3` |
-| `--doctor` | | Number of doctors | 1 | `--doctor 2` |
-| `--sheriff` | | Number of sheriffs | 1 | `--sheriff 0` |
-| `--vigilante` | | Number of vigilantes | 1 | `--vigilante 0` |
+| Setting | Description | Default | Example |
+|---------|-------------|---------|---------|
+| `numPlayers` | Total players in a game | 10 | `./mafia.sh config --players 8` |
+| `llmProvider` | Default LLM provider | openai | `./mafia.sh config --set llmProvider openai` |
+| `llmModel` | Default LLM model | openai/gpt-4o-mini | `./mafia.sh config --model openai/gpt-4o` |
+| `nightDuration` | Night phase duration (s) | 60 | `./mafia.sh config --set nightDuration 60` |
+| `dayDuration` | Day phase duration (s) | 120 | `./mafia.sh config --set dayDuration 120` |
+| `votingDuration` | Voting phase duration (s) | 30 | `./mafia.sh config --set votingDuration 30` |
+
+**Role distribution** is fixed by the engine at game start (roughly one
+mafia per 4 players, always 1 doctor + 1 sheriff, vigilante only at 6+
+players). It is not user-configurable.
 
 **Role Distribution Examples:**
 
 ```bash
-# 6 players: 1 Mafia, 1 Doctor, 1 Sheriff, 1 Vigilante, 2 Villagers
-./mafia.sh config --players 6 && ./mafia.sh new
+# Default 10-player game: 3 Mafia, 1 Doctor, 1 Sheriff, 1 Vigilante, 4 Villagers
+./mafia.sh new
 
-# 8 players: 2 Mafia, 1 Doctor, 1 Sheriff, 1 Vigilante, 3 Villagers
-./mafia.sh config --players 8 && ./mafia.sh new
+# 8-player game: 2 Mafia, 1 Doctor, 1 Sheriff, 1 Vigilante, 3 Villagers
+./mafia.sh new 8
 
-# 10 players: 2 Mafia, 1 Doctor, 1 Sheriff, 1 Vigilante, 5 Villagers
-./mafia.sh config --players 10 && ./mafia.sh new
+# 5-player game (minimum): 1 Mafia, 1 Doctor, 1 Sheriff, 2 Villagers
+./mafia.sh new 5
+```
 
-# 12 players: 3 Mafia, 1 Doctor, 1 Sheriff, 1 Vigilante, 6 Villagers
-./mafia.sh config --players 12 && ./mafia.sh new
+### 🔧 Config-file Commands (mafia.config.json)
 
-# Custom: 3 Mafia in 10-player game
-./mafia.sh config --players 10 --mafia 3 && ./mafia.sh new
+| Command | Description |
+|---------|-------------|
+| `./mafia.sh config --show` | View current settings |
+| `./mafia.sh config --reset` | Reset config file to defaults (writes `./mafia.config.json` — inside the repo) |
+| `./mafia.sh config --set <key> <value>` | Set any value (numbers/booleans parsed automatically) |
+| `./mafia.sh config --model <provider/model>` | Shorthand for `--set llmModel ...` |
+| `./mafia.sh config --players <n>` | Shorthand for `--set numPlayers ...` |
+| `./mafia.sh config --menu` | Full interactive setup (runs `mafiactl init --force`) |
+| `pnpm --filter @mafia/cli dev -- init` | Interactive setup from the CLI directly |
+
+**Examples:**
+
+```bash
+# 8-player default, GPT-4o, longer day phase
+./mafia.sh config --players 8
+./mafia.sh config --model openai/gpt-4o
+./mafia.sh config --set dayDuration 180
+
+# Verify what actually landed
+./mafia.sh config --show
+```
+
+The config file is a plain JSON document (flat keys as written by
+`config set/reset`, nested `game`/`llm` sections from `init` — both
+shapes are accepted when a game runs):
+
+```json
+{
+  "numPlayers": 10,
+  "llmProvider": "openai",
+  "llmModel": "openai/gpt-4o-mini",
+  "nightDuration": 60,
+  "dayDuration": 120,
+  "votingDuration": 30
+}
 ```
 
 ---
 
-### 💬 Messaging Settings
+## 💬 Messaging Limits (fixed in the engine)
 
-| Option | Description | Default | Example |
-|--------|-------------|---------|---------|
-| `--mafia-msg-per` | Messages each mafia member can send | 3 | `--mafia-msg-per 4` |
-| `--mafia-msg-max` | Maximum total mafia messages | 10 | `--mafia-msg-max 15` |
-| `--town-msg-per` | Messages each town member can send | 2 | `--town-msg-per 3` |
-| `--town-msg-max` | Maximum total town messages | 15 | `--town-msg-max 20` |
-
-**Messaging Examples:**
-
-```bash
-# Extended mafia discussion (5 messages each, max 20 total)
-./mafia.sh config --mafia-msg-per 5 --mafia-msg-max 20
-
-# Active town debate (3 messages each, max 25 total)
-./mafia.sh config --town-msg-per 3 --town-msg-max 25
-
-# Both: High-engagement game
-./mafia.sh config --mafia-msg-per 5 --mafia-msg-max 20 --town-msg-per 4 --town-msg-max 30
-```
-
-**How Messaging Works:**
-
-```
-MAFIA TEAM CHAT:
-├── Each mafia member can send up to --mafia-msg-per messages
-├── Discussion continues until:
-│   ├── All mafia exhausted their messages, OR
-│   ├── Total messages reach --mafia-msg-max, OR
-│   └── Mafia reach consensus early
-└── Then: Mafia vote on kill target
-
-DAY DISCUSSION:
-├── Each town member can send up to --town-msg-per messages
-├── Discussion continues until:
-│   ├── All members exhausted messages, OR
-│   └── Total messages reach --town-msg-max
-└── Then: Voting phase begins
-```
+Per-role messaging limits are **not configurable** — the engine fixes
+them in code (mafia chat up to 6 messages, day discussion up to
+`min(10, 2 × alive players)`). The old `--mafia-msg-per` / `--town-msg-per`
+config options no longer exist. If you need different dynamics, edit
+`game-engine.js` (the constants live near the chat loops).
 
 ---
 
-### 🎮 Gameplay Settings
+## 🤖 AI Models
 
-| Option | Description | Default | Example |
-|--------|-------------|---------|---------|
-| `--day-rounds` | Number of day discussion rounds | 1 | `--day-rounds 2` |
-| `--model` | AI model to use | openai/gpt-4o-mini | `--model claude-3` |
+### Default Model
 
-**Gameplay Examples:**
+Set the default model via config file **or** environment — both are read
+by the legacy engine through the `.env` loader:
 
-```bash
-# Two day rounds per cycle (extended discussion)
-./mafia.sh config --day-rounds 2
+| Layer | Where | Example |
+|-------|-------|---------|
+| Config file | `mafia.config.json` → `llmModel` | `./mafia.sh config --model openai/gpt-4o-mini` |
+| Environment | `.env` → `DEFAULT_MODEL` | `DEFAULT_MODEL=openai/gpt-4o-mini` |
+| Per-run flag | CLI `--model` flag | `pnpm --filter @mafia/cli dev -- run-game --model openai/gpt-4o` |
 
-# Different AI model
-./mafia.sh config --model anthropic/claude-3
+### Per-Role Overrides (`.env`)
 
-# Custom game
-./mafia.sh config --day-rounds 2 --model openai/gpt-4o
-```
-
----
-
-## 📖 Complete Configuration Examples
-
-### Example 1: Standard Game
+Give specific roles their own model — leave a variable empty to inherit
+`DEFAULT_MODEL`:
 
 ```bash
-./mafia.sh config \
-  --players 10 \
-  --mafia 2 \
-  --mafia-msg-per 3 \
-  --town-msg-per 2 \
-  --day-rounds 1
+# .env
+DEFAULT_MODEL=openai/gpt-4o-mini
+MAFIA_MODEL=openai/gpt-4o           # mafia needs stronger reasoning
+SHERIFF_MODEL=anthropic/claude-3-haiku
 ```
 
-**Result:**
-- 10 players (2 Mafia, 1 Doctor, 1 Sheriff, 1 Vigilante, 5 Villagers)
-- Mafia: 3 messages each, max 10 total
-- Town: 2 messages each, max 15 total
-- 1 day round
+Available role variables: `DEFAULT_MODEL`, `MAFIA_MODEL`,
+`DOCTOR_MODEL`, `SHERIFF_MODEL`, `VIGILANTE_MODEL`, `VILLAGER_MODEL`.
 
----
+Model ids use the `provider/model` form (e.g. `openai/gpt-4o-mini`,
+`anthropic/claude-3-sonnet`); the API key comes from the matching
+provider variable (e.g. `OPENAI_API_KEY`, `ANTHROPIC_API_KEY` — see
+`.env.sample`). The default setup targets **OpenRouter** with any
+OpenAI-compatible endpoint via `OPENAI_BASE_URL`.
 
-### Example 2: Mafia-Heavy Game
+**Check the current model setup:**
 
 ```bash
-./mafia.sh config \
-  --players 10 \
-  --mafia 4 \
-  --mafia-msg-per 4 \
-  --mafia-msg-max 25 \
-  --town-msg-per 3 \
-  --town-msg-max 20
-```
-
-**Result:**
-- 10 players with 4 Mafia (challenging!)
-- Mafia: 4 messages each, max 25 total (lots of coordination)
-- Town: 3 messages each, max 20 total (active debate)
-- Mafia has 40% of players (very difficult for town)
-
----
-
-### Example 3: Quick Game
-
-```bash
-./mafia.sh config \
-  --players 6 \
-  --mafia 1 \
-  --mafia-msg-per 2 \
-  --mafia-msg-max 4 \
-  --town-msg-per 1 \
-  --town-msg-max 5 \
-  --day-rounds 1
-```
-
-**Result:**
-- 6 players (1 Mafia, 1 Doctor, 1 Sheriff, 1 Vigilager, 2 Villagers)
-- Mafia: 2 messages each, max 4 total
-- Town: 1 message each, max 5 total
-- Fast-paced game
-
----
-
-### Example 4: Extended Strategy Game
-
-```bash
-./mafia.sh config \
-  --players 12 \
-  --mafia 3 \
-  --mafia-msg-per 5 \
-  --mafia-msg-max 30 \
-  --town-msg-per 4 \
-  --town-msg-max 40 \
-  --day-rounds 2
-```
-
-**Result:**
-- 12 players (3 Mafia, 1 Doctor, 1 Sheriff, 1 Vigilante, 6 Villagers)
-- Mafia: 5 messages each, max 30 total (extensive coordination)
-- Town: 4 messages each, max 40 total (vigorous debate)
-- 2 day rounds (more discussion before voting)
-- Long, strategic game
-
----
-
-### Example 5: AI Model Testing
-
-```bash
-# Test with GPT-4
-./mafia.sh config --model openai/gpt-4
-
-# Test with Claude
-./mafia.sh config --model anthropic/claude-3-opus-20240229
-
-# Test with different models, same game settings
-./mafia.sh config --mafia 2 --town-msg-per 2 --model openai/gpt-4o-mini
-```
-
----
-
-## 🔧 Interactive Configuration
-
-For an interactive menu-driven approach:
-
-```bash
-./mafia.sh config --menu
-```
-
-This will prompt you for each setting individually:
-
-```
-🎛️  MAFIA GAME CONFIGURATION MENU
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-
-Current values shown in brackets []
-Press Enter to keep current value
-
-👥 Total Players [10]: 
-😈 Mafia Count [auto]: 
-💉 Doctor Count [1]: 
-👮 Sheriff Count [1]: 
-🔫 Vigilante Count [1]: 
-
-💬 MESSAGING SETTINGS
-   Mafia Messages/Player [3]: 
-   Mafia Max Messages Total [10]: 
-   Town Messages/Player [2]: 
-   Town Max Messages Total [15]: 
-...
+./mafia.sh models
 ```
 
 ---
 
 ## 📂 Configuration File
 
-Settings are saved to `~/.mafia-config` (or `/config/workspace/mafia/.mafia-config`):
+Settings are saved to `./mafia.config.json` at the **repo root** (never
+in your home directory, never under `/config`):
 
 ```bash
-# View current config file
-cat /config/workspace/mafia/.mafia-config
-
-# Output:
-PLAYERS=10
-MAFIA_COUNT=2
-DOCTOR_COUNT=1
-SHERIFF_COUNT=1
-VIGILANTE_COUNT=1
-MAFIA_MESSAGES_PER_PLAYER=3
-MAFIA_MAX_MESSAGES=10
-TOWN_MESSAGES_PER_PLAYER=2
-TOWN_MAX_MESSAGES=15
-DAY_DISCUSSION_ROUNDS=1
-VOTING_ENABLED=true
-NIGHT_PHASE_ENABLED=true
-PERSONA_ENABLED=true
-AI_MODEL=openai/gpt-4o-mini
-API_KEY=auto
+# View the raw file
+cat mafia.config.json
 ```
+
+Both `mafiactl config` and the wrapper resolve the file from the
+working directory, which is always the repo root — a fresh clone gets
+its own file and never touches anything outside the repo.
 
 ---
 
 ## 🎮 Pre-Set Configurations
 
-### Quick Game (6 players, minimal discussion)
 ```bash
-./mafia.sh config --players 6 --mafia 1 --mafia-msg-per 2 --town-msg-per 1
-```
+# Standard Game (10 players, defaults)
+./mafia.sh config --reset && ./mafia.sh new
 
-### Standard Game (10 players, balanced)
-```bash
-./mafia.sh config --players 10 --mafia 2 --mafia-msg-per 3 --town-msg-per 2
-```
+# Quick Game (5 players — the minimum)
+./mafia.sh new 5
 
-### Championship Game (12 players, extended)
-```bash
-./mafia.sh config --players 12 --mafia 3 --mafia-msg-per 4 --town-msg-per 3 --day-rounds 2
-```
-
-### Mafia Advantage (High mafia count)
-```bash
-./mafia.sh config --players 10 --mafia 4 --mafia-msg-per 5
-```
-
-### Town Advantage (High town participation)
-```bash
-./mafia.sh config --players 10 --mafia 2 --mafia-msg-per 2 --town-msg-per 4
+# Championship Game (12 players)
+./mafia.sh new 12
 ```
 
 ---
 
 ## 🎭 Persona System
 
-The persona system is enabled by default. To disable:
+Personas are **always on** — every player gets an LLM-generated name,
+backstory, and communication style derived from seed descriptions. To
+run with specific persona seeds, pass them through the API:
 
 ```bash
-# Not yet implemented in config, coming soon!
-# ./mafia.sh config --personas false
+curl -X POST localhost:3004/api/v1/games \
+  -H 'Content-Type: application/json' \
+  -d '{"numPlayers": 5, "personaSeeds": ["A quiet accountant who loves puzzles", "..."]}'
 ```
 
-**With Personas:**
-- Each player gets a unique name and backstory
-- Communication style varies by archetype
-- Personas influence AI responses
-- More engaging roleplay experience
-
-**Without Personas:**
-- Simple numbered players (Player 1, Player 2, etc.)
-- Generic communication
-- Faster gameplay
-- Pure strategy focus
+The old `PERSONA_ENABLED` / `--personas` flags no longer exist.
 
 ---
 
-## 🤖 AI Models
+## 🖥️ Server Settings (`.env`)
 
-Available AI models (requires API keys):
+| Variable | Description | Default |
+|----------|-------------|---------|
+| `PORT` | HTTP port for direct `pnpm run server` runs | 3004 |
+| `WS_PORT` | WebSocket port | 3001 |
+| `DB_PATH` | SQLite database path (repo-local) | ./data/mafia.db |
+| `MAFIA_SERVER_URL` | Server URL the CLI/wrapper targets | http://localhost:3004 |
 
-| Model | Provider | Command |
-|-------|----------|---------|
-| GPT-4o-mini | OpenAI | `--model openai/gpt-4o-mini` |
-| GPT-4o | OpenAI | `--model openai/gpt-4o` |
-| GPT-4 | OpenAI | `--model openai/gpt-4` |
-| Claude 3 Opus | Anthropic | `--model anthropic/claude-3-opus-20240229` |
-| Claude 3 Sonnet | Anthropic | `--model anthropic/claude-3-sonnet-20240229` |
-| Gemini Pro | Google | `--model google/gemini-pro` |
+`MAFIA_SERVER_URL` is read by **all** mafiactl commands (run-game,
+list-games, watch-game, stats, benchmark) — export it once to point the
+whole toolchain at a remote server.
 
 ---
 
 ## 🧪 Testing Different Configurations
 
-### Test 1: Compare Messaging Limits
+### Test 1: Compare Player Counts
 
 ```bash
-# Test with low messaging
-./mafia.sh config --mafia-msg-per 1 --town-msg-per 1
-./mafia.sh demo
+./mafia.sh server                    # terminal 1
 
-# Reset and test with high messaging
-./mafia.sh config --reset
-./mafia.sh config --mafia-msg-per 5 --town-msg-per 4
-./mafia.sh demo
+./mafia.sh new 5                     # terminal 2
+./mafia.sh new 10
+./mafia.sh stats                     # compare outcomes
 ```
 
-### Test 2: Compare Role Distributions
+### Test 2: Compare Role Distributions (via player count)
 
 ```bash
-# Standard 10-player
-./mafia.sh config --players 10 --mafia 2
-./mafia.sh demo
-
-# Mafia-heavy
-./mafia.sh config --players 10 --mafia 4
-./mafia.sh demo
-
-# Town-heavy
-./mafia.sh config --players 10 --mafia 1
-./mafia.sh demo
+./mafia.sh new 6                     # 2 Mafia, 4 Town
+./mafia.sh new 10                    # 3 Mafia, 7 Town
+./mafia.sh stats
 ```
 
 ### Test 3: Compare AI Models
 
 ```bash
-# GPT-4o-mini (fast, cheap)
 ./mafia.sh config --model openai/gpt-4o-mini
-./mafia.sh demo
+./mafia.sh new 10
+./mafia.sh config --model openai/gpt-4o
+./mafia.sh new 10
+./mafia.sh stats                     # win rates per model
+```
 
-# GPT-4 (slower, smarter)
-./mafia.sh config --model openai/gpt-4
-./mafia.sh demo
+Or benchmark two models head-to-head:
+
+```bash
+./mafia.sh benchmark --games 2 --models openai/gpt-4o-mini,openai/gpt-4o
 ```
 
 ---
@@ -402,62 +265,70 @@ Available AI models (requires API keys):
 
 | Command | Description |
 |---------|-------------|
-| `./mafia.sh new` | Create new game with current config |
-| `./mafia.sh demo` | Run one-off demo game |
-| `./mafia.sh list` | List all saved games |
-| `./mafia.sh continue [id]` | Resume a saved game |
-| `./mafia.sh delete [id]` | Delete a saved game |
+| `./mafia.sh server` | Start the game server (:3004) |
+| `./mafia.sh new [n]` | Start a game (default 10 players) |
+| `./mafia.sh demo` | Run a one-off 5-player game |
+| `./mafia.sh list` | List all games |
+| `./mafia.sh watch [gameId]` | Watch a game live (most recent if no id) |
+| `./mafia.sh continue` | How to reopen a finished game |
+| `./mafia.sh delete [id]` | Not supported — the server has no delete API (rows are preserved for stats by design) |
+
+### Benchmarking
+
+| Command | Description |
+|---------|-------------|
+| `./mafia.sh benchmark --quick` | Show the accumulated benchmark report |
+| `./mafia.sh benchmark --games 2 --models a,b` | Run fresh benchmark games |
+| `./mafia.sh benchmark export --format csv` | Export benchmark data |
+| `./mafia.sh stats` | Game and model statistics |
 
 ### Configuration
 
 | Command | Description |
 |---------|-------------|
 | `./mafia.sh config --show` | View current settings |
-| `./mafia.sh config --menu` | Interactive configuration menu |
-| `./mafia.sh config --reset` | Reset to defaults |
-| `./mafia.sh config [OPTIONS]` | Set multiple options at once |
+| `./mafia.sh config --reset` | Reset config file to defaults (repo-local) |
+| `./mafia.sh config --set <k> <v>` | Set a configuration value |
+| `./mafia.sh config --model <m>` | Set default LLM model |
+| `./mafia.sh config --players <n>` | Set default player count |
+| `./mafia.sh models` | Show the model configuration |
 
-### Options
+### Raw mafiactl (equivalent, no wrapper)
 
-| Option | Description |
-|--------|-------------|
-| `--players, -p [n]` | Set total players |
-| `--mafia, -M [n]` | Set mafia count |
-| `--mafia-msg-per [n]` | Set mafia messages per player |
-| `--mafia-msg-max [n]` | Set mafia max total messages |
-| `--town-msg-per [n]` | Set town messages per player |
-| `--town-msg-max [n]` | Set town max total messages |
-| `--doctor [n]` | Set doctor count |
-| `--sheriff [n]` | Set sheriff count |
-| `--vigilante [n]` | Set vigilante count |
-| `--day-rounds [n]` | Set day discussion rounds |
-| `--model [name]` | Set AI model |
+| Command | Description |
+|---------|-------------|
+| `pnpm --filter @mafia/cli dev -- init` | Interactive setup |
+| `pnpm --filter @mafia/cli dev -- run-game --players 10` | Run a game |
+| `pnpm --filter @mafia/cli dev -- list-games` | List games |
+| `pnpm --filter @mafia/cli dev -- watch-game <id>` | Watch a game |
+| `pnpm --filter @mafia/cli dev -- config show` | Show config |
+| `pnpm --filter @mafia/cli dev -- stats` | Statistics |
+| `pnpm --filter @mafia/cli dev -- benchmark` | Benchmark report/run |
 
 ---
 
 ## 💡 Tips & Best Practices
 
-1. **Start with defaults**: Run a few games with default settings first
-2. **Adjust messaging**: Increase messages for more strategic depth
-3. **Test different role distributions**: See how game balance changes
-4. **Compare AI models**: Some models play better than others
-5. **Document your experiments**: Keep notes on what works best
+1. **Start with defaults**: run `./mafia.sh config --reset`, start the
+   server, and run a 5-player game first (cheapest).
+2. **Check for mock games**: an invalid API key makes every LLM call
+   fall back to canned phrases; such games are flagged `mock` and
+   excluded from win stats — fix `.env` if stats look empty.
+3. **Compare models fairly**: change only the model between runs.
+4. **Use `MAFIA_SERVER_URL`** to point the CLI at a remote server.
+5. **Document your experiments**: benchmark results accumulate on the
+   server — `./mafia.sh benchmark --quick` shows the full report.
 
 ---
 
-## 🔜 Future Enhancements
+## 🔜 Notes
 
-Planned configuration options:
-- `--personas` - Enable/disable persona system
-- `--debug` - Show AI reasoning in output
-- `--speed` - Control game speed (fast/normal/slow)
-- `--output` - Save game to file
-- `--seed` - Set random seed for reproducible games
-- `--teams` - Custom team compositions
-- `--roles` - Enable/disable specific roles
-- `--timer` - Add time limits to phases
+- Messaging limits and role counts are engine-fixed (see above).
+- Games run to completion server-side; there is no pause/resume — use
+  `watch-game` to follow live and `/replay` to review a finished game.
 
 ---
 
-*Last Updated: December 28, 2025*
-*Version: 3.0*
+*Last Updated: September 2026 (rewritten against the pnpm monorepo —
+MAF-GAP-071)*
+*Version: 4.0*
