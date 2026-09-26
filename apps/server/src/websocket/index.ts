@@ -14,6 +14,7 @@ interface WSClient {
   subscriptions: Set<string>;
   userId?: string;
   gameId?: string;
+  eventBusUnsubscribe?: () => void;
 }
 
 interface WSMessage {
@@ -178,12 +179,23 @@ export class WebSocketHandler {
     client.gameId = gameId;
     client.subscriptions.add(`game:${gameId}`);
     
-    // Subscribe to game-specific events
-    this.context.eventBus.subscribe(
-      `game:${gameId}`,
+    // Subscribe this joiner to the events the game actually publishes. The
+    // EventBus is event-TYPE-keyed (the legacy adapter publishes by event
+    // type like 'PHASE_CHANGED'/'GAME_ENDED'), so topic keys like
+    // `game:<id>` never fire. Use the wildcard subscription and filter by
+    // gameId, then deliver to every client watching this game — spectator
+    // semantics: the joiner itself must receive events for the game it
+    // joined (no self-exclusion).
+    const previousUnsubscribe = client.eventBusUnsubscribe;
+    if (previousUnsubscribe) {
+      previousUnsubscribe();
+      client.eventBusUnsubscribe = undefined;
+    }
+    
+    client.eventBusUnsubscribe = this.context.eventBus.subscribeAll(
       (event) => {
-        // Filter by visibility if needed
-        this.broadcastToGame(gameId, event as unknown as Record<string, unknown>, { excludeClientId: clientId });
+        if (event.gameId !== gameId) return;
+        this.broadcastToGame(gameId, event as unknown as Record<string, unknown>);
       }
     );
     
@@ -208,6 +220,10 @@ export class WebSocketHandler {
     
     if (client.gameId) {
       client.subscriptions.delete(`game:${client.gameId}`);
+      if (client.eventBusUnsubscribe) {
+        client.eventBusUnsubscribe();
+        client.eventBusUnsubscribe = undefined;
+      }
       client.gameId = undefined;
     }
     
@@ -302,6 +318,10 @@ export class WebSocketHandler {
     
     if (client.gameId) {
       client.subscriptions.delete(`game:${client.gameId}`);
+    }
+    if (client.eventBusUnsubscribe) {
+      client.eventBusUnsubscribe();
+      client.eventBusUnsubscribe = undefined;
     }
     
     this.clients.delete(clientId);
