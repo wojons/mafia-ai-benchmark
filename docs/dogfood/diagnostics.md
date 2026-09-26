@@ -385,3 +385,22 @@ per-model row you read — if you see more, you are looking at DF-2.
 also returns the full list) — the dashboard's own finished-game view is
 empty until DF-11 is fixed. To create a game today, use the API or CLI —
 the dashboard's Create button loses the created game until DF-10 is fixed.
+
+## 2026-09-25 late tick — fresh-deploy reverify: what the drift fix did and didn't buy
+
+DF-17 (deploy drift) was closed by rebuilding both images from HEAD. This tick re-ran the
+user path on the fresh build to see which merged fixes are actually reachable now:
+
+- **Reachable and working:** DF-11 spectate (on /watch/:gameId), DF-13 game-list cards,
+  DF-14 stats page, DF-2 winRate (0.998... wait — 99.8% shown, correct), benchmark/compare.
+- **Still broken despite being "fixed":** DF-16 (WS live spectate). The drift fix only
+  moved already-merged code; DF-16 was never merged. Lesson: a drift fix closes the
+  DELIVERY gap, not the DEFECT gap — each dogfood finding needs its own merge evidence.
+- **Route mismatch lesson (why yesterday's DF-11 re-check "failed"):** /game/:gameId
+  (GameBoard — the player view) and /watch/:gameId (GameWatcher — the spectator view)
+  render differently for a finished game. Both look like "the game page" from outside;
+  dogfood probes must name the route, not the page.
+- **Stats ground truth (recurring theme):** the leaderboard interpolates provider/model
+  strings with no type guard → [object Object] rows survive every fix; "Active Games"
+  counts a counter that never drains (97) while the games table says 5. Same lesson as
+  DF-2's 382% winRate: every headline number needs an independent cross-check.

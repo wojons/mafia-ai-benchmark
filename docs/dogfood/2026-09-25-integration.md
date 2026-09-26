@@ -74,3 +74,18 @@ docker exec mafia-ai-benchmark-web-1 sh -c 'ls /usr/share/nginx/html/assets/'
 docker exec mafia-ai-benchmark-web-1 grep -c "benchmark/compare" /usr/share/nginx/html/assets/index-*.js
 # 0 hits = the running web bundle predates the stats/leaderboard fix
 ```
+
+## Addendum — fresh-deploy reverify (2026-09-25 late tick, containers rebuilt from HEAD)
+
+The drift fix (DF-17) landed at 20:58 and tick-203's fixes are now LIVE. Re-tested
+as a browser user on the fresh build:
+
+| Claim | Status on fresh deploy |
+|---|---|
+| Create via API (POST /api/v1/games) | ✅ 201, real gameId, game runs to GAME_OVER in ~100s with real LLM dialogue |
+| DF-11 finished-game spectate | ✅ VERIFIED — on **/watch/:gameId** (GameWatcher). History hydration renders votes + full discussion. Yesterday's "fix unreachable" probe had hit **/game/:gameId** (the player board, GameBoard) which legitimately shows placeholders for a finished game — the two routes look interchangeable from the nav but are not |
+| DF-16 WS live spectate | ❌ STILL BROKEN — re-verified live: spectator joined at t=3ms, zero events in the 101s the game ran to completion (DF-21). /watch works only because it hydrates from GET /events; the "LIVE" badge is transport-only |
+| DF-13/14 stats surface | ✅ renders; but a literal `[object Object] /[object Object]` model row survives the fix (DF-22), and Active Games says 97 when the games table has 5 IN_PROGRESS rows (DF-23) |
+
+Wire-shape trap, reconfirmed: `{type:'JOIN_GAME', gameId}` gets ERROR;
+`{type:'JOIN_GAME', payload:{gameId}}` gets GAME_JOINED+GAME_STATE.
