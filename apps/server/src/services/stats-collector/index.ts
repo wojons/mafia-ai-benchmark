@@ -482,7 +482,7 @@ export class StatsCollector {
     // 24h started_at freshness window — pure SQL, same table, no writes.
     // NULL started_at never counts as active. The CSV/export/report paths
     // all consume THIS method, so one filter covers every surface.
-    let activeGames = 0;
+    let activeGames: number;
     try {
       const freshRow = this.gameRepository.getDatabase().prepare(`
         SELECT COUNT(*) as count FROM games
