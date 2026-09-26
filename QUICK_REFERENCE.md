@@ -1,27 +1,44 @@
-╔══════════════════════════════════════════════════════════════════════╗
-║                   🎮 MAFIA AI BENCHMARK - QUICK REFERENCE            ║
-╚══════════════════════════════════════════════════════════════════════╝
+╔════════════════════════════════════════════════════════════════════╗
+║         🎮 MAFIA AI BENCHMARK — QUICK REFERENCE                    ║
+╚════════════════════════════════════════════════════════════════════╝
+
+This is a **pnpm monorepo** (apps/server, apps/cli, apps/web,
+packages/shared). Every command below exists in the repo today — nothing
+here references legacy one-off scripts.
+
+┌─ FIRST-TIME SETUP ───────────────────────────────────────────────────┐
+│                                                                        │
+│  pnpm install                       # install all workspaces           │
+│  pnpm build                         # build (server imports shared     │
+│                                     # from its built dist/ output)     │
+│  echo 'OPENAI_API_KEY=sk-or-...' >> .env                            │
+│                                     # OpenRouter key (or any OpenAI-   │
+│                                     # compatible endpoint) —           │
+│                                     # see .env.sample for the template │
+│                                                                        │
+└────────────────────────────────────────────────────────────────────────┘
 
 ┌─ PLAYING GAMES ──────────────────────────────────────────────────────┐
 │                                                                        │
-│  ONE-OFF GAMES (Quick, not saved)                                     │
-│  ─────────────────────────────────                                    │
-│  node demo-game-correct-flow-v2.js        # 10 players (default)     │
-│  node demo-game-correct-flow-v2.js        # Runs to completion       │
+│  START THE SERVER (required for games, stats, benchmarks)             │
+│  ─────────────────────────────────────────────────────────             │
+│  pnpm run server                       # API on :3004, WS /ws          │
+│  ./mafia.sh server                     # same thing via the wrapper    │
+│  curl localhost:3004/health            # verify it is up               │
 │                                                                        │
-│  MANAGED GAMES (Saved, resumable)                                     │
-│  ─────────────────────────────────                                    │
-│  ./mafia.sh new 10                    # Create 10-player game        │
-│  ./mafia.sh new 8                     # Create 8-player game         │
-│  ./mafia.sh new 6                     # Create 6-player game         │
+│  RUN A GAME (server must be running)                                   │
+│  ─────────────────────────────────────────────────────                 │
+│  pnpm --filter @mafia/cli dev -- run-game --players 10                  │
+│  ./mafia.sh new 10                     # same thing via the wrapper    │
+│  ./mafia.sh new 8                      # 8-player game                 │
+│  ./mafia.sh demo                       # one-off 5-player game         │
 │                                                                        │
-│  ./mafia.sh list                       # List all saved games        │
-│  ./mafia.sh continue                   # Continue most recent game   │
-│  ./mafia.sh continue [gameId]          # Continue specific game      │
-│  ./mafia.sh delete [gameId]            # Delete a game               │
-│                                                                        │
-│  ./mafia.sh demo                       # Run one-off demo            │
-│  ./mafia.sh help                       # Show all commands           │
+│  WATCH / INSPECT GAMES                                                 │
+│  ─────────────────────                                                 │
+│  pnpm --filter @mafia/cli dev -- list-games                             │
+│  ./mafia.sh list                       # same thing via the wrapper    │
+│  ./mafia.sh watch <gameId>             # follow a game live (WS)       │
+│  ./mafia.sh continue                   # how to resume/reopen a game   │
 │                                                                        │
 └────────────────────────────────────────────────────────────────────────┘
 
@@ -32,7 +49,7 @@
 │  ├── 🎯 Mafia Consensus/Vote on kill target                           │
 │  ├── 💉 Doctor Action (can't protect same person twice)               │
 │  ├── 👮 Sheriff Investigation (gets exact role)                       │
-│  ├── 🔫 Vigilante Action (one-time shot)                              │
+│  ├── 🔫 Vigilante Action (one-time shot, 6+ players)                  │
 │  └── 🌅 Night Resolution                                               │
 │                                                                        │
 │  ☀️ DAY PHASE                                                          │
@@ -44,32 +61,31 @@
 
 ┌─ QUICK EXAMPLES ──────────────────────────────────────────────────────┐
 │                                                                        │
-│  Example 1: Quick Demo                                                 │
-│  ─────────────────                                                     │
-│  $ node demo-game-correct-flow-v2.js                                   │
-│  # Watch AI agents play a complete game                               │
+│  Example 1: Quick Demo (server running)                                │
+│  ───────────────────────────────                                       │
+│  $ ./mafia.sh demo                                                     │
+│  # Watch AI agents play a complete 5-player game                       │
 │                                                                        │
-│  Example 2: Compare Two Games                                          │
-│  ──────────────────────────                                            │
-│  $ node demo-game-correct-flow-v2.js > game1.txt                       │
-│  $ node demo-game-correct-flow-v2.js > game2.txt                       │
-│  $ diff game1.txt game2.txt                                            │
+│  Example 2: Compare Two Games (same settings, seed differs)            │
+│  ──────────────────────────────────────────────                        │
+│  $ ./mafia.sh new 10 > /tmp/game1.txt                                  │
+│  $ ./mafia.sh new 10 > /tmp/game2.txt                                  │
+│  $ diff /tmp/game1.txt /tmp/game2.txt                                  │
 │                                                                        │
 │  Example 3: Create Tournament                                          │
-│  ─────────────────────────                                             │
+│  ────────────────────────────                                          │
 │  $ ./mafia.sh new 10              # Game 1                            │
 │  $ ./mafia.sh new 10              # Game 2                            │
 │  $ ./mafia.sh new 10              # Game 3                            │
 │  $ ./mafia.sh list                # See all games                     │
 │                                                                        │
-│  Example 4: Test Different AI Models                                   │
-│  ─────────────────────────────────                                     │
-│  # Edit demo-game-correct-flow-v2.js line 73:                         │
-│  # Change: "openai/gpt-4o-mini" to "anthropic/claude-3"               │
-│  $ node demo-game-correct-flow-v2.js > ai_test1.txt                    │
-│  # Change to different model...                                       │
-│  $ node demo-game-correct-flow-v2.js > ai_test2.txt                    │
-│  $ diff ai_test1.txt ai_test2.txt                                      │
+│  Example 4: Test Different AI Models (per-role override via .env)      │
+│  ───────────────────────────────────────────────────────────           │
+│  $ echo 'MAFIA_MODEL=anthropic/claude-3-haiku' >> .env                 │
+│  $ ./mafia.sh new 10 > /tmp/ai_test1.txt                               │
+│  $ echo 'MAFIA_MODEL=openai/gpt-4o-mini' >> .env                       │
+│  $ ./mafia.sh new 10 > /tmp/ai_test2.txt                               │
+│  $ diff /tmp/ai_test1.txt /tmp/ai_test2.txt                            │
 │                                                                        │
 └────────────────────────────────────────────────────────────────────────┘
 
@@ -110,40 +126,54 @@
 
 ┌─ KEY FILES ───────────────────────────────────────────────────────────┐
 │                                                                        │
-│  demo-game-correct-flow-v2.js   # Main game engine                    │
-│  game-manager.js                 # Save/load system                   │
-│  mafia.sh                        # Easy CLI wrapper                   │
-│  saved-games/                    # Directory for saved games          │
-│  specs/correct-night-flow.md     # Complete game rules                │
-│  GAME_MANAGEMENT.md              # Detailed management guide          │
-│  IMPLEMENTATION_STATUS.md        # Current status & features          │
+│  apps/server/                    # Express + WebSocket game server     │
+│  apps/cli/                       # mafiactl CLI (run/list/config)      │
+│  apps/web/                       # React dashboard (pnpm run web)      │
+│  packages/shared/                # Shared types, FSM, providers        │
+│  game-engine.js                  # Legacy 5,303-line engine (root,     │
+│                                  # driven by the server adapter)       │
+│  mafia.sh                        # Repo wrapper over mafiactl          │
+│  mafia.config.json               # CLI/game config (created by         │
+│                                  # mafiactl init / config --reset)     │
+│  .env                            # API keys + per-role model overrides │
+│  docker-compose.yml              # Server (API :3004) + Web (:5174)    │
+│  specs/correct-night-flow.md     # Complete game rules                 │
+│  GAME_MANAGEMENT.md              # Detailed management guide           │
+│  CONFIG_GUIDE.md                 # Configuration guide                 │
 │                                                                        │
 └────────────────────────────────────────────────────────────────────────┘
 
 ┌─ TROUBLESHOOTING ─────────────────────────────────────────────────────┐
 │                                                                        │
-│  ❌ "No saved games found"                                             │
-│     → Run: ./mafia.sh new                                             │
+│  ❌ "Cannot connect to server at http://localhost:3004"                │
+│     → Start it: pnpm run server (or ./mafia.sh server)                 │
 │                                                                        │
 │  ❌ "Game not found: [id]"                                             │
 │     → Run: ./mafia.sh list to see valid IDs                           │
 │                                                                        │
-│  ❌ "ReferenceError: mafiaKillTarget is not defined"                   │
-│     → Fixed! (Scope issue resolved)                                    │
+│  ❌ Every player repeats canned phrases                                │
+│     → Your API key is missing/invalid: check .env (OPENAI_API_KEY);    │
+│       games that fell back to mocks are flagged 'mock' and excluded    │
+│       from win stats.                                                  │
 │                                                                        │
-│  💡 Want to change AI model?                                           │
-│     → Edit demo-game-correct-flow-v2.js line 73                       │
+│  ❌ ./mafia.sh: pnpm not found / missing deps                          │
+│     → Install pnpm (see QUICK_START.md Prerequisites), then            │
+│       pnpm install && pnpm build                                       │
 │                                                                        │
-│  💡 Want to save game for later?                                       │
-│     → Use: ./mafia.sh new                                             │
+│  💡 Want to change the default AI model?                               │
+│     → ./mafia.sh config --model openai/gpt-4o-mini                     │
 │                                                                        │
-│  💡 Want to run multiple games?                                        │
-│     → Run script multiple times or use game-manager.js                │
+│  💡 Want per-role models (mafia/plants/town on different models)?      │
+│     → Add MAFIA_MODEL= / DOCTOR_MODEL= / ... overrides to .env         │
+│                                                                        │
+│  💡 Want a web dashboard?                                              │
+│     → pnpm run server (one terminal) + pnpm run web (another),         │
+│       then open http://localhost:5174                                  │
 │                                                                        │
 └────────────────────────────────────────────────────────────────────────┘
 
-🎉 Everything is working! Run any command above to play!
+🎉 Everything above is wired to the monorepo — run any command to play!
 
-╔══════════════════════════════════════════════════════════════════════╗
-║  Status: ✅ Bug Fixed    ✅ Tests Passing    ✅ Games Running          ║
-╚══════════════════════════════════════════════════════════════════════╝
+╔════════════════════════════════════════════════════════════════════╗
+║  Status: ✅ Monorepo Verified    ✅ Commands Live    ✅ Docs Fresh     ║
+╚════════════════════════════════════════════════════════════════════╝
