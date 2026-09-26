@@ -11,6 +11,20 @@ import { getGameWinnerFromEvents } from './wins.js';
 type AnyRecord = Record<string, any>;
 
 /**
+ * DF-MAFIA-AI-BENCHMARK-22: the sentinel literal better-sqlite3's implicit
+ * object->string coercion wrote into api_calls/token_usage/players on the
+ * 2026-09-24 incident (22 usage rows + 18 players rows, provider AND model
+ * both '[object Object]'). Already-corrupted historical rows stay in the DB
+ * but must never aggregate into any client-facing row.
+ */
+export const OBJECT_OBJECT_SENTINEL = '[object Object]';
+
+/** True when a provider/model string is the corrupted-object sentinel. */
+export function isObjectObjectSentinel(value: unknown): boolean {
+  return typeof value === 'string' && value === OBJECT_OBJECT_SENTINEL;
+}
+
+/**
  * SQL expression selecting the canonical MODEL string for a table alias
  * (MAF-GAP-036/045). Some rows carry the provider prefix inside the model
  * column (provider='openai', model='openai/gpt-4o-mini') while others do
@@ -109,6 +123,8 @@ function getModelComparisonFromAssignments(
     FROM player_model_assignments pma
     JOIN games g ON g.id = pma.game_id
     WHERE g.status = 'ENDED'
+      AND pma.provider != '${OBJECT_OBJECT_SENTINEL}'
+      AND pma.model != '${OBJECT_OBJECT_SENTINEL}'
   `).all() as Array<{
     provider: string;
     model: string;
@@ -124,6 +140,8 @@ function getModelComparisonFromAssignments(
   >();
   for (const row of rows) {
     if (!row.provider || !row.model) continue;
+    // DF-MAFIA-AI-BENCHMARK-22: corrupted sentinel rows never aggregate.
+    if (isObjectObjectSentinel(row.provider) || isObjectObjectSentinel(row.model)) continue;
     const norm = normalizeModelKey(row.provider, row.model);
     const key = `${norm.provider}/${norm.model}`;
     let entry = byModel.get(key);
@@ -164,6 +182,7 @@ function getModelComparisonFromAssignments(
     }>;
     for (const r of wonRows) {
       if (!r.provider || !r.model) continue;
+      if (isObjectObjectSentinel(r.provider) || isObjectObjectSentinel(r.model)) continue;
       const norm = normalizeModelKey(r.provider, r.model);
       const entry = byModel.get(`${norm.provider}/${norm.model}`);
       if (entry) entry.winGames.add(r.game_id);
@@ -196,6 +215,7 @@ function getModelComparisonFromAssignments(
     }>;
     for (const row of usageRows) {
       if (!row.provider || !row.model) continue;
+      if (isObjectObjectSentinel(row.provider) || isObjectObjectSentinel(row.model)) continue;
       const norm = normalizeModelKey(row.provider, row.model);
       const key = `${norm.provider}/${norm.model}`;
       let list = usageByModel.get(key);
@@ -226,6 +246,7 @@ function getModelComparisonFromAssignments(
     }>;
     for (const row of latencyRows) {
       if (!row.provider || !row.model) continue;
+      if (isObjectObjectSentinel(row.provider) || isObjectObjectSentinel(row.model)) continue;
       const norm = normalizeModelKey(row.provider, row.model);
       latencyByModel.set(`${norm.provider}/${norm.model}`, row.avg_latency || 0);
     }
@@ -305,6 +326,7 @@ function getSideAttributedWinGames(
     const winnerCache = new Map<string, 'MAFIA' | 'TOWN' | null>();
     for (const row of rows) {
       if (!row.provider || !row.model) continue;
+      if (isObjectObjectSentinel(row.provider) || isObjectObjectSentinel(row.model)) continue;
       let winner: 'MAFIA' | 'TOWN' | null = null;
       if (row.winner === 'MAFIA' || row.winner === 'TOWN') {
         winner = row.winner;
@@ -391,6 +413,7 @@ function getModelComparisonFromUsage(
     `).all() as Array<{ provider: string; model: string; avg_latency: number }>;
     for (const row of latencyRows) {
       if (!row.provider || !row.model) continue;
+      if (isObjectObjectSentinel(row.provider) || isObjectObjectSentinel(row.model)) continue;
       const norm = normalizeModelKey(row.provider, row.model);
       latencyByModel.set(`${norm.provider}/${norm.model}`, row.avg_latency || 0);
     }
@@ -401,6 +424,9 @@ function getModelComparisonFromUsage(
   const out = [];
   for (const row of rows) {
     if (!row.provider || !row.model) continue;
+    // DF-MAFIA-AI-BENCHMARK-22: the corrupted token_usage group is the one
+    // that surfaced the live '[object Object]' leaderboard row — skip it.
+    if (isObjectObjectSentinel(row.provider) || isObjectObjectSentinel(row.model)) continue;
     // Normalize before keying: the latency map (built above) stores
     // NORMALIZED keys, so a raw provider-prefixed model string (e.g.
     // provider='openai', model='openai/gpt-4o-mini') would miss and the
@@ -481,6 +507,8 @@ export function getModelComparison(
   ) => {
     for (const row of rows) {
       if (!row.provider || !row.model) continue;
+      // DF-MAFIA-AI-BENCHMARK-22: corrupted sentinel rows never aggregate.
+      if (isObjectObjectSentinel(row.provider) || isObjectObjectSentinel(row.model)) continue;
       const norm = normalizeModelKey(row.provider, row.model);
       const key = `${norm.provider}/${norm.model}`;
       const normalized = { ...row, provider: norm.provider, model: norm.model };
@@ -627,6 +655,7 @@ function getHonestReportFallbackModels(
     }>;
     for (const r of playerRows) {
       if (!r.provider || !r.model) continue;
+      if (isObjectObjectSentinel(r.provider) || isObjectObjectSentinel(r.model)) continue;
       covered.add(`${r.provider}/${r.model}`);
       rows.push({
         provider: r.provider,
@@ -667,6 +696,7 @@ function getHonestReportFallbackModels(
     }>;
     for (const r of usageRows) {
       if (!r.provider || !r.model) continue;
+      if (isObjectObjectSentinel(r.provider) || isObjectObjectSentinel(r.model)) continue;
       const key = `${r.provider}/${r.model}`;
       if (covered.has(key)) continue;
       rows.push({
@@ -748,7 +778,7 @@ export function getCompareReport(
   const pProvExpr = normalizedProviderSql('p');
   const pModelExpr = normalizedModelSql('p');
   let modelQuery = `
-      SELECT 
+      SELECT
         ${pProvExpr} as provider,
         ${pModelExpr} as model,
         COUNT(DISTINCT p.game_id) as games_played,
@@ -758,6 +788,8 @@ export function getCompareReport(
       FROM players p
       WHERE p.provider IS NOT NULL AND p.model IS NOT NULL
         AND p.role != 'UNASSIGNED'
+        AND p.provider != '${OBJECT_OBJECT_SENTINEL}'
+        AND p.model != '${OBJECT_OBJECT_SENTINEL}'
     `;
   const modelParams: string[] = [];
 
@@ -783,6 +815,8 @@ export function getCompareReport(
       FROM players p
       WHERE p.provider IS NOT NULL AND p.model IS NOT NULL
         AND p.role != 'UNASSIGNED'
+        AND p.provider != '${OBJECT_OBJECT_SENTINEL}'
+        AND p.model != '${OBJECT_OBJECT_SENTINEL}'
     `;
   const roleParams: string[] = [];
 
@@ -830,6 +864,8 @@ export function getCompareReport(
                SUM(tu.cost) as cost_sum
         FROM token_usage tu
         WHERE tu.provider IS NOT NULL AND tu.model IS NOT NULL
+          AND tu.provider != '${OBJECT_OBJECT_SENTINEL}'
+          AND tu.model != '${OBJECT_OBJECT_SENTINEL}'
     `;
   const costParams: string[] = [];
   if (modelList) {
@@ -858,6 +894,8 @@ export function getCompareReport(
       FROM api_calls ac
       WHERE ac.provider IS NOT NULL AND ac.model IS NOT NULL
         AND ac.latency >= 50
+        AND ac.provider != '${OBJECT_OBJECT_SENTINEL}'
+        AND ac.model != '${OBJECT_OBJECT_SENTINEL}'
     `;
   const latencyParams: string[] = [];
   if (modelList) {
@@ -892,7 +930,7 @@ export function getCompareReport(
         Math.round(((row.avg_role_perf as number) || 0) * 100) / 100,
       rolePerformance: rolePerfMap.get(key) || {},
     };
-  });
+  }).filter((m) => !isObjectObjectSentinel(m.provider) && !isObjectObjectSentinel(m.model));
 
   // ===== Head-to-head =====
   let h2hQuery = 'SELECT * FROM model_matchups WHERE 1=1';
@@ -989,6 +1027,8 @@ export function getCompareReport(
         FROM players p
         WHERE p.provider IS NOT NULL AND p.model IS NOT NULL
           AND p.won = 1
+          AND p.provider != '${OBJECT_OBJECT_SENTINEL}'
+          AND p.model != '${OBJECT_OBJECT_SENTINEL}'
         GROUP BY p.game_id, ${pProvExpr}, ${pModelExpr}
       `).all() as Array<{
         game_id: string;
@@ -1014,6 +1054,8 @@ export function getCompareReport(
       FROM player_model_assignments pma
       JOIN games g ON g.id = pma.game_id
       WHERE g.status = 'ENDED'
+        AND pma.provider != '${OBJECT_OBJECT_SENTINEL}'
+        AND pma.model != '${OBJECT_OBJECT_SENTINEL}'
     `).all() as Array<{
       provider: string;
       model: string;
@@ -1094,6 +1136,7 @@ export function getCompareReport(
 
   for (const row of trendRows) {
     const modelKey = `${row.provider}/${row.model}`;
+    if (modelKey.includes(OBJECT_OBJECT_SENTINEL)) continue;
     if (!trendMap.has(modelKey)) {
       trendMap.set(modelKey, []);
     }

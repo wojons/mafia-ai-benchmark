@@ -354,6 +354,50 @@ describe('StatsCollector', () => {
       expect(s.totalGames).toBe(s.activeGames + s.completedGames + s.failedGames);
     });
 
+    it('counts ONLY fresh (<=24h started_at) IN_PROGRESS games as active (DF-MAFIA-AI-BENCHMARK-23)', () => {
+      const DAY = 24 * 60 * 60 * 1000;
+      // Stale zombie IN_PROGRESS rows (the 97 live legacy orphans, oldest
+      // 2026-06-21): started_at months ago. NOT active.
+      repo.seedGame({ id: 'zombie1', status: 'IN_PROGRESS', startedAt: Date.now() - 30 * DAY });
+      repo.seedGame({ id: 'zombie2', status: 'IN_PROGRESS', startedAt: Date.now() - 2 * DAY });
+      // Fresh IN_PROGRESS row started 1h ago — genuinely active.
+      repo.seedGame({ id: 'fresh1', status: 'IN_PROGRESS', startedAt: Date.now() - 60_000 });
+      // Boundary: just inside the 24h edge counts as fresh (< window).
+      repo.seedGame({ id: 'edge', status: 'IN_PROGRESS', startedAt: Date.now() - DAY + 1000 });
+
+      const s = stats.getGameStats();
+      expect(s.activeGames).toBe(2);
+      // Zombies must not vanish from the total — they stay counted as
+      // games (bucket reconciliation keeps holding).
+      expect(s.totalGames).toBe(4);
+      expect(s.totalGames).toBe(s.activeGames + s.completedGames + s.failedGames);
+    });
+
+    it('treats IN_PROGRESS games with NULL started_at as NOT active (DF-MAFIA-AI-BENCHMARK-23)', () => {
+      // Live shape: 99 of 102 IN_PROGRESS rows have started_at IS NULL.
+      // seedGame defaults startedAt to now — write the NULL directly.
+      repo.seedGame({ id: 'null-start', status: 'IN_PROGRESS' });
+      repo.db.prepare('UPDATE games SET started_at = NULL WHERE id = ?').run('null-start');
+      repo.seedGame({ id: 'fresh-ok', status: 'IN_PROGRESS', startedAt: Date.now() });
+
+      const s = stats.getGameStats();
+      // Only the fresh-started_at game counts; the NULL one does not.
+      expect(s.activeGames).toBe(1);
+      expect(s.totalGames).toBe(2);
+    });
+
+    it('CSV/report summary paths read the SAME fresh-only activeGames via getGameStats (DF-MAFIA-AI-BENCHMARK-23)', () => {
+      // Both export paths consume this.getGameStats() — one freshness
+      // filter must cover them (no duplicated logic). Seed only zombies.
+      const DAY = 24 * 60 * 60 * 1000;
+      repo.seedGame({ id: 'old-zombie', status: 'IN_PROGRESS', startedAt: Date.now() - 40 * DAY });
+
+      const csv = stats.exportCSV();
+      expect(csv).toContain('Active Games,0');
+      const report = stats.generateReport();
+      expect((report.summary as any).activeGames).toBe(0);
+    });
+
     it('lists failed game ids with status and timestamps via getFailedGames (MAF-GAP-050)', () => {
       repo.seedGame({
         id: 'stuck1', status: 'CANCELLED',
@@ -1677,6 +1721,82 @@ describe('StatsCollector', () => {
   describe('getMatchups()', () => {
     it('returns empty array when model_matchups is empty', () => {
       expect(stats.getMatchups()).toEqual([]);
+    });
+  });
+
+  // ==========================================================================
+  // DF-MAFIA-AI-BENCHMARK-22: '[object Object]' sentinel rows must never
+  // aggregate. The live DB carries 22 api_calls + 22 token_usage + 18
+  // players rows with provider/model literally '[object Object]' (dogfood
+  // probe window 2026-09-24 → 2026-09-25); the leaderboard rendered them as
+  // a 4-game/4-win model row.
+  // ==========================================================================
+
+  describe("[object Object] sentinel exclusion (DF-MAFIA-AI-BENCHMARK-22)", () => {
+    it('excludes [object Object] player rows from getModelComparison()', () => {
+      // Real model rows (survive).
+      repo.seedGame({
+        id: 'ok-game', status: 'ENDED', winner: 'TOWN',
+        players: [
+          { id: 'p-ok', name: 'Ok', role: 'VILLAGER', joinOrder: 0,
+            provider: 'openai', model: 'gpt-4o-mini', won: 1, tokens_used: 100 },
+        ],
+      });
+      // Corrupted players rows (the 18 live rows): provider/model are
+      // objects that stringified into the sentinel. Must NOT aggregate.
+      repo.seedGame({
+        id: 'bad-game', status: 'ENDED', winner: 'TOWN',
+        players: [
+          { id: 'p-bad', name: 'Bad', role: 'SHERIFF', joinOrder: 0,
+            provider: '[object Object]', model: '[object Object]', won: 1, tokens_used: 500 },
+        ],
+      });
+
+      const cmp = stats.getModelComparison();
+      expect(cmp.some(m => m.provider === '[object Object]' || m.model === '[object Object]')).toBe(false);
+      // The real model still aggregates.
+      expect(cmp.some(m => m.provider === 'openai' && m.model === 'gpt-4o-mini')).toBe(true);
+    });
+
+    it('excludes [object Object] token_usage/api_calls rows from getModelComparison()', () => {
+      repo.seedGame({ id: 'usage-game', status: 'ENDED' });
+      // Corrupted usage rows (the 22 live rows) — sentinel provider/model.
+      repo.insertTokenUsage({
+        gameId: 'usage-game', playerId: 'ALL', turnNumber: 0,
+        provider: '[object Object]', model: '[object Object]',
+        promptTokens: 10, completionTokens: 10, totalTokens: 20, cost: 0.01,
+      });
+      repo.insertApiCall({
+        gameId: 'usage-game', playerId: 'ALL',
+        provider: '[object Object]', model: '[object Object]',
+        endpoint: 'legacy-engine', latency: 100,
+      });
+      // Real usage for a model with no players/assignment rows — the
+      // getModelComparisonFromUsage fallback path must still surface it.
+      repo.insertTokenUsage({
+        gameId: 'usage-game', playerId: 'ALL', turnNumber: 0,
+        provider: 'realprov', model: 'realm',
+        promptTokens: 5, completionTokens: 5, totalTokens: 10, cost: 0.001,
+      });
+
+      const cmp = stats.getModelComparison();
+      expect(cmp.some(m => m.provider === '[object Object]' || m.model === '[object Object]')).toBe(false);
+      expect(cmp.some(m => m.provider === 'realprov' && m.model === 'realm')).toBe(true);
+    });
+
+    it('excludes [object Object] rows from getCompareReport() models (leaderboard path)', () => {
+      repo.seedGame({
+        id: 'rep-bad', status: 'ENDED', winner: 'TOWN',
+        players: [
+          { id: 'p-bad', name: 'Bad', role: 'MAFIA', joinOrder: 0,
+            provider: '[object Object]', model: '[object Object]', won: 1, tokens_used: 300 },
+        ],
+      });
+
+      const report = stats.getCompareReport();
+      expect(report.models.some(m => m.provider === '[object Object]' || m.model === '[object Object]')).toBe(false);
+      // And the trends fallback path (assignment-derived entries).
+      expect(report.trends.some(t => t.model.includes('[object Object]'))).toBe(false);
     });
   });
 });

@@ -405,3 +405,18 @@ user path on the fresh build to see which merged fixes are actually reachable no
   strings with no type guard → [object Object] rows survive every fix; "Active Games"
   counts a counter that never drains (97) while the games table says 5. Same lesson as
   DF-2's 382% winRate: every headline number needs an independent cross-check.
+
+## Fixed (2026-09-26, tick 205): the [object Object] row and the ghost Active stat
+
+- **DF-22 closed at the source, not the render:** object-typed `provider`/`model` in the
+  legacy bridge's usage payloads passed the old truthy guard, and better-sqlite3's
+  implicit coercion wrote literal `'[object Object]'` into api_calls/token_usage
+  (22 rows) AND an unguarded `backfillPlayerModel` call site wrote 18 players rows —
+  those players rows (not api_calls) fed the leaderboard's phantom "4 games / 4 wins"
+  row. The write path now requires non-empty strings (both loops + the backfill call
+  site), and aggregation filters the sentinel so the historical rows stay in the DB
+  but never surface.
+- **DF-23 closed by freshness, not deletion:** `/api/v1/stats` `activeGames` now counts
+  IN_PROGRESS games whose `started_at` is within 24h (`ACTIVE_FRESHNESS_MS`); NULL
+  started_at never counts. The 97 zombie rows remain in the games table untouched —
+  the counter just stops reporting them.
