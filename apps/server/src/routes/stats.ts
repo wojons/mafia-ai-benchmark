@@ -21,6 +21,10 @@ export function createStatsRouter(context: ServerContext): Router {
 
       res.json({
         success: true,
+        // DF-MAFIA-AI-BENCHMARK-18: data gains a top-level degenerateGames
+        // field (count of games excluded from win stats as degenerate).
+        // The rest of the envelope (success/data wrapper, field order) is
+        // unchanged.
         data: stats,
       });
     } catch {

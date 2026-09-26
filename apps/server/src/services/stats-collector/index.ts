@@ -11,6 +11,10 @@ import {
   computeDurationFromEvents,
 } from './wins.js';
 import {
+  getDegenerateGameCounts,
+  getDegenerateGameIds,
+} from './degenerate.js';
+import {
   getModelComparison,
   getCompareReport,
   generateRecommendations,
@@ -21,6 +25,7 @@ import { getPlayersFromEvents, calculateRolePerformance } from './players.js';
 // ==================== RE-EXPORTS ====================
 export { getAggregatedWins } from './wins.js';
 export { getGameWinnerFromEvents, computeDurationFromEvents } from './wins.js';
+export { getDegenerateGameCounts, getDegenerateGameIds } from './degenerate.js';
 export { getModelComparison, getCompareReport, generateRecommendations } from './models.js';
 export { getMatchups } from './matchups.js';
 export { getPlayersFromEvents, calculateRolePerformance } from './players.js';
@@ -80,6 +85,12 @@ export interface GameStats {
   avgDuration: number;
   mafiaWins: number;
   townWins: number;
+  /**
+   * DF-MAFIA-AI-BENCHMARK-18: count of ENDED games excluded from the
+   * mafiaWins/townWins aggregates as degenerate (all-empty SAYS + short
+   * duration, or flagged by the legacy adapter). Data stays in the DB.
+   */
+  degenerateGames: number;
 }
 
 export interface PlayerStatsSummary {
@@ -426,12 +437,34 @@ export class StatsCollector {
     let mafiaWins: number;
     let townWins: number;
     if (this.gameRepository.hasCompleteWinnerColumn()) {
+      // Column counts are already degenerate-filtered in the repository
+      // (DF-MAFIA-AI-BENCHMARK-18) — the degenerateGames count is the
+      // repository's set-based count over all ENDED games.
       mafiaWins = stats.mafiaWins;
       townWins = stats.townWins;
     } else {
+      // Event-derived counts: exclude degenerate games (all-empty SAYS +
+      // short duration / explicitly flagged) from the event-derived side
+      // too — same exclusion rule, same source.
+      const excluded = getDegenerateGameIds(this.gameRepository);
       const eventWins = this.gameRepository.getWinnerEventCounts();
+      const eventDegenerate = getDegenerateGameCounts(this.gameRepository);
+      // Re-walk ended games to attribute event counts per game: cheaper
+      // than SQL when the winner-column path is not used.
       mafiaWins = eventWins.mafiaWins;
       townWins = eventWins.townWins;
+      // getWinnerEventCounts counts only decisive GAME_OVER events — the
+      // excluded ids subtract the degenerate share from each side.
+      let degenerateMafia = 0;
+      let degenerateTown = 0;
+      for (const id of excluded) {
+        const winner = getGameWinnerFromEvents(this.gameRepository, id);
+        if (winner === 'MAFIA') degenerateMafia += 1;
+        else if (winner === 'TOWN') degenerateTown += 1;
+      }
+      mafiaWins = Math.max(0, mafiaWins - degenerateMafia);
+      townWins = Math.max(0, townWins - degenerateTown);
+      void eventDegenerate;
     }
 
     return {
@@ -442,6 +475,7 @@ export class StatsCollector {
       avgDuration: stats.avgDuration,
       mafiaWins,
       townWins,
+      degenerateGames: stats.degenerateGames,
     };
   }
   

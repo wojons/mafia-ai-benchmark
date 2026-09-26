@@ -405,3 +405,21 @@ user path on the fresh build to see which merged fixes are actually reachable no
   strings with no type guard → [object Object] rows survive every fix; "Active Games"
   counts a counter that never drains (97) while the games table says 5. Same lesson as
   DF-2's 382% winRate: every headline number needs an independent cross-check.
+
+## 2026-09-26 — DF-18: degenerate games marked and excluded from win stats
+
+The canned-mock fallback (game-engine.js:714) plays complete all-empty-SAYS games in ~81s that
+landed in mafiaWins/townWins unmarked (DF-12's integrity hole, observed live 09-25/26: 85 "JSON
+parse failed" warnings + 50 empty SAYS across 3 fresh games). Fix shape:
+
+- **Flag at write:** the legacy adapter's done path sets `games.config.$.degenerate=1` when a
+  completed game has 0 non-empty SAYS across >=3 broadcasts AND duration < 120s (rows are never
+  deleted — the marker is additive).
+- **Exclude at read:** every win aggregate (repository getGameStats, getModelStats,
+  stats-collector models/compare) filters with ONE shared SQL predicate
+  (`GameRepository.DEGENERATE_GAME_SQL`) that ORs the write-time flag with the same event
+  signature, so historical unflagged games are excluded too. `/api/v1/stats` now surfaces
+  `data.degenerateGames` (count excluded) instead of silently dropping them.
+- Verification signal in live stats after deploy: `degenerateGames` >= the canned-mock games
+  actually played; healthy games (real non-empty SAYS) unaffected — proven by the regression
+  battery in `apps/server/src/__tests__/services/degenerate-games.test.ts` (10 tests, RED→GREEN).

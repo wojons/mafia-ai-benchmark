@@ -5,7 +5,9 @@
  */
 
 import type { GameRepository } from '../../db/repository.js';
+import { GameRepository as GameRepositoryClass } from '../../db/repository.js';
 import { getGameWinnerFromEvents } from './wins.js';
+import { getDegenerateGameIds } from './degenerate.js';
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 type AnyRecord = Record<string, any>;
@@ -118,12 +120,19 @@ function getModelComparisonFromAssignments(
 
   if (rows.length === 0) return [];
 
+  // DF-MAFIA-AI-BENCHMARK-18: degenerate games (all-empty SAYS + short
+  // duration / flagged) never enter per-model aggregates — the LLM never
+  // played them, so gamesPlayed/wins/winRate must not count them.
+  const degenerateGames = new Set(getDegenerateGameIds(gameRepository));
+  const isCounted = (gameId: string): boolean => !degenerateGames.has(gameId);
+
   const byModel = new Map<
     string,
     { provider: string; model: string; games: Set<string>; winGames: Set<string> }
   >();
   for (const row of rows) {
     if (!row.provider || !row.model) continue;
+    if (!isCounted(row.game_id)) continue;
     const norm = normalizeModelKey(row.provider, row.model);
     const key = `${norm.provider}/${norm.model}`;
     let entry = byModel.get(key);
@@ -164,6 +173,7 @@ function getModelComparisonFromAssignments(
     }>;
     for (const r of wonRows) {
       if (!r.provider || !r.model) continue;
+      if (!isCounted(r.game_id)) continue;
       const norm = normalizeModelKey(r.provider, r.model);
       const entry = byModel.get(`${norm.provider}/${norm.model}`);
       if (entry) entry.winGames.add(r.game_id);
@@ -283,6 +293,9 @@ function getSideAttributedWinGames(
   }
   if (!db) return winGamesByModel;
   try {
+    // DF-MAFIA-AI-BENCHMARK-18: degenerate games carry no real play — a
+    // "win" there must not be side-attributed to any model.
+    const degenerateGames = new Set(getDegenerateGameIds(gameRepository));
     const pProvExpr = normalizedProviderSql('p');
     const pModelExpr = normalizedModelSql('p');
     const rows = db.prepare(`
@@ -305,6 +318,7 @@ function getSideAttributedWinGames(
     const winnerCache = new Map<string, 'MAFIA' | 'TOWN' | null>();
     for (const row of rows) {
       if (!row.provider || !row.model) continue;
+      if (degenerateGames.has(row.game_id)) continue;
       let winner: 'MAFIA' | 'TOWN' | null = null;
       if (row.winner === 'MAFIA' || row.winner === 'TOWN') {
         winner = row.winner;
@@ -362,6 +376,9 @@ function getModelComparisonFromUsage(
   const db = gameRepository.getDatabase();
   const tuProvExpr = normalizedProviderSql('tu');
   const tuModelExpr = normalizedModelSql('tu');
+  // DF-MAFIA-AI-BENCHMARK-18: degenerate games never enter per-model usage
+  // aggregates — the model never really played them. The shared predicate
+  // (aliased on games g) is applied in-SQL so no per-game re-walk is needed.
   const rows = db.prepare(`
     SELECT ${tuProvExpr} as provider, ${tuModelExpr} as model,
            COUNT(DISTINCT tu.game_id) as games,
@@ -370,6 +387,7 @@ function getModelComparisonFromUsage(
     FROM token_usage tu
     JOIN games g ON g.id = tu.game_id
     WHERE g.status = 'ENDED'
+      AND COALESCE((${GameRepositoryClass.DEGENERATE_GAME_SQL}), 0) = 0
     GROUP BY ${tuProvExpr}, ${tuModelExpr}
   `).all() as Array<{
     provider: string;
@@ -606,9 +624,15 @@ function getHonestReportFallbackModels(
   const covered = new Set<string>();
   const pProvExpr = normalizedProviderSql('p');
   const pModelExpr = normalizedModelSql('p');
+  // DF-MAFIA-AI-BENCHMARK-18: shared degenerate exclusion for the fallback
+  // player/usage queries below (games alias gdeg on the players queries;
+  // the token_usage query filters directly on its own games alias g).
+  const degenerateJoin = `JOIN games gdeg ON gdeg.id = p.game_id
+        AND COALESCE((${GameRepositoryClass.DEGENERATE_GAME_SQL.replace(/\bg\./g, 'gdeg.')}), 0) = 0`;
 
   // 1. players-table rows (any role) — wins from players.won per row.
   try {
+    // DF-MAFIA-AI-BENCHMARK-18: degenerate games excluded from fallback rows.
     const playerRows = db.prepare(`
       SELECT ${pProvExpr} as provider,
              ${pModelExpr} as model,
@@ -616,6 +640,7 @@ function getHonestReportFallbackModels(
              SUM(CASE WHEN p.won = 1 THEN 1 ELSE 0 END) as wins,
              COALESCE(AVG(p.tokens_used), 0) as avg_tokens
       FROM players p
+      ${degenerateJoin}
       WHERE p.provider IS NOT NULL AND p.model IS NOT NULL
       GROUP BY ${pProvExpr}, ${pModelExpr}
     `).all() as Array<{
@@ -657,6 +682,7 @@ function getHonestReportFallbackModels(
       JOIN games g ON g.id = tu.game_id
       WHERE g.status = 'ENDED'
         AND tu.provider IS NOT NULL AND tu.model IS NOT NULL
+        AND COALESCE((${GameRepositoryClass.DEGENERATE_GAME_SQL}), 0) = 0
       GROUP BY ${tuProvExpr}, ${tuModelExpr}
     `).all() as Array<{
       provider: string;
@@ -747,6 +773,11 @@ export function getCompareReport(
   // the stored provider is 'CUSTOM' (MAF-GAP-045).
   const pProvExpr = normalizedProviderSql('p');
   const pModelExpr = normalizedModelSql('p');
+  // DF-MAFIA-AI-BENCHMARK-18: exclude degenerate games (all-empty SAYS +
+  // short duration / flagged) from every per-model aggregate in the report.
+  // The players alias is p and games alias g in all queries below.
+  const degenerateJoin = `JOIN games gdeg ON gdeg.id = p.game_id
+        AND COALESCE((${GameRepositoryClass.DEGENERATE_GAME_SQL.replace(/\bg\./g, 'gdeg.')}), 0) = 0`;
   let modelQuery = `
       SELECT 
         ${pProvExpr} as provider,
@@ -756,6 +787,7 @@ export function getCompareReport(
         COALESCE(AVG(p.tokens_used), 0) as avg_tokens,
         COALESCE(AVG(p.role_performance), 0) as avg_role_perf
       FROM players p
+      ${degenerateJoin}
       WHERE p.provider IS NOT NULL AND p.model IS NOT NULL
         AND p.role != 'UNASSIGNED'
     `;
@@ -781,6 +813,7 @@ export function getCompareReport(
         COUNT(DISTINCT p.game_id) as games_played,
         COUNT(DISTINCT CASE WHEN p.won = 1 THEN p.game_id END) as wins
       FROM players p
+      ${degenerateJoin}
       WHERE p.provider IS NOT NULL AND p.model IS NOT NULL
         AND p.role != 'UNASSIGNED'
     `;
@@ -930,6 +963,7 @@ export function getCompareReport(
         g.created_at
       FROM players p
       JOIN games g ON g.id = p.game_id
+      ${degenerateJoin}
       WHERE p.provider IS NOT NULL AND p.model IS NOT NULL
         AND p.role != 'UNASSIGNED'
     `;
