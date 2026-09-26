@@ -46,6 +46,10 @@
     {"task_id": "DEPS-001", "reason": "work merged (5b819e6) but CI red is INT-CI-001 scope; closeout after CI green"},
     {"task_id": "DF-MAFIA-AI-BENCHMARK-24", "reason": "needs bunker-las-03 reachability, not code work"}
   ],
-  "outcomes": null,
-  "finished_at": null
+  "outcomes": {
+    "INT-CI-001": {"status": "complete", "commits": ["e12a063", "1dc3da1"], "judge": "1eb6f505 FAIL (residual tsbuildinfo no-op) -> continuation INT-CI-001B PASS ef9f1df2", "ci": "green on 1dc3da1"},
+    "MAF-GAP-071": {"status": "complete", "commits": ["452e9ec"], "judge": "re-judge PASS 91721545 (initial 77883289 FAIL = tier1 env-poisoned)"},
+    "MAF-GAP-073": {"status": "complete", "commits": ["77caa7e"], "judge": "PASS 69ece98d"}
+  },
+  "finished_at": "2026-09-26T07:41:00-05:00"
 }
