@@ -406,6 +406,95 @@ CREATE TABLE game_events_replay (
 );
 ```
 
+### token_usage Table
+
+One row per recorded token consumer per game. `player_id = 'ALL'` is the
+whole-game per-model aggregate; real engine player ids carry each player's
+own totals (this is what per-player attribution in the game detail reads).
+
+```sql
+CREATE TABLE IF NOT EXISTS token_usage (
+  id TEXT PRIMARY KEY,
+  game_id TEXT NOT NULL,
+  player_id TEXT NOT NULL,
+  turn_number INTEGER NOT NULL,
+  provider TEXT NOT NULL,
+  model TEXT NOT NULL,
+  prompt_tokens INTEGER NOT NULL,
+  completion_tokens INTEGER NOT NULL,
+  total_tokens INTEGER NOT NULL,
+  cost REAL,
+  timestamp INTEGER NOT NULL DEFAULT (unixepoch()),
+  FOREIGN KEY (game_id) REFERENCES games(id) ON DELETE CASCADE
+);
+```
+
+### api_calls Table
+
+One row per recorded call batch, carrying the latency the report's
+`avgLatency` is built from (`endpoint = 'legacy-engine'` on the legacy path).
+
+```sql
+CREATE TABLE IF NOT EXISTS api_calls (
+  id TEXT PRIMARY KEY,
+  game_id TEXT NOT NULL,
+  player_id TEXT NOT NULL,
+  provider TEXT NOT NULL,
+  model TEXT NOT NULL,
+  endpoint TEXT NOT NULL,
+  latency INTEGER NOT NULL,
+  status_code INTEGER,
+  error TEXT,
+  timestamp INTEGER NOT NULL DEFAULT (unixepoch()),
+  FOREIGN KEY (game_id) REFERENCES games(id) ON DELETE CASCADE
+);
+```
+
+## Benchmark Reporting (implemented)
+
+The per-model cost-efficiency numbers the README advertises are served by
+`GET /api/v1/benchmark/report` under `data.modelPerformance`, derived by
+`apps/server/src/services/stats-collector/models.ts` from the `token_usage`
+and `api_calls` rows above. They do not come from the in-memory `CostTracker`
+class documented in the previous sections.
+
+| Report field  | Source |
+| ------------- | ------ |
+| `avgTokens`   | mean `SUM(total_tokens)` per game, grouped by provider/model |
+| `avgCost`     | mean `SUM(cost)` per game, grouped by provider/model |
+| `avgLatency`  | mean `api_calls.latency` per model |
+| `gamesPlayed` | count of games with recorded usage for that model |
+
+Recording happens on the legacy engine path at game completion: the bridge's
+`done` message carries the engine's real per-model and per-player usage
+(`apps/server/src/services/legacy-usage-collector.js` — `collectUsage` /
+`collectLatencyByModel`), and `legacy-game-adapter.ts` persists it into
+`token_usage` + `api_calls` (`persistUsage`).
+
+Nothing is fabricated. A game whose provider calls all failed and fell back to
+canned mock responses records zero tokens by design and is flagged
+`config.$.mock`; it contributes no invented cost to the report.
+
+### Reproducing
+
+```bash
+# 1. start a real game (5 players, one model for every role)
+curl -s -X POST http://localhost:3004/api/v1/games \
+  -H 'Content-Type: application/json' \
+  -d '{"numPlayers":5,"roleModels":{"MAFIA":"openai/gpt-4o-mini","SHERIFF":"openai/gpt-4o-mini","TOWN":"openai/gpt-4o-mini","DOCTOR":"openai/gpt-4o-mini"}}'
+
+# 2. once the game ends, read the aggregated report
+curl -s http://localhost:3004/api/v1/benchmark/report \
+  | jq '.data.modelPerformance[] | {provider, model, gamesPlayed, avgTokens, avgCost, avgLatency}'
+```
+
+Measured on the running stack (2026-09-26): one 5-player game on
+`openai/gpt-4o-mini`, completed through `POST /api/v1/games`, recorded 6
+`token_usage` rows (1 whole-game aggregate + 5 per-player), 73,868 tokens and
+$0.014071 of cost, plus 6 `api_calls` rows. The report's `modelPerformance`
+entry for that model read `avgTokens` ≈ 67,999 and `avgCost` ≈ $0.0131 over
+2,228 games.
+
 ## Integration Example
 
 ### Manual Integration
@@ -522,13 +611,24 @@ process.env.API_KEY = ""; // No API key = mock responses
 
 ## Estimated Costs
 
-### Per Game (6 Players)
+### Per Game
 
-| Model         | Prompt Price | Completion Price | Est. Cost/Game |
-| ------------- | ------------ | ---------------- | -------------- |
-| gpt-4o-mini   | $0.15/M      | $0.60/M          | $1-5           |
-| gpt-3.5-turbo | $0.50/M      | $1.50/M          | $3-15          |
-| gpt-4o        | $2.50/M      | $10.00/M         | $15-75         |
+The prices are the list prices the engine bills against. "Measured" is the
+per-game mean the benchmark report actually recorded over real games — quote
+that when comparing models, and treat the price columns as a sanity check on
+the order of magnitude rather than as a budget.
+
+| Model         | Prompt Price | Completion Price | Measured Avg/Game | Games |
+| ------------- | ------------ | ---------------- | ----------------- | ----- |
+| gpt-4o-mini   | $0.15/M      | $0.60/M          | $0.0131           | 2,228 |
+| gpt-4o        | $2.50/M      | $10.00/M         | $0.0045           | 85    |
+| gpt-3.5-turbo | $0.50/M      | $1.50/M          | no recorded games | 0     |
+
+The measured mean depends on how long the games ran and how much history each
+player carried, not on price alone — a lower mean for a higher-priced model
+means those games were shorter. Compare models by `avgTokens` alongside
+`avgCost`, and re-read both from `GET /api/v1/benchmark/report` rather than
+from a table in a doc.
 
 ### Per Player Turn
 
@@ -548,12 +648,23 @@ COST_PER_PLAYER_PER_TURN=0.50
 COST_PER_PLAYER_PER_TURN = 0.50  #Spaces around =
 ```
 
-### Issue: TotalTokens shows NaN
+### Issue: TotalTokens shows NaN, or a model reports 0 tokens/cost
 
-**Solution:** The cost tracking may not have detected token usage. Check that:
+**Root cause fixed (MAF-GAP-018):** the usage collector read a nonexistent
+top-level `totalTokens` off the tracker result, so every game recorded `NaN`,
+which landed in the database as 0 and made every model in the benchmark report
+read 0 tokens/cost. It now reads `estimatedCost.tokens.totalTokens` — the
+shape `trackPlayerTurn` actually returns.
 
-- AI response includes `usage` field
-- Token values are numbers, not strings
+If you still see zeros:
+
+- Confirm the game's provider calls succeeded. When every call falls back to
+  canned mock responses the game records zero tokens **by design** and is
+  flagged `config.$.mock`; a mock game is not evidence that tracking broke.
+- Confirm the AI response includes a `usage` field and that token values are
+  numbers, not strings.
+- Inspect the game's own rows:
+  `SELECT player_id, model, total_tokens, cost FROM token_usage WHERE game_id = '<id>'`.
 
 ### Issue: Context compression not working
 
