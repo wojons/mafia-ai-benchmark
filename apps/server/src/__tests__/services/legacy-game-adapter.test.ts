@@ -1224,6 +1224,130 @@ describe('LegacyGameAdapter', () => {
       expect(playerCalls[1].latency).toBe(1000);
     });
 
+    it("skips usage entries whose provider/model are objects — never writes '[object Object]' rows (DF-MAFIA-AI-BENCHMARK-22)", () => {
+      // Incident (2026-09-24, 22 rows): usage entries carrying provider/model
+      // as OBJECTS passed the truthy !u.provider guard and the literal
+      // '[object Object]' string was inserted into api_calls/token_usage.
+      // Post-fix: an object-typed entry is skipped (never a JSON blob, never
+      // a sentinel), while well-typed entries in the SAME array persist.
+      const sqliteRepo = createSqliteBackedRepository();
+      sqliteRepo.seedGame({ id: 'g-objusage', status: 'IN_PROGRESS' });
+      const sqliteAdapter = new LegacyGameAdapter(eventBus, sqliteRepo as any);
+
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      (sqliteAdapter as any).persistUsage('g-objusage', [
+        {
+          provider: 'openai',
+          model: 'gpt-4o-mini',
+          promptTokens: 1000,
+          completionTokens: 500,
+          totalTokens: 1500,
+          cost: 0.0015,
+          apiCalls: 12,
+          latencyMs: 800,
+        },
+        {
+          // The corrupted shape: provider/model are objects.
+          provider: { name: 'openai' },
+          model: { id: 'gpt-4o-mini' },
+          promptTokens: 500,
+          completionTokens: 250,
+          totalTokens: 750,
+          cost: 0.0008,
+          apiCalls: 5,
+          latencyMs: 300,
+        } as any,
+        {
+          provider: 'anthropic',
+          model: 'claude-3',
+          promptTokens: 100,
+          completionTokens: 50,
+          totalTokens: 150,
+          cost: 0.0002,
+          apiCalls: 2,
+          latencyMs: 100,
+        },
+      ]);
+
+      const tu = sqliteRepo.db.prepare(
+        'SELECT provider, model FROM token_usage WHERE game_id = ?'
+      ).all('g-objusage') as Array<Record<string, unknown>>;
+      // Only the two well-typed entries persisted.
+      expect(tu).toHaveLength(2);
+      expect(tu.map(r => String(r.provider))).toEqual(['openai', 'anthropic']);
+      expect(tu.every(r => !String(r.provider).includes('object Object'))).toBe(true);
+      expect(tu.every(r => !String(r.model).includes('object Object'))).toBe(true);
+
+      const ac = sqliteRepo.db.prepare(
+        'SELECT provider, model FROM api_calls WHERE game_id = ?'
+      ).all('g-objusage') as Array<Record<string, unknown>>;
+      expect(ac).toHaveLength(2);
+      expect(ac.every(r => !String(r.provider).includes('object Object'))).toBe(true);
+      expect(ac.every(r => !String(r.model).includes('object Object'))).toBe(true);
+
+      // player_game_stats: only the persisted models' rows (2, not 3). This
+      // is the RED observable pre-fix: the object entry SKIPS its
+      // token_usage/api_calls inserts only because better-sqlite3 throws on
+      // object binds, but the player_game_stats insert carries no object
+      // bind (role falls back to 'UNASSIGNED'), so a phantom 3rd row lands.
+      const pgs = sqliteRepo.db.prepare(
+        'SELECT COUNT(*) as c FROM player_game_stats WHERE game_id = ?'
+      ).get('g-objusage') as { c: number };
+      expect(pgs.c).toBe(2);
+    });
+
+    it("skips per-player usage entries whose provider/model are objects (DF-MAFIA-AI-BENCHMARK-22)", () => {
+      // The 18 live players-table sentinel rows came from backfillPlayerModel
+      // fed by object-typed usageByPlayer entries; the persistUsage per-player
+      // loop must skip them too.
+      const sqliteRepo = createSqliteBackedRepository();
+      sqliteRepo.seedGame({ id: 'g-objplayer', status: 'IN_PROGRESS' });
+      const sqliteAdapter = new LegacyGameAdapter(eventBus, sqliteRepo as any);
+
+      (sqliteAdapter as any).persistUsage(
+        'g-objplayer',
+        [],
+        [
+          {
+            playerId: 'p1',
+            playerName: 'Ok',
+            provider: 'openai',
+            model: 'gpt-4o-mini',
+            promptTokens: 10,
+            completionTokens: 5,
+            totalTokens: 15,
+            cost: 0.0001,
+            apiCalls: 1,
+            latencyMs: 50,
+          },
+          {
+            playerId: 'p2',
+            playerName: 'Corrupted',
+            provider: { vendor: 'openai' },
+            model: { id: 'gpt-4o-mini' },
+            promptTokens: 10,
+            completionTokens: 5,
+            totalTokens: 15,
+            cost: 0.0001,
+            apiCalls: 1,
+            latencyMs: 50,
+          } as any,
+        ],
+      );
+
+      const playerTokens = sqliteRepo.db.prepare(
+        "SELECT provider, model FROM token_usage WHERE game_id = ? AND player_id != 'ALL'"
+      ).all('g-objplayer') as Array<Record<string, unknown>>;
+      expect(playerTokens).toHaveLength(1);
+      expect(playerTokens[0].provider).toBe('openai');
+
+      const playerCalls = sqliteRepo.db.prepare(
+        "SELECT provider, model FROM api_calls WHERE game_id = ? AND player_id != 'ALL'"
+      ).all('g-objplayer') as Array<Record<string, unknown>>;
+      expect(playerCalls).toHaveLength(1);
+      expect(playerCalls[0].provider).toBe('openai');
+    });
+
     it('persists per-player rows end-to-end when the bridge done message carries usageByPlayer (MAF-GAP-029)', () => {
       const sqliteRepo = createSqliteBackedRepository();
       sqliteRepo.seedGame({ id: 'g-done-pp', status: 'IN_PROGRESS' });

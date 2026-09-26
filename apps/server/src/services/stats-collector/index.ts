@@ -118,6 +118,15 @@ export interface AgentStats {
 }
 
 /**
+ * DF-MAFIA-AI-BENCHMARK-23: an IN_PROGRESS row only counts as an ACTIVE
+ * game when it started within this window. The live DB carried 97 such
+ * zombie rows (legacy orphans, oldest 2026-06-21) that /api/v1/stats
+ * reported as "Active Games" forever; only genuinely-fresh games count.
+ * NULL started_at never counts as active.
+ */
+export const ACTIVE_FRESHNESS_MS = 24 * 60 * 60 * 1000;
+
+/**
  * Empty report shape shared by generateReport()'s error fallback — keeps
  * the response contract stable (generatedAt / summary / modelPerformance /
  * agentStats / recommendations) even when report generation fails.
@@ -467,11 +476,40 @@ export class StatsCollector {
       void eventDegenerate;
     }
 
+    // DF-MAFIA-AI-BENCHMARK-23: the repository's activeGames counts ALL
+    // status='IN_PROGRESS' rows, but the legacy orphan zombies (97 live
+    // rows, started months ago) are not real active games. Recount with a
+    // 24h started_at freshness window — pure SQL, same table, no writes.
+    // NULL started_at never counts as active. The CSV/export/report paths
+    // all consume THIS method, so one filter covers every surface.
+    let activeGames = 0;
+    try {
+      const freshRow = this.gameRepository.getDatabase().prepare(`
+        SELECT COUNT(*) as count FROM games
+        WHERE status = 'IN_PROGRESS'
+          AND started_at IS NOT NULL
+          AND started_at >= ?
+      `).get(Date.now() - ACTIVE_FRESHNESS_MS) as { count: number };
+      activeGames = freshRow.count;
+    } catch {
+      // games table unavailable — fall back to the repository counter
+      // (the same value this method reported before the freshness filter).
+      activeGames = stats.activeGames;
+    }
+
+    // MAF-GAP-050 reconciliation identity (total = active + completed +
+    // failed) must keep holding: rows demoted from active by the freshness
+    // filter (stale zombies + NULL started_at) are neither active nor
+    // completed, so they join the failedGames bucket — the same
+    // "non-terminal, not-counted-elsewhere" bucket MAF-GAP-050 defined.
+    const demotedFromActive = Math.max(0, stats.activeGames - activeGames);
+    const failedGames = stats.failedGames + demotedFromActive;
+
     return {
       totalGames: stats.totalGames,
-      activeGames: stats.activeGames,
+      activeGames,
       completedGames: stats.completedGames,
-      failedGames: stats.failedGames,
+      failedGames,
       avgDuration: stats.avgDuration,
       mafiaWins,
       townWins,

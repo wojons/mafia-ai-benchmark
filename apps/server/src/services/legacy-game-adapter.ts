@@ -403,8 +403,13 @@ export class LegacyGameAdapter extends EventEmitter {
             if (Array.isArray(message.usageByPlayer)) {
               for (const u of message.usageByPlayer as PlayerUsageAggregate[]) {
                 if (!u || !u.playerId || !u.provider || !u.model) continue;
+                // DF-MAFIA-AI-BENCHMARK-22: string-only — object-typed
+                // provider/model values here wrote the 18 sentinel
+                // '[object Object]' players rows in the 2026-09-24 incident.
+                if (typeof u.provider !== 'string' || !u.provider.trim()) continue;
+                if (typeof u.model !== 'string' || !u.model.trim()) continue;
                 try {
-                  this.gameRepository.backfillPlayerModel(u.playerId, u.provider, u.model);
+                  this.gameRepository.backfillPlayerModel(u.playerId, u.provider.trim(), u.model.trim());
                 // eslint-disable-next-line @typescript-eslint/no-explicit-any
                 } catch (e: any) {
                   console.error(`[LegacyAdapter] Failed to backfill player model for ${u.playerId}: ${e?.message || e}`);
@@ -626,7 +631,16 @@ export class LegacyGameAdapter extends EventEmitter {
 
     if (usage && Array.isArray(usage)) for (const u of usage) {
       if (!u || !u.provider || !u.model) continue;
-      const role = roleByModel.get(`${u.provider}/${u.model}`) || 'UNASSIGNED';
+      // DF-MAFIA-AI-BENCHMARK-22: provider/model must be non-empty STRINGS.
+      // An object-typed value passes the truthy guard above and its implicit
+      // String() coercion inserts the literal '[object Object]' into
+      // api_calls/token_usage (incident 2026-09-24: 22 rows) and a phantom
+      // player_game_stats row. Normalize; skip anything that is not a
+      // non-empty string after normalization.
+      const provider = typeof u.provider === 'string' ? u.provider.trim() : '';
+      const model = typeof u.model === 'string' ? u.model.trim() : '';
+      if (!provider || !model) continue;
+      const role = roleByModel.get(`${provider}/${model}`) || 'UNASSIGNED';
 
       try {
         insertTokenUsage.run(
@@ -634,8 +648,8 @@ export class LegacyGameAdapter extends EventEmitter {
           gameId,
           'ALL',
           0,
-          u.provider,
-          u.model,
+          provider,
+          model,
           u.promptTokens || 0,
           u.completionTokens || 0,
           u.totalTokens || 0,
@@ -652,8 +666,8 @@ export class LegacyGameAdapter extends EventEmitter {
           uuidv4(),
           gameId,
           'ALL',
-          u.provider,
-          u.model,
+          provider,
+          model,
           'legacy-engine',
           u.latencyMs || 0,
           200,
@@ -690,6 +704,13 @@ export class LegacyGameAdapter extends EventEmitter {
     if (usageByPlayer && Array.isArray(usageByPlayer)) {
       for (const u of usageByPlayer) {
         if (!u || !u.playerId || !u.provider || !u.model) continue;
+        // DF-MAFIA-AI-BENCHMARK-22: same string-only rule as the per-model
+        // loop above — object-typed provider/model values never reach the
+        // usage tables OR backfillPlayerModel (which wrote the 18 sentinel
+        // players rows in the same incident).
+        const provider = typeof u.provider === 'string' ? u.provider.trim() : '';
+        const model = typeof u.model === 'string' ? u.model.trim() : '';
+        if (!provider || !model) continue;
 
         try {
           insertTokenUsage.run(
@@ -697,8 +718,8 @@ export class LegacyGameAdapter extends EventEmitter {
             gameId,
             u.playerId,
             0,
-            u.provider,
-            u.model,
+            provider,
+            model,
             u.promptTokens || 0,
             u.completionTokens || 0,
             u.totalTokens || 0,
@@ -715,8 +736,8 @@ export class LegacyGameAdapter extends EventEmitter {
             uuidv4(),
             gameId,
             u.playerId,
-            u.provider,
-            u.model,
+            provider,
+            model,
             'legacy-engine',
             u.latencyMs || 0,
             200,
