@@ -392,7 +392,8 @@ DF-17 (deploy drift) was closed by rebuilding both images from HEAD. This tick r
 user path on the fresh build to see which merged fixes are actually reachable now:
 
 - **Reachable and working:** DF-11 spectate (on /watch/:gameId), DF-13 game-list cards,
-  DF-14 stats page, DF-2 winRate (0.998... wait — 99.8% shown, correct), benchmark/compare.
+  DF-14 stats page, DF-2 winRate (99.8% gpt-4o-mini — matches the fixed COUNT/DISTINCT
+  semantics), benchmark/compare.
 - **Still broken despite being "fixed":** DF-16 (WS live spectate). The drift fix only
   moved already-merged code; DF-16 was never merged. Lesson: a drift fix closes the
   DELIVERY gap, not the DEFECT gap — each dogfood finding needs its own merge evidence.
