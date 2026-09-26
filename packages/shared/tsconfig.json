@@ -17,7 +17,8 @@
     "resolveJsonModule": true,
     "allowSyntheticDefaultImports": true,
     "composite": true,
-    "noEmit": false
+    "noEmit": false,
+    "tsBuildInfoFile": "./dist/tsconfig.tsbuildinfo"
   },
   "include": ["src/**/*"],
   "exclude": ["node_modules", "dist", "**/__tests__/**"]
