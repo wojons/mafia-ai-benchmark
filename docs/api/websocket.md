@@ -56,8 +56,11 @@ Response:
 
 ### `SUBSCRIBE`
 
-Add one or more event types to this client's subscription set. Non-array
-`eventTypes` payloads are ignored silently (no error, no subscription).
+Two modes:
+
+**Event-types mode (unchanged).** Add one or more event types to this
+client's subscription set. Non-array `eventTypes` payloads are ignored
+silently (no error, no subscription).
 
 ```json
 { "type": "SUBSCRIBE", "payload": { "eventTypes": ["PHASE_CHANGED", "VOTE_CAST"] } }
@@ -67,6 +70,25 @@ Response:
 
 ```json
 { "type": "SUBSCRIBED", "payload": { "eventTypes": ["PHASE_CHANGED", "VOTE_CAST"] }, "timestamp": "..." }
+```
+
+**Game-alias mode (DF-MAFIA-AI-BENCHMARK-19).** A `SUBSCRIBE` carrying a
+`gameId` (or `game_id`) is an alias for `JOIN_GAME`: the client is
+registered on the game's event stream exactly as if it had sent
+`JOIN_GAME {gameId}`, and replies `SUBSCRIBED` with
+`{ eventTypes: ["GAME_EVENT"], gameId }` instead of a silent no-op. Sending
+`SUBSCRIBE {gameId}` previously acked `SUBSCRIBED` while registering
+nothing — that trap is closed; a gameId on SUBSCRIBE always registers.
+`LEAVE_GAME` ends the aliased stream like any other join.
+
+```json
+{ "type": "SUBSCRIBE", "payload": { "gameId": "8e6e0ac0-..." } }
+```
+
+Response:
+
+```json
+{ "type": "SUBSCRIBED", "payload": { "eventTypes": ["GAME_EVENT"], "gameId": "8e6e0ac0-..." }, "timestamp": "..." }
 ```
 
 ### `UNSUBSCRIBE`

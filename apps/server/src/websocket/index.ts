@@ -140,14 +140,28 @@ export class WebSocketHandler {
   private handleSubscribe(clientId: string, payload: Record<string, unknown>): void {
     const client = this.clients.get(clientId);
     if (!client) return;
-    
+
+    // Legacy trap (DF-MAFIA-AI-BENCHMARK-19): a SUBSCRIBE carrying a gameId
+    // used to ack SUBSCRIBED while registering nothing — the real per-game
+    // channel is JOIN_GAME. Alias it to the join path so it can never
+    // silently no-op. Plain eventTypes-only SUBSCRIBE is unchanged.
+    const aliasGameId = (payload.gameId ?? payload.game_id) as string | undefined;
+    if (typeof aliasGameId === 'string' && aliasGameId.length > 0) {
+      this.registerGameSubscription(clientId, aliasGameId);
+      this.sendToClient(clientId, {
+        type: 'SUBSCRIBED',
+        payload: { eventTypes: ['GAME_EVENT'], gameId: aliasGameId },
+      });
+      return;
+    }
+
     const eventTypes = payload.eventTypes as string[];
     if (Array.isArray(eventTypes)) {
       eventTypes.forEach(type => {
         client.subscriptions.add(type);
       });
     }
-    
+
     this.sendToClient(clientId, {
       type: 'SUBSCRIBED',
       payload: { eventTypes },
@@ -175,10 +189,38 @@ export class WebSocketHandler {
     const gameId = payload.gameId as string;
     const client = this.clients.get(clientId);
     if (!client) return;
-    
+
+    this.registerGameSubscription(clientId, gameId);
+
+    this.sendToClient(clientId, {
+      type: 'GAME_JOINED',
+      payload: { gameId },
+    });
+
+    // Send current game state
+    const state = this.context.gameEngine.getGameState(gameId);
+    if (state) {
+      this.sendToClient(clientId, {
+        type: 'GAME_STATE',
+        payload: { state },
+      });
+    }
+  }
+
+  /**
+   * The one per-game registration path. Both JOIN_GAME and the legacy
+   * SUBSCRIBE {gameId} alias (DF-MAFIA-AI-BENCHMARK-19) route through here:
+   * set client.gameId, subscribe to the EventBus (wildcard + gameId filter,
+   * spectator semantics — the joiner itself receives the game's events), and
+   * tear down any previous per-game subscription first.
+   */
+  private registerGameSubscription(clientId: string, gameId: string): void {
+    const client = this.clients.get(clientId);
+    if (!client) return;
+
     client.gameId = gameId;
     client.subscriptions.add(`game:${gameId}`);
-    
+
     // Subscribe this joiner to the events the game actually publishes. The
     // EventBus is event-TYPE-keyed (the legacy adapter publishes by event
     // type like 'PHASE_CHANGED'/'GAME_ENDED'), so topic keys like
@@ -191,27 +233,13 @@ export class WebSocketHandler {
       previousUnsubscribe();
       client.eventBusUnsubscribe = undefined;
     }
-    
+
     client.eventBusUnsubscribe = this.context.eventBus.subscribeAll(
       (event) => {
         if (event.gameId !== gameId) return;
         this.broadcastToGame(gameId, event as unknown as Record<string, unknown>);
       }
     );
-    
-    this.sendToClient(clientId, {
-      type: 'GAME_JOINED',
-      payload: { gameId },
-    });
-    
-    // Send current game state
-    const state = this.context.gameEngine.getGameState(gameId);
-    if (state) {
-      this.sendToClient(clientId, {
-        type: 'GAME_STATE',
-        payload: { state },
-      });
-    }
   }
   
   private handleLeaveGame(clientId: string): void {

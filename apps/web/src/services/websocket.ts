@@ -146,10 +146,24 @@ class WebSocketService {
   }
   
   // Convenience methods for common operations
-  subscribe(eventTypes: string[]): void {
+  // gameId is the real per-game channel (JOIN_GAME registration). A plain
+  // SUBSCRIBE {gameId} used to ack while registering nothing (silent no-op
+  // trap, DF-MAFIA-AI-BENCHMARK-19) — route it through JOIN_GAME instead.
+  subscribe(eventTypes: string[], gameId?: string): void {
+    if (gameId) {
+      this.joinGame(gameId);
+      return;
+    }
     this.send({
       type: 'SUBSCRIBE',
       payload: { eventTypes },
+    });
+  }
+
+  joinGame(gameId: string): void {
+    this.send({
+      type: 'JOIN_GAME',
+      payload: { gameId },
     });
   }
   
