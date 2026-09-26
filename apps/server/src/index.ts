@@ -113,7 +113,7 @@ async function main(): Promise<void> {
   app.get('/api/v1/health', healthHandler);
 
   app.get('/api/v1', (req, res) => {
-    res.json({ version: '1.0.0', name: 'Mafia AI Benchmark API', endpoints: '/api/v1/games, /api/v1/players, /api/v1/agents, /api/v1/stats, /api/v1/benchmark' });
+    res.json({ version: '1.0.0', name: 'Mafia AI Benchmark API', endpoints: '/api/v1/games, /api/v1/agents, /api/v1/stats, /api/v1/benchmark, /api/v1/models' });
   });
 
   setupRoutes(app, context);

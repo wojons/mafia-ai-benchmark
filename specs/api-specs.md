@@ -51,64 +51,34 @@ ws://localhost:3004/ws
 }
 ```
 
-**Response (200 OK):**
+**Response (201 Created):**
+
+The default creation path runs the LEGACY game engine; the response is an
+acknowledgment, not the full game object (realigned to the live API,
+MAF-GAP-073):
 
 ```json
 {
-  "gameId": "game-123",
-  "status": "SETUP",
-  "config": {
-    "players": 10,
-    "mafia": 3,
-    "seed": 12345,
-    "personaMode": "custom"
-  },
-  "players": [
-    {
-      "id": "p1",
-      "name": "Suspicious 25",
-      "role": "MAFIA",
-      "alive": true,
-      "persona": {
-        "archetype": "Detective",
-        "traits": ["Observant", "Analytical", "Skeptical"],
-        "communicationStyle": "Clinical",
-        "humor": "dry",
-        "moralAlignment": "True Neutral",
-        "flaw": "Trusting",
-        "seed": "suspicious lawyer who questions everyone"
-      }
-    },
-    {
-      "id": "p2",
-      "name": "Quiet 5",
-      "role": "MAFIA",
-      "alive": true,
-      "persona": {
-        "archetype": "Observer",
-        "traits": ["Resourceful", "Cautious", "Adaptable"],
-        "communicationStyle": "Direct",
-        "humor": "quiet",
-        "moralAlignment": "Neutral Good",
-        "flaw": "Impulsive",
-        "seed": "quiet bookstore owner who observes everything"
-      }
+  "success": true,
+  "data": {
+    "gameId": "1692df5c-f844-4abd-ad78-ae7e00d2fe64",
+    "status": "starting",
+    "config": {
+      "engineType": "legacy",
+      "numPlayers": 5
     }
-    // ... other players
-  ],
-  "links": {
-    "self": "/api/v1/games/game-123",
-    "stream": "/ws/game-123",
-    "export": "/api/v1/games/game-123/export"
   }
 }
 ```
 
-**Validation Rules:**
+Body fields (all optional): `numPlayers` (default 5), `personaSeeds`,
+`config` (legacy engine config), `roleModels` (or `config.roleModels` /
+`models` — per-role model overrides). When the legacy adapter is unavailable
+the server falls back to the standard engine and returns
+`{ success: true, data: { gameId, status, config } }`.
 
-- `numPlayers`: Must be between 5 and 20
-- `mafia`: Must be 20-40% of players, rounded down
-- `seed`: Optional random seed (auto-generated if not provided)
+The full game (players, roles, state) is read afterwards via
+`GET /api/v1/games/:gameId`. There is no `links` object on the live response.
 
 ---
 
@@ -231,159 +201,142 @@ ws://localhost:3004/ws
 
 ---
 
-### Game Control
+### Game Control (POST /api/v1/games/:gameId/... — realigned MAF-GAP-073)
+
+The live server has NO pause/resume/step control routes — the previously
+documented `POST /api/v1/games/:gameId/{pause,resume,step}` routes do not
+exist in the route table (no `game-pause`/`game-resume`/`game-step` events are
+emitted anywhere in the server). Game lifecycle is controlled by
+`start` + legacy-engine `stop` only.
 
 #### Start Game
 
 **Endpoint:** `POST /api/v1/games/:gameId/start`
 
+**Request Body:** None.
+
 **Response (200 OK):**
 
 ```json
 {
-  "id": "game-123",
-  "status": "IN_PROGRESS",
-  "phase": "NIGHT_ACTIONS",
-  "dayNumber": 0,
-  "startedAt": 1703774401000
+  "success": true,
+  "data": { "eventId": "evt-uuid-or-null" }
 }
 ```
 
 **Error Cases:**
 
-- `400 Bad Request`: Game already started
-- `404 Not Found`: Game ID not found
+- `400 Bad Request`: `{ "success": false, "error": "<engine reason>" }` (game already started, etc.)
+- `500 Internal Server Error`: `{ "success": false, "error": "Failed to start game" }`
 
----
+#### Join Game
 
-#### Pause Game
+**Endpoint:** `POST /api/v1/games/:gameId/join`
 
-**Endpoint:** `POST /api/v1/games/:gameId/pause`
+**Request Body:**
 
-**Request:** (empty body)
+```json
+{ "playerName": "Alice", "agentConfig": { /* optional */ } }
+```
+
+**Response (201 Created):**
+
+```json
+{ "success": true, "data": { "eventId": "evt-uuid-or-null" } }
+```
+
+**Error Cases:** `400` (engine rejects — game full, already started, name taken) with the engine's error string; `500` with `"Failed to join game"`.
+
+#### Stop a Legacy Game
+
+**Endpoint:** `POST /api/v1/legacy-games/:gameId/stop`
+
+**Request Body:** None.
 
 **Response (200 OK):**
 
 ```json
-{
-  "id": "game-123",
-  "status": "PAUSED",
-  "phase": "DAY_VOTING",
-  "pausedAt": 1703774500000
-}
+{ "success": true, "data": { "gameId": "1692df5c...", "stopped": true } }
 ```
 
----
+`success` mirrors the adapter's boolean stop result. When the legacy engine
+is not available the route answers `503` with
+`{ "success": false, "error": "Legacy engine not available" }`.
 
-#### Resume Game
+#### Get Game State
 
-**Endpoint:** `POST /api/v1/games/:gameId/resume`
+**Endpoint:** `GET /api/v1/games/:gameId/state`
 
-**Response (200 OK):**
+Returns the in-memory engine state for a game the standard (non-legacy)
+engine owns.
+
+**Response (200 OK):** `{ "success": true, "data": <GameFsmState> }` — for
+ended games this is the `currentState` object documented under
+[Get Game Status](#get-game-status):
 
 ```json
 {
-  "id": "game-123",
-  "status": "IN_PROGRESS",
-  "phase": "DAY_VOTING",
-  "resumedAt": 1703774501000
+  "success": true,
+  "data": {
+    "phase": "GAME_OVER",
+    "dayNumber": 0,
+    "turnNumber": 27,
+    "timeRemaining": 0,
+    "activePlayers": ["p1", "p2", "p3", "p4"],
+    "eliminatedPlayers": ["p5"],
+    "votes": [],
+    "nightActions": []
+  }
 }
 ```
 
----
-
-#### Execute Single Step
-
-**Endpoint:** `POST /api/v1/games/:gameId/step`
-
-**Response (200 OK):**
-
-```json
-{
-  "id": "game-123",
-  "status": "PAUSED", // Pauses after each step
-  "completedStep": {
-    "type": "VOTE_RESULT",
-    "sequence": 75
-  },
-  "nextStepAvailable": true
-}
-```
+**Error Cases:** `404` (`"Game not found"`), `500` (`"Failed to get game state"`).
 
 ---
 
 ### Game Data
 
-#### Export Event Log
-
-**Endpoint:** `GET /api/v1/games/:gameId/export`
-
-**Query Parameters:**
-
-- `format`: Export format (default: "jsonl", options: "jsonl", "json")
-
-**Response (200 OK):**
-
-For `jsonl` format:
-
-```
-{ "eventType": "GAME_CREATED", "gameId": "game-123", ... }
-{ "eventType": "PHASE_CHANGED", "gameId": "game-123", ... }
-{ "eventType": "NIGHT_ACTION_SUBMITTED", "gameId": "game-123", ... }
-...
-```
-
-For `json` format:
-
-```json
-{
-  "gameId": "game-123",
-  "events": [
-    { "eventType": "GAME_CREATED", ... },
-    { "eventType": "PHASE_CHANGED", ... },
-    // ... all events
-  ]
-}
-```
-
-**Response Headers:**
-
-- `Content-Type`: `application/jsonl` or `application/json`
-- `Content-Disposition`: `attachment; filename="game-123.jsonl"`
-
 ---
 
-#### Get Event Stream (Polling)
+#### Get Event Stream (Polling / SSE)
 
 **Endpoint:** `GET /api/v1/games/:gameId/events`
 
 **Query Parameters:**
 
-- `since`: Starting sequence number (default: 0)
-- `includePrivate`: Include private events (default: false, requires admin access)
+- `visibility`: Event filter (default: `"all"`, options: `"all"`, `"public"`, `"private"`, `"admin"`)
 
-**Response (200 OK):**
+**Response (200 OK):** Realigned to the live payload (MAF-GAP-073) — full
+event objects under `data`, no `nextSequence` polling contract:
 
 ```json
 {
-  "gameId": "game-123",
-  "events": [
+  "success": true,
+  "data": [
     {
-      "eventType": "NIGHT_ACTION_SUBMITTED",
-      "sequence": 2,
-      "timestamp": 1703774402000,
-      "private": false,
-      "payload": {
-        /* event data */
-      }
+      "id": "48cdd612-bd4d-4b33-a334-b521dd1ede02",
+      "gameId": "1692df5c-f844-4abd-ad78-ae7e00d2fe64",
+      "type": "GAME_STARTED",
+      "timestamp": "2026-09-26T10:11:10.745Z",
+      "visibility": "ADMIN",
+      "actorId": null,
+      "targetId": null,
+      "data": { "legacyType": "STATE_CHANGE", "status": "STARTED", "playerCount": 5, "playerName": null },
+      "metadata": { "turnNumber": 1, "dayNumber": 0, "phase": "SETUP", "sequence": 1 }
     }
-    // ... events since 'since' parameter
+    // ... all events for the game
   ],
-  "nextSequence": 16 // Next sequence number to poll
+  "count": 27
 }
 ```
 
-**Usage:** Clients can poll this endpoint for events instead of using WebSocket.
+**SSE streaming:** When the request carries `Accept: text/event-stream`, the
+same route switches to a Server-Sent-Events stream
+(`Content-Type: text/event-stream`): an initial
+`data: {"type":"connected","gameId":...,"timestamp":...}` frame, then one
+`data: <event JSON>` frame per published event, with `: keepalive` comments
+every 30s. The number of live SSE subscribers per game is exposed at
+`GET /api/v1/games/:gameId/sse-status`.
 
 ---
 
@@ -645,48 +598,53 @@ difference is the 404 error message:
 - `gameId`: Optional. Include a per-game detail block for the given game.
 - `format`: Optional. `json` (default) or `csv`.
 
-**Response (200 OK):** Top-level payload — NOT wrapped in a `data` field.
+**Response (200 OK):** Standard `{ success, data }` envelope (realigned to
+the live API, MAF-GAP-073 — an earlier revision of this section claimed the
+payload was NOT wrapped in a `data` field; the route has always wrapped it).
 
 ```json
 {
-  "generatedAt": "2026-08-13T00:00:00.000Z",
-  "summary": {
-    "totalGames": 1058,
-    "activeGames": 76,
-    "completedGames": 982,
-    "failedGames": 0,
-    "failedGameIds": [],
-    "mafiaWinRate": 0.1802,
-    "avgDuration": 197
-  },
-  "modelPerformance": [
-    {
-      "provider": "openai",
-      "model": "gpt-4o-mini",
-      "gamesPlayed": 511,
-      "wins": 0,
-      "winRate": 0,
-      "avgTokens": 30400,
-      "avgCost": 0.0072,
-      "avgLatency": 102
-    }
-  ],
-  "agentStats": [
-    {
-      "agentId": "p1",
-      "executions": 122,
-      "successes": 122,
-      "totalLatency": 13000,
-      "totalTokens": 49000000,
-      "totalCost": 15.04,
-      "provider": "CUSTOM",
-      "model": "openai"
-    }
-  ],
-  "recommendations": [
-    "Best win rate: openai/gpt-4o-mini (18.0%)",
-    "Best value: openai/gpt-4o-mini (win rate per dollar)"
-  ]
+  "success": true,
+  "data": {
+    "generatedAt": "2026-08-13T00:00:00.000Z",
+    "summary": {
+      "totalGames": 1058,
+      "activeGames": 76,
+      "completedGames": 982,
+      "failedGames": 0,
+      "failedGameIds": [],
+      "mafiaWinRate": 0.1802,
+      "avgDuration": 197
+    },
+    "modelPerformance": [
+      {
+        "provider": "openai",
+        "model": "gpt-4o-mini",
+        "gamesPlayed": 511,
+        "wins": 0,
+        "winRate": 0,
+        "avgTokens": 30400,
+        "avgCost": 0.0072,
+        "avgLatency": 102
+      }
+    ],
+    "agentStats": [
+      {
+        "agentId": "p1",
+        "executions": 122,
+        "successes": 122,
+        "totalLatency": 13000,
+        "totalTokens": 49000000,
+        "totalCost": 15.04,
+        "provider": "CUSTOM",
+        "model": "openai"
+      }
+    ],
+    "recommendations": [
+      "Best win rate: openai/gpt-4o-mini (18.0%)",
+      "Best value: openai/gpt-4o-mini (win rate per dollar)"
+    ]
+  }
 }
 ```
 
@@ -704,6 +662,731 @@ Per-model wins are games the model's side won, attributed from real per-game mod
 `winRate = wins / gamesPlayed`. `wins` is **0 when unattributable** — legacy usage-only games (e.g. `token_usage` rows with `player_id = 'ALL'`) record real usage but no side/role data, so their wins are never guessed. A row with `gamesPlayed > 0` and `wins = 0` therefore means "no attributable wins," not "lost every game." Game-level winners are never assigned to every model in a game, and one row per model string is guaranteed (provider-prefixed spellings are normalized).
 
 **`agentStats[]`:** per-agent execution aggregates (`executions`, `successes`, totals). Rows with zero executions legitimately show `totalLatency: 0`.
+
+---
+
+### Benchmark Compare (MAF-GAP-073)
+
+#### Compare Models Head-to-Head
+
+**Endpoint:** `GET /api/v1/benchmark/compare`
+
+**Query Parameters:**
+
+- `models`: Optional. Comma-separated model strings to include (e.g. `openai/gpt-4o-mini,openai/gpt-4o`); whitespace around entries is trimmed, empty entries dropped. When omitted, ALL models are included.
+
+**Response (200 OK):** `{ success, data }` envelope.
+
+```json
+{
+  "success": true,
+  "data": {
+    "models": [
+      {
+        "provider": "openai",
+        "model": "gpt-4o-mini",
+        "gamesPlayed": 1632,
+        "wins": 1629,
+        "winRate": 0.9981617647058824,
+        "avgTokensPerGame": 0,
+        "avgCostPerGame": 0.0132,
+        "avgLatency": 827,
+        "avgRolePerformance": 0,
+        "rolePerformance": {
+          "DOCTOR":   { "gamesPlayed": 1545, "wins": 1540, "winRate": 0.9967637540453075 },
+          "MAFIA":    { "gamesPlayed": 1630, "wins": 24,   "winRate": 0.014723926380368098 },
+          "SHERIFF":  { "gamesPlayed": 1630, "wins": 1605, "winRate": 0.9846625766871165 },
+          "VIGILANTE":{ "gamesPlayed": 83,   "wins": 63,   "winRate": 0.7590361445783133 },
+          "VILLAGER": { "gamesPlayed": 1549, "wins": 1541, "winRate": 0.9948353776630084 }
+        }
+      }
+      // ... one row per model, sorted by gamesPlayed DESC
+    ],
+    "headToHead": [
+      {
+        "modelA": "openai/gpt-4o-mini",
+        "modelB": "openai/gpt-4o",
+        "gamesPlayed": 40,
+        "modelAWins": 20,
+        "modelBWins": 18,
+        "ties": 2
+      }
+    ],
+    "trends": [
+      {
+        "model": "openai/gpt-4o-mini",
+        "games": [
+          {
+            "gameId": "1692df5c-f844-4abd-ad78-ae7e00d2fe64",
+            "won": true,
+            "role": "VILLAGER",
+            "tokensUsed": 5731,
+            "createdAt": "2026-09-26T10:10:46.731Z"
+          }
+          // ... per-game participation rows
+        ],
+        "cumulativeWinRate": [1, 1, 0.5, 0.75]
+        // running winRate after each game, same length as `games`
+      }
+    ]
+  }
+}
+```
+
+**`data.models[].rolePerformance` semantics:** keys are the roles the model
+actually played (`DOCTOR`, `MAFIA`, `SHERIFF`, `VIGILANTE`, `VILLAGER` — any
+role in the game's role vocabulary); values are per-role `gamesPlayed`,
+`wins`, `winRate`. `avgRolePerformance` is the average stored per-player
+`role_performance` score (0 for games that never recorded one).
+
+**`data.headToHead` / `data.trends` availability:** both are populated only
+when the underlying data exists — head-to-head rows need recorded model
+pairings and trends need per-game model participation; both are `[]`
+otherwise (a live probe with an explicit `models` filter can legitimately
+return an empty `headToHead`).
+
+**Exclusions:** degenerate games (all-empty SAYS + short duration / flagged)
+and mock games (every provider call fell back to the canned-mock fallback)
+are excluded from the aggregates. The source type also declares a
+`mockGames` count on the report for auditability; the running container at
+documentation time does not emit it — do not treat its absence as an error,
+and expect it on newer builds.
+
+**Errors:** `500` — `{ "success": false, "error": "Failed to generate comparison report" }`.
+
+---
+
+### Benchmark Export (MAF-GAP-073)
+
+#### Export Comprehensive Benchmark Report
+
+**Endpoint:** `GET /api/v1/benchmark/export`
+
+**Query Parameters:**
+
+- `format`: Optional. `json` (default) or `csv`.
+- `games`: Optional. Integer. Cap on the number of games included in the
+  per-game `games[]` array (default 50 when omitted).
+
+**Response (200 OK, `format=json`):** `{ success, data }` envelope.
+
+```json
+{
+  "success": true,
+  "data": {
+    "generatedAt": "2026-09-26T11:51:46.358Z",
+    "summary": {
+      "totalGames": 2875,
+      "activeGames": 97,
+      "completedGames": 2759,
+      "failedGames": 19,
+      "mafiaWins": 230,
+      "townWins": 2529,
+      "avgDuration": 150,
+      "totalTokens": 328180267,
+      "totalCost": 63.6959
+    },
+    "games": [
+      {
+        "gameId": "1692df5c-f844-4abd-ad78-ae7e00d2fe64",
+        "status": "ENDED",
+        "dayCount": 1,
+        "playerCount": 5,
+        "duration": 81366,
+        "winner": "TOWN",
+        "players": [
+          {
+            "playerId": "p17904174505850",
+            "name": "Lysandra Tzeng",
+            "role": "VILLAGER",
+            "provider": "unknown",
+            "model": "unknown",
+            "survived": true,
+            "won": true,
+            "tokensUsed": 5731,
+            "apiCalls": 1
+          }
+          // ... one row per player
+        ],
+        "events": [
+          {
+            "id": "48cdd612-bd4d-4b33-a334-b521dd1ede02",
+            "type": "GAME_STARTED",
+            "description": "...",
+            "playerId": null,
+            "timestamp": "2026-09-26T10:11:10.745Z",
+            "turnNumber": 1,
+            "phase": "SETUP"
+          }
+          // ... per-game events
+        ],
+        "costBreakdown": {
+          "totalCost": 0.0072,
+          "totalTokens": 0,
+          "promptTokens": 0,
+          "completionTokens": 0,
+          "apiCalls": 0,
+          "errorRate": 0,
+          "byModel": [
+            { "provider": "openai", "model": "gpt-4o-mini", "cost": 0.0072, "tokens": 5731 }
+          ]
+        }
+      }
+    ],
+    "modelAggregates": [
+      {
+        "provider": "openai",
+        "model": "gpt-4o-mini",
+        "gamesPlayed": 1632,
+        "wins": 1629,
+        "winRate": 0.9981617647058824,
+        "avgTokensPerGame": 0,
+        "avgCostPerGame": 0.0132,
+        "avgLatency": 827,
+        "avgRolePerformance": 0,
+        "rolePerformance": { "MAFIA": { "gamesPlayed": 1630, "wins": 24, "winRate": 0.014723926380368098 } }
+      }
+    ],
+    "headToHead": []
+  }
+}
+```
+
+**Notes:**
+
+- `data.modelAggregates` / `data.headToHead` are the same shapes as
+  `GET /api/v1/benchmark/compare`'s `data.models` / `data.headToHead`.
+- `winner` is `null` for games without a decided outcome; `duration` is
+  `null` when the game never recorded an end time.
+- `games[].events[].description` / `playerId` come from the per-game event
+  projection and may be `null` for legacy-sourced events.
+
+**Response (`format=csv`):** `text/csv; charset=utf-8` body with
+`Content-Disposition: attachment; filename="benchmark-export.csv"`.
+
+**Errors:** `500` — `{ "success": false, "error": "Failed to export benchmark data" }`.
+
+---
+
+### Statistics (MAF-GAP-073)
+
+#### Get Game Statistics
+
+**Endpoint:** `GET /api/v1/stats`
+
+**Response (200 OK):** `{ success, data }` envelope over the aggregated game
+stats (same source as `GET /api/v1/benchmark/report`'s `summary`, minus the
+per-model/agent sections):
+
+```json
+{
+  "success": true,
+  "data": {
+    "totalGames": 2875,
+    "activeGames": 97,
+    "completedGames": 2759,
+    "failedGames": 19,
+    "avgDuration": 150,
+    "mafiaWins": 230,
+    "townWins": 2529
+  }
+}
+```
+
+`data` also carries a `degenerateGames` count (count of games excluded from
+win stats as degenerate, DF-MAFIA-AI-BENCHMARK-18) on current builds.
+
+**Errors:** `500` — `{ "success": false, "error": "Failed to get statistics" }`.
+
+#### Get Model Comparison
+
+**Endpoint:** `GET /api/v1/stats/models`
+
+**Response (200 OK):** `{ success, data }` envelope over per-model comparison
+rows (the same row shape as `benchmark/report`'s `modelPerformance[]`):
+
+```json
+{
+  "success": true,
+  "data": [
+    {
+      "provider": "openai",
+      "model": "gpt-4o-mini",
+      "gamesPlayed": 2284,
+      "wins": 1629,
+      "winRate": 0.7132224168126094,
+      "avgTokens": 68191.8795971979,
+      "avgCost": 0.013164966571803853,
+      "avgLatency": 826.7087515407642
+    }
+  ]
+}
+```
+
+**Errors:** `500` — `{ "success": false, "error": "Failed to get model comparison" }`.
+
+#### Get Matchups
+
+**Endpoint:** `GET /api/v1/stats/matchups`
+
+Head-to-head matchup rows from the `model_matchups` table, ordered by
+`games_played` DESC, capped at 20. `[]` when no matchup data has been
+recorded.
+
+**Response (200 OK):**
+
+```json
+{
+  "success": true,
+  "data": [
+    {
+      "modelA": "openai/gpt-4o-mini",
+      "modelB": "openai/gpt-4o",
+      "gamesPlayed": 40,
+      "modelAWins": 20,
+      "modelBWins": 18,
+      "ties": 2
+    }
+  ]
+}
+```
+
+`modelA`/`modelB` are `provider/model` composite strings.
+
+**Errors:** `500` — `{ "success": false, "error": "Failed to get matchups" }`.
+
+---
+
+### Dashboard (MAF-GAP-073)
+
+#### Get Dashboard Data
+
+**Endpoint:** `GET /api/v1/dashboard`
+
+**Response (200 OK):** `{ success, data }` envelope.
+
+```json
+{
+  "success": true,
+  "data": {
+    "totals": { "total": 2875, "active": 97, "completed": 2759 },
+    "statusBreakdown": { "ENDED": 2759, "IN_PROGRESS": 97, "CANCELLED": 0 },
+    "wins": { "mafia": 5, "town": 994 },
+    "avgDuration": 150,
+    "recentGames": [
+      {
+        "id": "1692df5c-f844-4abd-ad78-ae7e00d2fe64",
+        "status": "ENDED",
+        "createdAt": 1790417446731,
+        "endedAt": 1790417552115
+      }
+    ]
+  }
+}
+```
+
+**Notes:**
+
+- `wins.mafia`/`wins.town` come from the aggregated-wins collector (falling
+  back to the raw game stats); `statusBreakdown.CANCELLED` is always `0`.
+- `recentGames` is the 10 most recent games with **epoch-millisecond**
+  `createdAt`/`endedAt` (numbers, not ISO strings).
+
+**Errors:** `500` — `{ "success": false, "error": "Failed to get dashboard data" }`.
+
+---
+
+### Analytics (MAF-GAP-073)
+
+#### Get Analytics Data
+
+**Endpoint:** `GET /api/v1/analytics`
+
+**Response (200 OK):** `{ success, data }` envelope.
+
+```json
+{
+  "success": true,
+  "data": {
+    "totals": { "games": 2875, "events": 0, "agents": 0, "models": 5 },
+    "eventBreakdown": {},
+    "gameTimeline": [
+      {
+        "id": "1692df5c-f844-4abd-ad78-ae7e00d2fe64",
+        "status": "ENDED",
+        "players": 5,
+        "createdAt": 1790417446731
+      }
+    ],
+    "performance": {
+      "models": [ /* up to 10 rows, same shape as stats/models */ ],
+      "agents": [ /* up to 10 rows, same shape as agents/stats */ ]
+    }
+  }
+}
+```
+
+**Notes:**
+
+- `totals.events` / `totals.agents` are currently always `0`; `models` is the
+  number of rows in the model comparison.
+- `eventBreakdown` is `{}` unless the collector exposes an event distribution.
+- `gameTimeline` is the 50 most recent games with epoch-millisecond
+  `createdAt`.
+
+**Errors:** `500` — `{ "success": false, "error": "Failed to get analytics data" }`.
+
+---
+
+### Models (MAF-GAP-073)
+
+#### List Available Models
+
+**Endpoint:** `GET /api/v1/models`
+
+**Query Parameters:**
+
+- `provider`: Optional. Filter to a single provider (case-sensitive, e.g. `DEEPSEEK`). Returns `{ success, data: [...], count }` with `[]`/`0` when the provider has no cached models.
+
+**Response (200 OK, no filter):** `{ success, data }` envelope.
+
+```json
+{
+  "success": true,
+  "data": {
+    "providers": ["OPENAI", "ANTHROPIC", "GOOGLE", "DEEPSEEK", "GROQ", "OLLAMA", "LM_STUDIO", "CUSTOM", "META", "QWEN", "XAI"],
+    "models": [
+      { "provider": "OPENAI", "modelId": "gpt-4o-mini", "displayName": "GPT-4o mini" },
+      { "provider": "OPENAI", "modelId": "gpt-4o", "displayName": "GPT-4o" }
+      // ... up to 20 models per provider
+    ],
+    "totalCached": 3839,
+    "cacheAge": 45
+  }
+}
+```
+
+`cacheAge` is the metadata cache age in seconds.
+
+**Errors:** `500` — `{ "success": false, "error": "Failed to list models" }`.
+
+#### Get Model Pricing
+
+**Endpoint:** `GET /api/v1/models/pricing`
+
+**Query Parameters:**
+
+- `model`: Optional. A provider-prefixed model string (e.g. `openai/gpt-4o-mini`).
+
+**Response (200 OK, `model` given):**
+
+```json
+{
+  "success": true,
+  "data": {
+    "modelId": "openai/gpt-4o-mini",
+    "inputPerMillion": 0.15,
+    "outputPerMillion": 0.6,
+    "cacheReadPerMillion": 0.075,
+    "hasPricing": true,
+    "isMissingPricing": false,
+    "noPricingMarker": -6.66
+  }
+}
+```
+
+**Response (200 OK, no `model`):** cache overview + hint.
+
+```json
+{
+  "success": true,
+  "data": {
+    "message": "Use ?model= to get specific model pricing",
+    "cachedModels": 3839,
+    "cacheAge": 45,
+    "noPricingMarker": -6.66
+  }
+}
+```
+
+`noPricingMarker` (-6.66) is the sentinel the cost calculator emits for
+models without recorded pricing — treat any per-token price equal to it as
+"no pricing available," not as a real rate.
+
+**Errors:** `500` — `{ "success": false, "error": "Failed to get model pricing" }`.
+
+#### Calculate Cost
+
+**Endpoint:** `POST /api/v1/models/calculate-cost`
+
+**Request Body:**
+
+```json
+{ "modelId": "openai/gpt-4o-mini", "inputTokens": 1000, "outputTokens": 500 }
+```
+
+**Response (200 OK):** `{ "success": true, "data": <calculated cost result> }`.
+
+**Errors:** `400` — `{ "success": false, "error": "modelId, inputTokens, and outputTokens are required" }`; `500` — `"Failed to calculate cost"`.
+
+---
+
+### Agents (MAF-GAP-073)
+
+#### List Registered Agents
+
+**Endpoint:** `GET /api/v1/agents`
+
+**Response (200 OK):** `{ "success": true, "data": [] }` — the coordinator's
+registered agents; empty in the default single-process setup.
+
+**Errors:** `500` — `{ "success": false, "error": "Failed to list agents" }`.
+
+#### Register Agent
+
+**Endpoint:** `POST /api/v1/agents`
+
+**Request Body:**
+
+```json
+{
+  "id": "agent-1",
+  "name": "Alice",
+  "provider": "openai",
+  "model": "openai/gpt-4o-mini",
+  "temperature": 0.7,
+  "maxTokens": 500,
+  "apiKey": "optional",
+  "baseUrl": "optional"
+}
+```
+
+**Response (201 Created):**
+
+```json
+{ "success": true, "data": { "id": "agent-1", "name": "Alice", "provider": "openai", "model": "openai/gpt-4o-mini" } }
+```
+
+**Errors:** `500` — `{ "success": false, "error": "Failed to register agent" }`.
+
+#### Get Agent Stats
+
+**Endpoint:** `GET /api/v1/agents/stats`
+
+**Response (200 OK):** `{ success, data }` envelope over per-agent execution
+aggregates (grouped by provider/model in live data):
+
+```json
+{
+  "success": true,
+  "data": [
+    {
+      "agentId": "ALL",
+      "name": "Unknown",
+      "provider": "openai",
+      "model": "openai/gpt-4o-mini",
+      "executions": 2267,
+      "successRate": 1,
+      "avgLatency": 743.9797088663432
+    }
+  ]
+}
+```
+
+**Errors:** `500` — `{ "success": false, "error": "Failed to get agent stats" }`.
+
+---
+
+### Legacy Games (MAF-GAP-073)
+
+#### List Active Legacy Games
+
+**Endpoint:** `GET /api/v1/legacy-games`
+
+**Response (200 OK):** `{ success, data }` envelope over the legacy engine's
+ACTIVE game list (one row per game the legacy adapter is still tracking —
+completed games stop being listed here):
+
+```json
+{
+  "success": true,
+  "data": [
+    {
+      "gameId": "585f06fe-a37e-4664-a4f7-5364aee99e5f",
+      "status": "COMPLETED",
+      "eventCount": 27,
+      "startedAt": "2026-09-26T00:32:11.602Z",
+      "error": null
+    }
+  ]
+}
+```
+
+`status` is the legacy engine's own vocabulary (e.g. `RUNNING`, `COMPLETED`)
+— NOT the canonical `GameStatus` union; `error` is `null` unless the game
+recorded an error. When the legacy engine is not available the route answers
+`503` with `{ "success": false, "error": "Legacy engine not available" }`.
+
+---
+
+### Game Players & Replay (MAF-GAP-073)
+
+#### Get Game Players
+
+**Endpoint:** `GET /api/v1/games/:gameId/players`
+
+**Response (200 OK):** `{ success, data }` envelope over the persisted
+player rows (a slimmer projection than the detail endpoint's `players[]` —
+no usage attribution here):
+
+```json
+{
+  "success": true,
+  "data": [
+    {
+      "id": "p17904174505850",
+      "name": "Lysandra Tzeng",
+      "role": "VILLAGER",
+      "isAlive": true,
+      "isMafia": false,
+      "joinOrder": 0,
+      "won": 1
+    }
+  ]
+}
+```
+
+**Errors:** `500` — `{ "success": false, "error": "Failed to get players" }`.
+
+#### Get Full Game Replay
+
+**Endpoint:** `GET /api/v1/games/:gameId/replay`
+
+Returns the game's full event timeline sorted chronologically (oldest
+first). Works for both repository and legacy games; `404` when the game
+exists in neither.
+
+**Response (200 OK):**
+
+```json
+{
+  "success": true,
+  "data": [
+    {
+      "id": "48cdd612-bd4d-4b33-a334-b521dd1ede02",
+      "gameId": "1692df5c-f844-4abd-ad78-ae7e00d2fe64",
+      "type": "GAME_STARTED",
+      "timestamp": "2026-09-26T10:11:10.745Z",
+      "visibility": "ADMIN",
+      "actorId": null,
+      "targetId": null,
+      "data": { "legacyType": "STATE_CHANGE", "status": "STARTED", "playerCount": 5, "playerName": null },
+      "metadata": { "turnNumber": 1, "dayNumber": 0, "phase": "SETUP", "sequence": 1 }
+    }
+  ],
+  "count": 27
+}
+```
+
+Each element is the same full event object as
+`GET /api/v1/games/:gameId/events`, sorted chronologically. Legacy engine
+events surface their original type under `data.legacyType` with the
+normalized `type` on top.
+
+**Errors:** `404` — `{ "success": false, "error": "Game not found" }`; `500` — `"Failed to get replay"`.
+
+#### Get SSE Connection Status
+
+**Endpoint:** `GET /api/v1/games/:gameId/sse-status`
+
+**Response (200 OK):**
+
+```json
+{
+  "success": true,
+  "data": {
+    "gameId": "1692df5c-f844-4abd-ad78-ae7e00d2fe64",
+    "activeConnections": 0,
+    "isStreaming": false
+  }
+}
+```
+
+`isStreaming` is `true` iff at least one SSE client is attached to the
+game's `GET /api/v1/games/:gameId/events` stream.
+
+---
+
+### Player Model Configuration (POST, MAF-GAP-073)
+
+Per-player/per-role model assignment for a game. All three routes return
+`404 { "success": false, "error": "Game not found: <id>" }` for unknown
+games and `500` on repository failure.
+
+#### Set Model for a Player
+
+**Endpoint:** `POST /api/v1/games/:gameId/players/:playerIndex/model`
+
+**Request Body:** `{ "provider", "model" }` required; optional
+`temperature` (default 0.7), `maxTokens` (default 500), `priority`
+(default 0).
+
+**Response (200 OK):**
+
+```json
+{
+  "success": true,
+  "data": {
+    "id": 1,
+    "gameId": "1692df5c...",
+    "playerIndex": 0,
+    "provider": "openai",
+    "model": "gpt-4o-mini",
+    "temperature": 0.7,
+    "maxTokens": 500,
+    "priority": 0,
+    "createdAt": "2026-09-26T10:10:46.000Z"
+  }
+}
+```
+
+**Errors:** `400` — `"provider and model are required"`.
+
+#### Set Model for a Role
+
+**Endpoint:** `POST /api/v1/games/:gameId/role/:role/model`
+
+Same body/response as the per-player route, with `role` (e.g. `MAFIA`) as
+the path parameter; the response's `data` carries `role` instead of
+`playerIndex`.
+
+#### Bulk Update Player Models
+
+**Endpoint:** `POST /api/v1/games/:gameId/models/bulk`
+
+**Request Body:**
+
+```json
+{ "assignments": [ { "playerIndex": 0, "provider": "openai", "model": "gpt-4o-mini" } ] }
+```
+
+**Response (200 OK):**
+
+```json
+{
+  "success": true,
+  "data": {
+    "message": "1 of 1 assignments saved",
+    "results": [
+      { "status": "saved", "id": 1, "playerIndex": 0, "role": null, "provider": "openai", "model": "gpt-4o-mini" }
+    ]
+  }
+}
+```
+
+Per-row results are `{ "status": "saved", ... }` or
+`{ "status": "failed", "error": "..." }`. Missing/invalid `assignments`
+array → `400 { "success": false, "error": "assignments array is required" }`.
 
 ---
 

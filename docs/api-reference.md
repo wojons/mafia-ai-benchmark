@@ -6,7 +6,7 @@ The DuckBrain sync-twin integration contract — per-tick /sync markers (`/sync/
 
 That document covers:
 
-- **Endpoints** — `/api/v1/games`, `/api/v1/players`, `/api/v1/agents`, `/api/v1/stats`, `/api/v1/benchmark`, `/api/v1/benchmark/report`, health checks
+- **Endpoints** — `/api/v1/games`, `/api/v1/agents`, `/api/v1/stats`, `/api/v1/benchmark`, `/api/v1/benchmark/report`, `/api/v1/models`, health checks. (There is NO `/api/v1/players` route on the server — an earlier revision of this list advertised one and it 404'd; per-player data lives at `/api/v1/games/:gameId/players`.)
 - **WebSocket protocol** — `/ws` connection, event shapes, streaming (the
   code-extracted reference for the live protocol is
   [`api/websocket.md`](api/websocket.md))
