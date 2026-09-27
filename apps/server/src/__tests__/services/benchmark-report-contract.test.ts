@@ -453,6 +453,74 @@ describe('GET /api/v1/benchmark/report — data-integrity contract (MAF-GAP-064)
   });
 
   // ======================================================================
+  // Clause 9 — report vs compare consistency (DF-MAFIA-AI-BENCHMARK-25):
+  // both endpoints aggregate the SAME persisted data and must agree on
+  // gamesPlayed/wins/winRate for every canonical provider/model key.
+  // ======================================================================
+
+  it('agrees with GET /compare on gamesPlayed/wins/winRate for every model', async () => {
+    const report = await fetchReport();
+    const compare = await fetchCompare();
+    const compareData = compare.data ?? compare; // tolerate raw/unwrapped
+
+    const reportRows = report.modelPerformance as any[];
+    const compareRows = compareData.models as any[];
+
+    const compareByKey = new Map(
+      compareRows.map((r) => [`${r.provider}/${r.model}`, r]),
+    );
+
+    for (const row of reportRows) {
+      const key = `${row.provider}/${row.model}`;
+      const counterpart = compareByKey.get(key);
+      expect(counterpart, `compare must carry ${key}`).toBeDefined();
+      expect(counterpart.gamesPlayed).toBe(row.gamesPlayed);
+      expect(counterpart.wins).toBe(row.wins);
+      expect(counterpart.winRate).toBe(row.winRate);
+    }
+    // And the reverse direction: no compare-only model may contradict the
+    // report (every compare row must exist in the report rows, or at least
+    // not disagree — the report caps modelPerformance at 10 rows).
+    const reportByKey = new Map(
+      reportRows.map((r) => [`${r.provider}/${r.model}`, r]),
+    );
+    expect(reportRows.length).toBeLessThanOrEqual(10);
+    for (const row of compareRows) {
+      const key = `${row.provider}/${row.model}`;
+      const counterpart = reportByKey.get(key);
+      if (counterpart) {
+        expect(counterpart.gamesPlayed).toBe(row.gamesPlayed);
+        expect(counterpart.wins).toBe(row.wins);
+        expect(counterpart.winRate).toBe(row.winRate);
+      }
+    }
+  });
+
+  it('carries the usage-only model into /compare with the report numbers (DF-25 divergence shape)', async () => {
+    // The DF-25 observed divergence: one endpoint counted the model, the
+    // other dropped it entirely (players-only source vs usage fallback).
+    // deepseek-v4-flash has NO players rows — only token_usage — so the old
+    // compare SQL never surfaced it. It must now match the report exactly.
+    const report = await fetchReport();
+    const { data } = await fetchCompare();
+
+    const reportDeepseek = (report.modelPerformance as any[]).find(
+      (r) => r.model === 'deepseek-v4-flash',
+    );
+    expect(reportDeepseek).toBeDefined();
+    expect(reportDeepseek.gamesPlayed).toBe(1);
+    expect(reportDeepseek.wins).toBe(0);
+
+    const compareDeepseek = (data.models as any[]).find(
+      (r) => r.model === 'deepseek-v4-flash',
+    );
+    expect(compareDeepseek).toBeDefined();
+    expect(compareDeepseek.gamesPlayed).toBe(reportDeepseek.gamesPlayed);
+    expect(compareDeepseek.wins).toBe(reportDeepseek.wins);
+    expect(compareDeepseek.winRate).toBe(reportDeepseek.winRate);
+  });
+
+  // ======================================================================
   // Clause 8 — /compare distinct-game win aggregation
   // (QA-MAFIA-AI-BENCHMARK-1: win rate could exceed 100%)
   // ======================================================================

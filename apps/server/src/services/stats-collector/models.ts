@@ -825,47 +825,29 @@ export function getCompareReport(
     modelFilter && modelFilter.length > 0 ? modelFilter : null;
 
   // ===== Per-model aggregate stats =====
-  // MAF-GAP-036/045: aggregate on the NORMALIZED provider/model — rows
-  // that carry the provider prefix inside the model column and rows that
-  // don't are the same real model and must merge into ONE row, even when
-  // the stored provider is 'CUSTOM' (MAF-GAP-045).
+  // DF-MAFIA-AI-BENCHMARK-25: canonical per-model aggregates. Both
+  // /api/v1/benchmark/report (modelPerformance) and /api/v1/benchmark/compare
+  // (models) MUST derive from the SAME source, normalization, distinct-game
+  // counting, winner semantics and exclusion rules. Previously this endpoint
+  // ran its own players-only SQL (players.won player-row counting, no side
+  // attribution, no usage-only rows) while the report used
+  // getModelComparison() (players + assignments + usage-only + side
+  // attribution) — the same persisted data produced contradictory
+  // gamesPlayed/wins/winRate (observed: mini 72.7%/2400g vs 99.8%/1729g).
+  // getCompareReport now consumes getModelComparison() directly and only
+  // enriches the rows with the compare-specific fields (rolePerformance,
+  // avgCostPerGame/avgLatency from the recorded usage tables below).
+  const modelComparison = getModelComparison(gameRepository);
+
+  // Normalized SQL helpers + shared exclusion join — still used by the
+  // compare-only enrichment queries below (rolePerformance, avgRolePerformance,
+  // avgCostPerGame, avgLatency, trends). They are NOT the source of the
+  // contested gamesPlayed/wins/winRate aggregates (see above).
   const pProvExpr = normalizedProviderSql('p');
   const pModelExpr = normalizedModelSql('p');
-  // DF-MAFIA-AI-BENCHMARK-18: exclude degenerate games (all-empty SAYS +
-  // short duration / flagged) from every per-model aggregate in the report.
-  // The players alias is p and games alias g in all queries below.
-  // DF-MAFIA-AI-BENCHMARK-12: mock games are excluded with the same rule.
   const degenerateJoin = `JOIN games gdeg ON gdeg.id = p.game_id
         AND COALESCE((${GameRepositoryClass.DEGENERATE_GAME_SQL.replace(/\bg\./g, 'gdeg.')}), 0) = 0
         AND COALESCE((${GameRepositoryClass.MOCK_GAME_SQL.replace(/\bg\./g, 'gdeg.')}), 0) = 0`;
-  let modelQuery = `
-      SELECT
-        ${pProvExpr} as provider,
-        ${pModelExpr} as model,
-        COUNT(DISTINCT p.game_id) as games_played,
-        COUNT(DISTINCT CASE WHEN p.won = 1 THEN p.game_id END) as wins,
-        COALESCE(AVG(p.tokens_used), 0) as avg_tokens,
-        COALESCE(AVG(p.role_performance), 0) as avg_role_perf
-      FROM players p
-      ${degenerateJoin}
-      WHERE p.provider IS NOT NULL AND p.model IS NOT NULL
-        AND p.role != 'UNASSIGNED'
-        AND p.provider != '${OBJECT_OBJECT_SENTINEL}'
-        AND p.model != '${OBJECT_OBJECT_SENTINEL}'
-    `;
-  const modelParams: string[] = [];
-
-  if (modelList) {
-    const placeholders = modelList.map(() => '?').join(',');
-    modelQuery += ` AND (p.model IN (${placeholders}) OR ${pModelExpr} IN (${placeholders}))`;
-    modelParams.push(...modelList, ...modelList);
-  }
-
-  modelQuery += ` GROUP BY ${pProvExpr}, ${pModelExpr} ORDER BY games_played DESC`;
-
-  const modelRows = db
-    .prepare(modelQuery)
-    .all(...modelParams) as Record<string, unknown>[];
 
   // ===== Per-model role-specific performance =====
   let roleQueryBody = `
@@ -979,24 +961,60 @@ export function getCompareReport(
     latencyMap.set(`${row.provider}/${row.model}`, row.avg_latency as number);
   }
 
-  const models = modelRows.map((row) => {
-    const key = `${row.provider}/${row.model}`;
-    const gp = row.games_played as number;
-    const w = row.wins as number;
-    return {
-      provider: row.provider as string,
-      model: row.model as string,
-      gamesPlayed: gp,
-      wins: w,
-      winRate: gp > 0 ? w / gp : 0,
-      avgTokensPerGame: Math.round((row.avg_tokens as number) || 0),
-      avgCostPerGame: Math.round((costMap.get(key) || 0) * 10000) / 10000,
-      avgLatency: Math.round(latencyMap.get(key) || 0),
-      avgRolePerformance:
-        Math.round(((row.avg_role_perf as number) || 0) * 100) / 100,
-      rolePerformance: rolePerfMap.get(key) || {},
-    };
-  }).filter((m) => !isObjectObjectSentinel(m.provider) && !isObjectObjectSentinel(m.model));
+  // ===== Avg role performance per model (compare-only field) =====
+  let roleAvgQuery = `
+      SELECT
+        ${pProvExpr} as provider,
+        ${pModelExpr} as model,
+        COALESCE(AVG(p.role_performance), 0) as avg_role_perf
+      FROM players p
+      ${degenerateJoin}
+      WHERE p.provider IS NOT NULL AND p.model IS NOT NULL
+        AND p.role != 'UNASSIGNED'
+        AND p.provider != '${OBJECT_OBJECT_SENTINEL}'
+        AND p.model != '${OBJECT_OBJECT_SENTINEL}'
+    `;
+  const roleAvgParams: string[] = [];
+  if (modelList) {
+    const placeholders = modelList.map(() => '?').join(',');
+    roleAvgQuery += ` AND (p.model IN (${placeholders}) OR ${pModelExpr} IN (${placeholders}))`;
+    roleAvgParams.push(...modelList, ...modelList);
+  }
+  roleAvgQuery += ` GROUP BY ${pProvExpr}, ${pModelExpr}`;
+  const roleAvgRows = db
+    .prepare(roleAvgQuery)
+    .all(...roleAvgParams) as Record<string, unknown>[];
+  const roleAvgMap = new Map<string, number>();
+  for (const row of roleAvgRows) {
+    roleAvgMap.set(`${row.provider}/${row.model}`, row.avg_role_perf as number);
+  }
+
+  // Canonical rows: same gamesPlayed/wins/winRate the report's
+  // modelPerformance shows (DF-MAFIA-AI-BENCHMARK-25), enriched with the
+  // compare-specific fields from the recorded usage tables.
+  const models = modelComparison
+    .filter((m) => {
+      if (modelList) {
+        return modelList.includes(m.model) || modelList.includes(`${m.provider}/${m.model}`);
+      }
+      return true;
+    })
+    .map((m) => {
+      const key = `${m.provider}/${m.model}`;
+      return {
+        provider: m.provider,
+        model: m.model,
+        gamesPlayed: m.gamesPlayed,
+        wins: m.wins,
+        winRate: m.winRate,
+        avgTokensPerGame: Math.round(m.avgTokens || 0),
+        avgCostPerGame: Math.round((costMap.get(key) || m.avgCost || 0) * 10000) / 10000,
+        avgLatency: Math.round(latencyMap.get(key) || m.avgLatency || 0),
+        avgRolePerformance:
+          Math.round(((roleAvgMap.get(key) || 0) as number) * 100) / 100,
+        rolePerformance: rolePerfMap.get(key) || {},
+      };
+    });
 
   // ===== Head-to-head =====
   let h2hQuery = 'SELECT * FROM model_matchups WHERE 1=1';
