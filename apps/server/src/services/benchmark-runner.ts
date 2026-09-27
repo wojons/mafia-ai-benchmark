@@ -689,6 +689,43 @@ export class BenchmarkRunner {
         `(modelA=${pairing.modelA} -> MAFIA/SHERIFF, modelB=${pairing.modelB} -> TOWN/DOCTOR)`,
     );
 
+    // QA-MAFIA-AI-BENCHMARK-13: a bridge child that dies BEFORE any terminal
+    // event (the shipped failure was `Cannot find module .../legacy-bridge.js`
+    // — the child died at require(), never emitted 'done') left the
+    // benchmark_games row without completed_at/error forever, and the run
+    // stayed RUNNING with no in-process writer left to finish it. Watch the
+    // child directly: a nonzero exit with no terminal evidence on the row
+    // marks the game errored, which lets maybeCompleteRun retire the run.
+    // A clean exit (0) or signal kill (null) is left to the normal
+    // GAME_ENDED / cancel paths.
+    const child = gameState.process;
+    if (child && typeof child.on === 'function') {
+      child.on('close', (code: number | null) => {
+        if (code === 0 || code === null) return;
+        try {
+          const row = this.db
+            .prepare('SELECT completed_at, error FROM benchmark_games WHERE game_id = ?')
+            .get(gameId) as { completed_at: number | null; error: string | null } | undefined;
+          if (!row || row.completed_at !== null || row.error !== null) return;
+          const message =
+            `legacy bridge process exited with code ${code} without publishing ` +
+            `a terminal game event (no 'done' — bridge likely failed to start)`;
+          this.db
+            .prepare('UPDATE benchmark_games SET error = ? WHERE game_id = ?')
+            .run(message, gameId);
+          console.error(
+            `[BenchmarkRunner] Run ${runId}: game ${gameId} failed — ${message}`,
+          );
+          this.maybeCompleteRun(runId);
+        } catch (e) {
+          console.error(
+            `[BenchmarkRunner] Failed to record bridge failure for game ${gameId}: ` +
+              (e instanceof Error ? e.message : String(e)),
+          );
+        }
+      });
+    }
+
     return gameId;
   }
 
@@ -892,16 +929,21 @@ export class BenchmarkRunner {
       .prepare('SELECT * FROM benchmark_games WHERE run_id = ?')
       .all(runId) as BenchmarkGameRow[];
 
-    const allDone = games.length > 0 && games.every((g) => g.completed_at !== null);
+    // QA-MAFIA-AI-BENCHMARK-13: a game row carrying durable error evidence
+    // is terminal too (same predicate reconcileTerminalRun uses on
+    // restart) — otherwise a bridge child that died before publishing any
+    // event left the run RUNNING forever with no writer left to finish it.
+    const allDone = games.length > 0 && games.every((g) => g.completed_at !== null || g.error !== null);
     if (!allDone) return;
 
     const now = Date.now();
+    const errored = games.some((g) => g.error !== null);
     this.db
       .prepare(
         'UPDATE benchmark_runs SET status = ?, completed_at = ?, updated_at = ? WHERE id = ?',
       )
-      .run('COMPLETED', now, now, runId);
+      .run(errored ? 'FAILED' : 'COMPLETED', now, now, runId);
 
-    console.log(`[BenchmarkRunner] Run ${runId} completed`);
+    console.log(`[BenchmarkRunner] Run ${runId} ${errored ? 'failed' : 'completed'}`);
   }
 }
