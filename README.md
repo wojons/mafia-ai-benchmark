@@ -26,7 +26,7 @@ An advanced AI-powered Mafia game simulation that benchmarks different AI models
 - **☀️ Day Phase**: Discussion, voting, lynching
 - **📊 Event Sourcing**: Complete game audit trail with visibility levels
 - **💰 Cost Tracking**: Track API costs per game and player
-- **🧪 835 Tests**: Comprehensive test coverage (410 shared, 298 server, 98 CLI, 29 web)
+- **🧪 967 Tests**: Comprehensive test coverage (410 shared, 392 server, 101 CLI, 64 web)
 
 ## 🚀 Quick Start
 

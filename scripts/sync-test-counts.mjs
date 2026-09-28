@@ -76,6 +76,11 @@ function main() {
   // match at least once — a miss means the README structure drifted and the
   // script must fail loudly instead of silently leaving a stale count.
   const replacements = [
+    [
+      /🧪 \d+ Tests: Comprehensive test coverage \(\d+ shared, \d+ server, \d+ CLI, \d+ web\)/,
+      `🧪 ${total} Tests: Comprehensive test coverage (${shared} shared, ${server} server, ${cli} CLI, ${web} web)`,
+      'hero test count line',
+    ],
     [/server tests \(\d+\)/g, `server tests (${server})`, 'server tests (N)'],
     [/Server tests \(\d+\)/g, `Server tests (${server})`, 'Server tests (N)'],
     [/Server \(\d+ tests\)/g, `Server (${server} tests)`, 'Server (N tests)'],
