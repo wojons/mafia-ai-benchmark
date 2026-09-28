@@ -77,8 +77,8 @@ function main() {
   // script must fail loudly instead of silently leaving a stale count.
   const replacements = [
     [
-      /🧪 \d+ Tests: Comprehensive test coverage \(\d+ shared, \d+ server, \d+ CLI, \d+ web\)/,
-      `🧪 ${total} Tests: Comprehensive test coverage (${shared} shared, ${server} server, ${cli} CLI, ${web} web)`,
+      /\*\*🧪 \d+ Tests\*\*: Comprehensive test coverage \(\d+ shared, \d+ server, \d+ CLI, \d+ web\)/,
+      `**🧪 ${total} Tests**: Comprehensive test coverage (${shared} shared, ${server} server, ${cli} CLI, ${web} web)`,
       'hero test count line',
     ],
     [/server tests \(\d+\)/g, `server tests (${server})`, 'server tests (N)'],
