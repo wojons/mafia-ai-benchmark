@@ -234,16 +234,16 @@ See **[specs/correct-night-flow.md](specs/correct-night-flow.md)** for complete 
 | Command | Purpose | When to Use |
 | --- | --- | --- |
 | `pnpm --filter @mafia/server dev` | **Start server** | Run REST API + WebSocket |
-| `pnpm --filter @mafia/server test:run` | **Run tests** | Verify server tests (320) |
+| `pnpm --filter @mafia/server test:run` | **Run tests** | Verify server tests (392) |
 
 ### Root Commands
 
 ```bash
 pnpm install              # Install all dependencies
 pnpm build                # Build all packages (4/4)
-pnpm --filter @mafia/server test:run    # Server tests (320)
+pnpm --filter @mafia/server test:run    # Server tests (392)
 pnpm --filter @mafia/shared test:run    # Shared tests (410)
-pnpm --filter @mafia/web test:run       # Web tests (29)
+pnpm --filter @mafia/web test:run       # Web tests (64)
 ```
 
 ## 🎭 Roles
@@ -284,12 +284,12 @@ mafia-ai-benchmark/
 
 ```bash
 # All tests from root
-pnpm --filter @mafia/server test:run   # Server (320 tests)
+pnpm --filter @mafia/server test:run   # Server (392 tests)
 pnpm --filter @mafia/shared test:run   # Shared (410 tests)
-pnpm --filter @mafia/web test:run      # Web (29 tests)
+pnpm --filter @mafia/web test:run      # Web (64 tests)
 ```
 
-**Test Coverage**: 860 tests (410 shared, 320 server, 101 CLI, 29 web)
+**Test Coverage**: 967 tests (410 shared, 392 server, 101 CLI, 64 web)
 
 **Test counts are generated — don't hand-edit them.** Every test count in this
 README is produced from live vitest output by `pnpm test:counts`
@@ -375,7 +375,7 @@ MIT License - see LICENSE file
 
 ---
 
-**Status**: ✅ Production Ready | ✅ Fully Documented | ✅ 860 Tests (all 860 passing: 410 shared, 320 server, 101 CLI, 29 web)
+**Status**: ✅ Production Ready | ✅ Fully Documented | ✅ 967 Tests (all 967 passing: 410 shared, 392 server, 101 CLI, 64 web)
 
 **Quick Start**: See [QUICK_START.md](QUICK_START.md) for 5-minute setup guide!
 
