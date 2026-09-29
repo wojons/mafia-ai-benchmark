@@ -84,3 +84,4 @@ mafia.config.json
 .gitreins/usage.jsonl
 .gitreins/logs/
 .gitreins/qa-ledger.jsonl
+.lock
