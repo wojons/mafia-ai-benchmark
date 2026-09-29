@@ -247,6 +247,143 @@ emitted anywhere in the server). Game lifecycle is controlled by
 
 **Error Cases:** `400` (engine rejects — game full, already started, name taken) with the engine's error string; `500` with `"Failed to join game"`.
 
+#### Submit Vote
+
+**Endpoint:** `POST /api/v1/games/:gameId/vote`
+
+**Request Body:**
+
+```json
+{ "voterId": "player-uuid", "targetId": "player-uuid" }
+```
+
+- `voterId` (string): id of the voting player.
+- `targetId` (string): id of the player being voted for.
+
+**Response (200 OK):**
+
+```json
+{ "success": true, "data": { "eventId": "evt-uuid-or-null" } }
+```
+
+Records a `VOTE_CAST` event (`visibility: PUBLIC`, `actorId = voterId`,
+`targetId`). The event data includes `voteNumber`
+(`currentState.votes.length + 1`) and `final`, which is `true` only when the
+game is in the `DAY_VOTING` phase — the engine does NOT restrict voting to
+that phase, so votes cast outside `DAY_VOTING` are accepted but recorded as
+non-final.
+
+**Error Cases:**
+
+- `400 Bad Request`: `{ "success": false, "error": "<engine reason>" }` — one of
+  `"Game not found"`, `"Voter not found"`, `"Voter is eliminated"`,
+  `"Self-voting is not allowed"` (only when the game's `config.allowSelfVote`
+  is `false` and `voterId === targetId`).
+- `500 Internal Server Error`: `{ "success": false, "error": "Failed to submit vote" }`
+
+#### Submit Night Action
+
+**Endpoint:** `POST /api/v1/games/:gameId/night-action`
+
+**Request Body:**
+
+```json
+{ "playerId": "player-uuid", "action": "MAFIA_KILL", "targetId": "player-uuid" }
+```
+
+- `playerId` (string): id of the acting player.
+- `action` (string): night-action vocabulary per `NightActionType` in
+  `packages/shared` — `"MAFIA_KILL"`, `"DOCTOR_PROTECT"`,
+  `"SHERIFF_INVESTIGATE"`, `"VIGILANTE_SHOOT"`. The route/engine parameter is
+  typed `string` and performs no server-side validation of this vocabulary.
+- `targetId` (string): id of the target player.
+
+**Response (200 OK):**
+
+```json
+{ "success": true, "data": { "eventId": "evt-uuid-or-null" } }
+```
+
+Records a `NIGHT_ACTION_SUBMITTED` event with `visibility: PRIVATE` (hidden
+from the public event feed — only visible under the `private`/`admin`
+visibility filters on the events endpoints). Event data carries `actorId`,
+`action`, `targetId`, and `nightNumber` (the current `dayNumber`).
+
+**Error Cases:**
+
+- `400 Bad Request`: `{ "success": false, "error": "<engine reason>" }` — one of
+  `"Game not found"`, `"Not in night phase"` (engine phase must be exactly
+  `NIGHT_ACTIONS`), `"Player not found"`, `"Player is eliminated"`.
+- `500 Internal Server Error`: `{ "success": false, "error": "Failed to submit night action" }`
+
+#### Make Accusation
+
+**Endpoint:** `POST /api/v1/games/:gameId/accusation`
+
+**Request Body:**
+
+```json
+{
+  "accuserId": "player-uuid",
+  "targetId": "player-uuid",
+  "accusation": "I think X is mafia because...",
+  "evidence": "supporting reasoning or cited events"
+}
+```
+
+- `accuserId` (string): id of the accusing player.
+- `targetId` (string): id of the accused player.
+- `accusation` (string): the accusation statement.
+- `evidence` (string): supporting evidence/reasoning.
+
+**Response (200 OK):**
+
+```json
+{ "success": true, "data": { "eventId": "evt-uuid-or-null" } }
+```
+
+Records an `ACCUSATION_MADE` event (`visibility: PUBLIC`, `actorId =
+accuserId`, `targetId`). Event data carries `accuserId`, `targetId`,
+`accusation`, `evidence`, and `dayNumber`. The engine performs no phase or
+alive checks — the only failure it returns is an unknown game.
+
+**Error Cases:**
+
+- `400 Bad Request`: `{ "success": false, "error": "Game not found" }`
+- `500 Internal Server Error`: `{ "success": false, "error": "Failed to make accusation" }`
+
+#### Claim Role
+
+**Endpoint:** `POST /api/v1/games/:gameId/claim-role`
+
+**Request Body:**
+
+```json
+{ "playerId": "player-uuid", "role": "SHERIFF" }
+```
+
+- `playerId` (string): id of the player making the claim.
+- `role` (string): claimed role, per `RoleType` in `packages/shared` —
+  `"MAFIA"`, `"DOCTOR"`, `"SHERIFF"`, `"VIGILANTE"`, `"VILLAGER"`,
+  `"UNASSIGNED"`. The claim is recorded verbatim; the engine does NOT
+  validate it against the player's actual assigned role.
+
+**Response (200 OK):**
+
+```json
+{ "success": true, "data": { "eventId": "evt-uuid-or-null" } }
+```
+
+Records a `ROLE_CLAIMED` event (`visibility: PUBLIC`, `actorId = playerId`).
+Event data carries `playerId`, `claimedRole`, `dayNumber`, and `believable:
+true` (constant). Like accusations, the only engine failure is an unknown
+game — there is no phase or alive check.
+
+**Error Cases:**
+
+- `400 Bad Request`: `{ "success": false, "error": "Game not found" }`
+- `500 Internal Server Error`: `{ "success": false, "error": "Failed to claim role" }`
+
 #### Stop a Legacy Game
 
 **Endpoint:** `POST /api/v1/legacy-games/:gameId/stop`
