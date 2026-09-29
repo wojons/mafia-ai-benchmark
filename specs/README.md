@@ -80,7 +80,7 @@ This directory contains detailed technical specifications for the Mafia AI Bench
 
 ### Frontend Specifications
 - `ui-components.md` - React component specifications (AgentCard, GameFeed, PhaseHeader, Controls)
-- `streaming-protocol.md` - WebSocket event streaming protocol details
+- `streaming-protocol.md` - **Live** WebSocket protocol (`/ws` global channel: CONNECTED, JOIN_GAME, GAME_EVENT, PING/PONG). Includes a clearly separated **PLANNED / NOT IMPLEMENTED** section for per-game URLs, replay buffers, and snapshot resume — do not build clients against those.
 - `permission-model.md` - View modes (Admin/Town/Replay) and data filtering
 
 ### Implementation Planning
