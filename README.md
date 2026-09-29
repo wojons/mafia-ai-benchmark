@@ -229,6 +229,17 @@ See **[specs/correct-night-flow.md](specs/correct-night-flow.md)** for complete 
 
 > **Note:** `pnpm --filter @mafia/cli config ...` is intercepted by pnpm's built-in `config` command (ERR_PNPM_RECURSIVE_RUN_NO_SCRIPT / "Unknown option"), so config subcommands use the `run config ...` form. `stats` and `list-games` work directly as scripts.
 
+> **Note — non-interactive shells (cron / CI / agents):** pnpm 11 runs a
+> dependency check before every script and aborts in non-TTY shells with
+> `ERR_PNPM_ABORTED_REMOVE_MODULES_DIR_NO_TTY` whenever it decides
+> `node_modules` must be re-provisioned (stale or symlinked `node_modules` —
+> the normal state in worktrees, fresh automation checkouts, and after config
+> changes). This repo sets `confirmModulesPurge: false` in
+> `pnpm-workspace.yaml`, so the documented invocations above work unattended.
+> In checkouts without that setting (older clones, forks), prefix the command
+> with `CI=true` (e.g. `CI=true pnpm --filter @mafia/cli dev -- benchmark`)
+> or run the built CLI directly: `node apps/cli/dist/index.js <cmd>`.
+
 ### Server Commands
 
 | Command | Purpose | When to Use |

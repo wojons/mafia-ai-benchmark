@@ -151,6 +151,22 @@ The game will:
 > tests at it with `TEST_BASE_URL=http://localhost:3004 pnpm test` (the
 > compose host port; the default probe URL is `http://localhost:3004`).
 
+### Non-interactive shells (cron / CI / agents)
+
+For unattended shells, `pnpm` commands work as documented — this repo sets
+`confirmModulesPurge: false` in `pnpm-workspace.yaml` so pnpm 11's pre-run
+dependency check never aborts with `ERR_PNPM_ABORTED_REMOVE_MODULES_DIR_NO_TTY`
+(abort: non-TTY shell + stale or symlinked `node_modules`). In checkouts
+without that setting (older clones, forks), use one of these:
+
+```bash
+# Option 1: tell pnpm it is non-interactive
+CI=true pnpm --filter @mafia/cli dev -- list-games
+
+# Option 2: run the built CLI directly (after `pnpm build`)
+node apps/cli/dist/index.js list-games
+```
+
 ### CLI Commands (mafiactl)
 
 | Command                                                       | Description                    |

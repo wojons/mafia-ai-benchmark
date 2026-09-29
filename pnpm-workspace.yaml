@@ -16,3 +16,9 @@ allowBuilds:
 onlyBuiltDependencies:
   - esbuild
   - better-sqlite3
+
+# Non-TTY safety (DF-27): pnpm 11 aborts with ERR_PNPM_ABORTED_REMOVE_MODULES_DIR_NO_TTY
+# when a pre-run dependency check decides node_modules must be re-provisioned (stale or
+# symlinked node_modules — the normal state in cron/CI/worktrees) and cannot ask for
+# confirmation. false = proceed non-interactively, exactly like CI=true.
+confirmModulesPurge: false
