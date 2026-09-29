@@ -1,6 +1,7 @@
 {
   "name": "@mafia/shared",
   "version": "1.0.0",
+  "private": true,
   "description": "Mafia AI Benchmark Shared Package",
   "type": "module",
   "main": "dist/index.js",
