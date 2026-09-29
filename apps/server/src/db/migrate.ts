@@ -55,6 +55,35 @@ export class DatabaseMigrator {
           AND (phase = 'GAME_OVER' OR json_extract(data, '$.winner') IS NOT NULL)
       `).run();
       
+      // RELENG-MAFIA-20260928-04 data backfill: legacy ENDED games have a
+      // NULL/empty games.winner because older runs predate the column write
+      // (MAF-GAP-056 fixed the writer, not the store). Backfill the winner
+      // from the most recent GAME_ENDED event's $.winner, only when it is
+      // MAFIA or TOWN (UNKNOWN/absent stay NULL). Idempotent — only rows
+      // still NULL/empty are touched; re-runs are no-ops.
+      this.db.prepare(`
+        UPDATE games SET winner = (
+          SELECT json_extract(e.data, '$.winner')
+          FROM events e
+          WHERE e.game_id = games.id
+            AND e.type = 'GAME_ENDED'
+            AND json_extract(e.data, '$.winner') IN ('MAFIA', 'TOWN')
+          ORDER BY e.rowid DESC
+          LIMIT 1
+        )
+        WHERE status = 'ENDED'
+          AND (winner IS NULL OR winner = '')
+          AND (
+            SELECT json_extract(e.data, '$.winner')
+            FROM events e
+            WHERE e.game_id = games.id
+              AND e.type = 'GAME_ENDED'
+              AND json_extract(e.data, '$.winner') IN ('MAFIA', 'TOWN')
+            ORDER BY e.rowid DESC
+            LIMIT 1
+          ) IS NOT NULL
+      `).run();
+
       console.log('✅ Database schema initialized successfully');
       
       return {
