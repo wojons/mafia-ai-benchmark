@@ -1,654 +1,305 @@
 # Streaming Protocol Specification
 
+> **Status: reflects the LIVE implementation.** Source of truth:
+> `apps/server/src/websocket/index.ts` (WebSocketHandler) and
+> `apps/server/src/services/event-bus.ts` (EventBus).
+> Everything in [§ Planned / NOT IMPLEMENTED](#planned-not-implemented) is design-stage
+> material from earlier drafts of this document — it has **no implementation**. Do not
+> build clients against it.
+
 ## Overview
-Real-time event streaming from server to clients using WebSocket protocol. Supports live games, replays, and reconnection scenarios with guaranteed delivery.
+
+Real-time event streaming over WebSocket. There is **one global WebSocket endpoint**
+(`/ws`); games are selected per-connection with a `JOIN_GAME` message, not by the URL.
+Events are delivered **live only** — there is no server-side replay buffer, no sequence
+resume, and no snapshot mechanism (see [Planned](#planned-not-implemented)).
 
 ## Transport Layer
 
 ### WebSocket Connection
+
 ```
-Endpoint: ws://localhost:3004/ws/:gameId
-Protocol: ws (upgrade from HTTP)
-Message Format: UTF-8 JSON
-Ping/Pong: Every 30 seconds (heartbeat)
+Endpoint:      ws://<host>:<port>/ws        (single global path — NOT /ws/:gameId)
+Protocol:      ws (upgrade from HTTP, same server as the REST API)
+Message format: UTF-8 JSON, one object per message
+Deployment:    container-internal :3000; docker-compose maps host :3004 → :3000;
+               the web container's nginx proxies /ws to server:3000
 ```
 
-### Connection Flow
+- The endpoint is mounted once at server startup:
+  `new WebSocketServer({ server: httpServer, path: '/ws' })`
+  (`apps/server/src/index.ts`, alongside the Express REST routes — same port).
+- There is no per-game URL. Subscribing to a game is a **message**, not a path
+  (see `JOIN_GAME` below).
+- There is no server-initiated heartbeat. The only keepalive is a client-initiated
+  `PING` (the ws library's protocol-level ping/pong frames aside, the app layer
+  implements nothing periodic).
+
+### Message Envelope
+
+Every message in both directions follows this shape
+(`sendToClient()` stamps `timestamp` and echoes `requestId` on everything it sends):
+
+```typescript
+interface WSMessage {
+  type: string;                      // message type discriminator
+  payload: Record<string, unknown>;  // type-specific data
+  requestId?: string;                // optional client correlation id (echoed back)
+  timestamp?: string;                // ISO 8601, stamped by the server on send
+}
 ```
-Client                                  Server
-  │                                       │
-  │  CONNECT ws://.../ws/game-123         │
-  ├──────────────────────────────────────▶│
-  │                                       │
-  │  {                                    │
-  │     "type": "SUBSCRIBE",              │
-  │     "gameId": "game-123",             │
-  │     "viewMode": "admin",              │
-  │     "lastSeq": 15,    (optional)      │
-  │     "authToken": "..."  (optional)    │
-  │  }                                    │
-  ├──────────────────────────────────────▶│
-  │                                       │
-  │  {                                    │
-  │     "type": "SUBSCRIBED",             │
-  │     "gameId": "game-123",             │
-  │     "currentSeq": 18,                 │
-  │     "status": "RUNNING",              │
-  │     "phase": "DAY_DISCUSSION",       │
-  │     "dayNumber": 2                    │
-  │  }                                    │
-  │◀──────────────────────────────────────┤
-  │                                       │
-  │  { "type": "EVENT", "event": {...} } │
-  │◀──────────────────────────────────────┤
-  │                                       │
-  │  { "type": "EVENT", "event": {...} } │
-  │◀──────────────────────────────────────┤
-  │                                       │
-  │  { "type": "HEARTBEAT" }              │
-  │◀──────────────────────────────────────┤
-  │                                       │
-  │  { "type": "PING" }                   │
-  ├──────────────────────────────────────▶│
-  │                                       │
-  │  { "type": "PONG" }                   │
-  │◀──────────────────────────────────────┤
-  │                                       │
+
+### Connection Flow (live)
+
+```
+Client                                          Server
+  │                                               │
+  │  CONNECT ws://<host>:<port>/ws                │
+  ├──────────────────────────────────────────────▶│
+  │                                               │
+  │  { "type": "CONNECTED",                       │
+  │    "payload": { "clientId": "<uuid>" } }      │
+  │◀──────────────────────────────────────────────┤
+  │                                               │
+  │  { "type": "JOIN_GAME",                       │
+  │    "payload": { "gameId": "game-123" },       │
+  │    "requestId": "r1"            (optional)    │
+  │  }                                            │
+  ├──────────────────────────────────────────────▶│
+  │                                               │
+  │  { "type": "GAME_JOINED",                     │
+  │    "payload": { "gameId": "game-123" } }      │
+  │◀──────────────────────────────────────────────┤
+  │                                               │
+  │  { "type": "GAME_STATE",                      │
+  │    "payload": { "state": {...} } }   (only if the game exists)
+  │◀──────────────────────────────────────────────┤
+  │                                               │
+  │  { "type": "GAME_EVENT",                      │  ← every event the game
+  │    "payload": { ...GameEvent... },            │    publishes, live
+  │    "timestamp": "2026-09-29T..." }            │
+  │◀──────────────────────────────────────────────┤
+  │                                               │
+  │  { "type": "PING", "payload": {} }            │
+  ├──────────────────────────────────────────────▶│
+  │                                               │
+  │  { "type": "PONG", "payload": {} }            │
+  │◀──────────────────────────────────────────────┤
 ```
 
 ---
 
-## Message Types
+## Message Types (live)
 
-### 1. SUBSCRIBE (Client → Server)
-Initial subscription request.
+### Server → Client
 
-**Schema:**
-```typescript
-interface SubscribeMessage {
-  type: 'SUBSCRIBE';
-  gameId: string;
-  viewMode: 'admin' | 'town' | 'postmortem';
-  lastSeq?: number;              // Start from this sequence
-  authToken?: string;            // Optional admin token
-}
+| Type | Payload | When |
+|---|---|---|
+| `CONNECTED` | `{ clientId }` | Immediately after the socket opens |
+| `GAME_JOINED` | `{ gameId }` | Ack for `JOIN_GAME` |
+| `GAME_STATE` | `{ state }` | After `JOIN_GAME` (if the game exists) and in reply to `REQUEST_STATE` |
+| `GAME_EVENT` | the `GameEvent` as published | Live game event, delivered to every client joined to that game |
+| `BROADCAST` | event object | Server-wide fan-out via `broadcastToAll()` (handler surface; no current in-repo caller) |
+| `SUBSCRIBED` | `{ eventTypes }` or `{ eventTypes: ['GAME_EVENT'], gameId }` | Ack for `SUBSCRIBE` (see below) |
+| `UNSUBSCRIBED` | `{ eventTypes }` | Ack for `UNSUBSCRIBE` |
+| `GAME_LEFT` | `{}` | Ack for `LEAVE_GAME` |
+| `ACTION_SENT` | `{ actionType, targetId }` | Ack for `SEND_ACTION` |
+| `PONG` | `{}` | Reply to `PING` |
+| `ERROR` | `{ message }` | Invalid JSON, unknown type, protocol misuse, engine failure |
+
+### Client → Server
+
+| Type | Payload | Effect |
+|---|---|---|
+| `PING` | `{}` | Server replies `PONG` (empty payload; no latency/seq fields) |
+| `JOIN_GAME` | `{ gameId }` | Register this connection for the game's live events |
+| `LEAVE_GAME` | `{}` | Drop the per-game subscription; server replies `GAME_LEFT` |
+| `SUBSCRIBE` | `{ eventTypes: string[] }` or `{ gameId }` | See below |
+| `UNSUBSCRIBE` | `{ eventTypes: string[] }` | Removes types from the (informational) subscription set |
+| `SEND_ACTION` | `{ actionType, targetId, ... }` | Submit a game action; requires an active `JOIN_GAME` |
+| `REQUEST_STATE` | `{ gameId }` | Replies `GAME_STATE`, or `ERROR` "Game not found" |
+
+---
+
+### 1. CONNECTED (Server → Client)
+
+Sent on every new connection. `clientId` is a UUID generated per connection.
+
+```json
+{ "type": "CONNECTED", "payload": { "clientId": "0b8f..." }, "timestamp": "..." }
 ```
 
-**Example:**
+### 2. JOIN_GAME (Client → Server) — the per-game subscription
+
+```json
+{ "type": "JOIN_GAME", "payload": { "gameId": "game-abc123" }, "requestId": "r1" }
+```
+
+Effects (all in `registerGameSubscription()`):
+
+1. Sets the client's `gameId` and adds `game:<id>` to its subscription set.
+2. Subscribes the client to the **EventBus wildcard** (`subscribeAll`) and filters by
+   `event.gameId === gameId` — the EventBus is event-type-keyed, so topic keys like
+   `game:<id>` never fire by themselves. Spectator semantics: the joiner receives the
+   game's events (no self-exclusion).
+3. Tears down any **previous** per-game subscription first — one game per connection;
+   a second `JOIN_GAME` replaces the first.
+
+Replies: `GAME_JOINED { gameId }`, then `GAME_STATE { state }` **only if** the game
+engine has state for that id. Note: joining an unknown gameId still acks `GAME_JOINED`
+— there is no existence validation and no error frame for it.
+
+### 3. GAME_EVENT (Server → Client) — live game events
+
+The majority of traffic. One frame per event the game publishes:
+
 ```json
 {
-  "type": "SUBSCRIBE",
-  "gameId": "game-abc123",
-  "viewMode": "admin",
-  "lastSeq": 45,
-  "authToken": "admin-token-xyz"
-}
-```
-
-**Validation:**
-- `gameId` must exist and not be deleted
-- `viewMode` must be valid enum
-- If `lastSeq` provided, server checks if it's within buffering range
-- If `authToken` invalid, server downgrades to `town` mode
-
----
-
-### 2. SUBSCRIBED (Server → Client)
-Subscription confirmation with initial state.
-
-**Schema:**
-```typescript
-interface SubscribedMessage {
-  type: 'SUBSCRIBED';
-  gameId: string;
-  currentSeq: number;            // Last event sequence number
-  status: 'RUNNING' | 'PAUSED' | 'ENDED';
-  phase: Phase;
-  dayNumber: number;
-  roundNumber: number;
-  aliveCount: number;
-  deadCount: number;
-  winner: 'town' | 'mafia' | null;
-  missedEvents?: Event[];        // Events since lastSeq
-}
-```
-
-**Example:**
-```json
-{
-  "type": "SUBSCRIBED",
-  "gameId": "game-abc123",
-  "currentSeq": 45,
-  "status": "RUNNING",
-  "phase": "DAY_DISCUSSION",
-  "dayNumber": 2,
-  "roundNumber": 5,
-  "aliveCount": 6,
-  "deadCount": 4,
-  "winner": null,
-  "missedEvents": [
-    { "eventType": "VOTE_CAST", "sequence": 44, ... }
-  ]
-}
-```
-
-**If `lastSeq` was provided:** Server includes `missedEvents` array with all events from `lastSeq + 1` to `currentSeq`.
-
----
-
-### 3. EVENT (Server → Client)
-Game event (majority of traffic).
-
-**Schema:**
-```typescript
-interface EventMessage {
-  type: 'EVENT';
-  event: Event;                 // See event-schemas.md
-  timestamp: number;            // Server timestamp
-}
-```
-
-**Example:**
-```jsonn
-{
-  "type": "EVENT",
-  "timestamp": 1703774405000,
-  "event": {
-    "eventType": "AGENT_SAY_CHUNK",
+  "type": "GAME_EVENT",
+  "payload": {
+    "id": "<uuid>",
     "gameId": "game-abc123",
-    "sequence": 46,
-    "private": false,
-    "payload": {
-      "agentId": "p1",
-      "agentName": "Alice",
-      "chunk": "I think Bob is acting suspiciously.",
-      "turnId": "say-day-2-p1"
-    }
-  }
+    "type": "AGENT_SAYS_BROADCASTED",
+    "timestamp": "2026-09-29T12:00:00.000Z",
+    "visibility": "PUBLIC",
+    "actorId": "p1",
+    "data": { "...": "..." },
+    "metadata": { "turnNumber": 5, "dayNumber": 2, "phase": "DAY_DISCUSSION", "sequence": 44 }
+  },
+  "timestamp": "2026-09-29T12:00:00.001Z"
 }
 ```
 
-**Streaming Chunks:**
-- THINK and SAY events stream in real-time
-- Client accumulates chunks per turnId
-- Empty chunk signals stream end
+- `payload` is the `GameEvent` **exactly as published** to the EventBus
+  (`packages/shared` `GameEvent`: `id`, `gameId`, `type`, `timestamp`, `visibility`
+  (`'PUBLIC' | 'PRIVATE' | 'ADMIN'`), optional `actorId`/`targetId`, `data`,
+  `metadata { turnNumber, dayNumber, phase, sequence }`).
+- **No visibility filtering happens on the WebSocket path.** `PRIVATE`/`ADMIN` events
+  reach any client joined to the game. (The REST events endpoint
+  `GET /api/v1/games/:gameId/events` does filter by visibility; the WS does not.)
+  Treat admin-view gating as a client/UI concern until a filter lands.
+- `metadata.sequence` is the only sequence number in the system, and **nothing in the
+  WS layer consumes it** — there is no gap detection, no replay, no resume.
 
-**Example streaming sequence:**
+### 4. SUBSCRIBE (Client → Server) — two forms
+
+**Event-type form** (adds types to the client's subscription set):
+
 ```json
-{"type": "EVENT", "event": {"eventType": "AGENT_THINK_CHUNK", "payload": {"chunk": "I need to", ...}}}
-{"type": "EVENT", "event": {"eventType": "AGENT_THINK_CHUNK", "payload": {"chunk": "protect the", ...}}}
-{"type": "EVENT", "event": {"eventType": "AGENT_THINK_CHUNK", "payload": {"chunk": "sheriff.", ...}}}
-{"type": "EVENT", "event": {"eventType": "AGENT_THINK_CHUNK", "payload": {"chunk": "", ...}}}  // End signal
-{"type": "EVENT", "event": {"eventType": "AGENT_SAY_CHUNK", "payload": {"chunk": "I will", ...}}}
+{ "type": "SUBSCRIBE", "payload": { "eventTypes": ["PHASE_CHANGED", "VOTE_CAST"] } }
 ```
 
----
+Ack: `SUBSCRIBED { eventTypes: [...] }`. **Caveat:** that subscription set is
+bookkeeping only — event delivery keys exclusively off the client's `gameId`
+(see `JOIN_GAME`). Subscribing to event types does not cause any frames to be sent.
 
-### 4. HEARTBEAT (Server → Client)
-Keepalive + status update (sent every 30s if no events).
+**gameId form** (legacy alias, kept for compatibility — DF-MAFIA-AI-BENCHMARK-19):
 
-**Schema:**
-```typescript
-interface HeartbeatMessage {
-  type: 'HEARTBEAT';
-  timestamp: number;
-  gameStatus: {
-    phase: Phase;
-    dayNumber: number;
-    aliveCount: number;
-    deadCount: number;
-  };
-}
-```
-
-**Example:**
 ```json
-{
-  "type": "HEARTBEAT",
-  "timestamp": 1703774500000,
-  "gameStatus": {
-    "phase": "DAY_VOTING",
-    "dayNumber": 2,
-    "aliveCount": 6,
-    "deadCount": 4
-  }
-}
+{ "type": "SUBSCRIBE", "payload": { "gameId": "game-abc123" } }
 ```
 
-**Client Behavior:**
-- Reset connection timeout
-- Update UI status bar
-- Detect server-side disconnects
+`gameId` (or `game_id`) is aliased to the `JOIN_GAME` path so it can never silently
+no-op. Ack: `SUBSCRIBED { eventTypes: ['GAME_EVENT'], gameId }` — followed by the same
+EventBus registration as `JOIN_GAME` (but without the `GAME_JOINED`/`GAME_STATE`
+replies). Prefer `JOIN_GAME` in new clients.
 
----
+### 5. SEND_ACTION (Client → Server)
 
-### 5. PING (Client → Server)
-Client keepalive (optional, but recommended).
+Requires an active `JOIN_GAME`; otherwise `ERROR { message: 'Not in a game' }`.
 
-**Schema:**
-```typescript
-interface PingMessage {
-  type: 'PING';
-  timestamp: number;
-  clientSeq?: number;           // Last event sequence received
-}
-```
-
-**Example:**
 ```json
-{
-  "type": "PING",
-  "timestamp": 1703774501000,
-  "clientSeq": 47
-}
+{ "type": "SEND_ACTION", "payload": { "actionType": "VOTE", "targetId": "p3", "voterId": "p1" } }
 ```
 
-**Frequency:** Every 15-30 seconds or when idle.
+| `actionType` | Extra payload fields | Engine call |
+|---|---|---|
+| `VOTE` | `voterId`, `targetId` | `submitVote(gameId, voterId, targetId)` |
+| `NIGHT_ACTION` | `playerId`, `action`, `targetId` | `submitNightAction(gameId, playerId, action, targetId)` |
+| `ACCUSATION` | `accuserId`, `targetId`, `accusation`, `evidence` | `makeAccusation(...)` |
+| `ROLE_CLAIM` | `playerId`, `role` (`MAFIA`\|`DOCTOR`\|`SHERIFF`\|`VIGILANTE`\|`VILLAGER`) | `claimRole(...)` |
 
----
+Success ack: `ACTION_SENT { actionType, targetId }`. Engine throw:
+`ERROR { message: 'Failed to send action' }`.
 
-### 6. PONG (Server → Client)
-Ping response.
+### 6. PING / PONG (Client → Server / Server → Client)
 
-**Schema:**
-```typescript
-interface PongMessage {
-  type: 'PONG';
-  timestamp: number;
-  serverSeq: number;            // Current server sequence
-  roundTripMs: number;
-}
-```
-
-**Example:**
 ```json
-{
-  "type": "PONG",
-  "timestamp": 1703774501005,
-  "serverSeq": 48,
-  "roundTripMs": 5
-}
+→ { "type": "PING", "payload": {} }
+← { "type": "PONG", "payload": {} }
 ```
 
-**Client Use:**
-- Calculate latency
-- Verify connection health
-- Detect missing events (if serverSeq > clientSeq + buffer)
-
----
+The client may send `PING` at any time; the server replies `PONG` with an **empty
+payload** — no `roundTripMs`, no `serverSeq`. There is no server-initiated heartbeat
+and no idle timeout tied to it. The REST SSE stream (below) uses 30 s keepalive
+comments instead.
 
 ### 7. ERROR (Server → Client)
-Streaming error or protocol violation.
 
-**Schema:**
-```typescript
-interface ErrorMessage {
-  type: 'ERROR';
-  code: string;
-  message: string;
-  fatal: boolean;               // True = connection closing
-}
-```
-
-**Error Codes:**
-```typescript
-const ERROR_CODES = {
-  'INVALID_GAME_ID': 'Game ID does not exist',
-  'GAME_ENDED': 'Game has finished',
-  'GAME_DELETED': 'Game data has been purged',
-  'VIEW_MODE_DENIED': 'Insufficient permissions for view mode',
-  'RATE_LIMITED': 'Too many subscriptions',
-  'PROTOCOL_ERROR': 'Invalid message format',
-  'SEQUENCE_OUT_OF_RANGE': 'Requested sequence too old'
-};
-```
-
-**Examples:**
 ```json
-{
-  "type": "ERROR",
-  "code": "INVALID_GAME_ID",
-  "message": "Game 'game-999' not found",
-  "fatal": true
-}
+{ "type": "ERROR", "payload": { "message": "Unknown message type: FOO" }, "timestamp": "..." }
 ```
+
+Emitted for: unparseable JSON (`Invalid message format`), unknown `type`,
+`SEND_ACTION` without a game (`Not in a game`), engine failures
+(`Failed to send action`), `REQUEST_STATE` for an unknown game
+(`Game not found`). The payload is a plain `message` string — there are **no error
+codes and no `fatal` flag**; the server never closes the socket on an `ERROR`.
+
+### 8. BROADCAST (Server → Client)
+
+`broadcastToAll()` fans an event out to **every** connected client wrapped as
+`{ type: 'BROADCAST', payload: <event> }`. It is part of the handler surface but has
+no in-repo caller today; do not rely on receiving it.
 
 ---
 
-## Event Buffering & Replay
+## Delivery Semantics
 
-### Server-Side Buffer
-Server maintains in-memory ring buffer of recent events:
+- **One game per connection.** A `JOIN_GAME` (or gameId-`SUBSCRIBE`) replaces the
+  previous per-game subscription.
+- **Spectator semantics.** The joiner receives the game's events, including its own
+  submissions (no self-exclusion).
+- **Live only.** A client that connects mid-game receives `GAME_STATE` once (if the
+  game exists) and then only *future* events. Past events are not replayed over the
+  WS — fetch them via REST: `GET /api/v1/games/:gameId/events` (JSON, visibility
+  filtered) or `GET /api/v1/games/:gameId/replay`.
+- **Disconnect cleanup.** On socket close the EventBus subscription is torn down and
+  the client record dropped. No server-side state survives the connection.
 
-```typescript
-class EventBuffer {
-  private buffer: Event[] = [];
-  private readonly capacity = 1000;  // Last 1000 events
-  private startSeq = 0;
-  
-  append(event: Event): void {
-    if (this.buffer.length >= this.capacity) {
-      this.buffer.shift();  // Remove oldest
-      this.startSeq++;
-    }
-    this.buffer.push(event);
-  }
-  
-  getFrom(sequence: number): Event[] | null {
-    if (sequence < this.startSeq) {
-      return null;  // Too old, not in buffer
-    }
-    
-    const startIdx = sequence - this.startSeq;
-    return this.buffer.slice(startIdx);
-  }
-}
-```
+## Related Live Surfaces
 
-**Missed Event Recovery:**
-1. Client reconnects with `lastSeq: 45`
-2. Server checks if sequence 46+ is in buffer
-3. If yes: Send `missedEvents` array in SUBSCRIBED message
-4. If no: Return error `SEQUENCE_OUT_OF_RANGE`
-
-### Client Handling
-```typescript
-class StreamingClient {
-  private lastSeq: number = -1;
-  private eventBuffer: Event[] = [];
-  private isReplaying: boolean = false;
-  
-  async connect(gameId: string, lastSeq?: number) {
-    this.ws = new WebSocket(`ws://.../${gameId}`);
-    
-    this.ws.onmessage = (event) => {
-      const message = JSON.parse(event.data);
-      
-      if (message.type === 'EVENT') {
-        const event = message.event;
-        
-        // Check for sequence gaps
-        if (this.lastSeq >= 0 && event.sequence !== this.lastSeq + 1) {
-          console.warn(`Sequence gap: ${this.lastSeq} -> ${event.sequence}`);
-          if (!this.isReplaying) {
-            this.handleGap(event.sequence);
-          }
-        }
-        
-        this.lastSeq = event.sequence;
-        this.eventBuffer.push(event);
-        
-        // Limit buffer size
-        if (this.eventBuffer.length > 5000) {
-          this.eventBuffer = this.eventBuffer.slice(-5000);
-        }
-        
-        this.onEvent(event);
-      }
-    };
-  }
-  
-  private handleGap(expectedSeq: number) {
-    // 1. Pause live updates
-    this.isReplaying = true;
-    
-    // 2. Request missing events via REST API
-    fetch(`/api/games/${this.gameId}/events?fromSeq=${this.lastSeq + 1}`)
-      .then(res => res.json())
-      .then(data => {
-        // 3. Insert missed events
-        for (const event of data.events) {
-          this.onEvent(event);
-        }
-        
-        // 4. Resume live updates
-        this.isReplaying = false;
-      });
-  }
-}
-```
+- **SSE:** `GET /api/v1/games/:gameId/events` with `Accept: text/event-stream`
+  streams the same EventBus events as raw `data:` JSON frames (plus an initial
+  `{type:'connected'}` frame and 30 s `: keepalive` comments). Also unfiltered by
+  visibility.
+- **REST:** the same route without the SSE header returns the full event list as JSON
+  (visibility filtered); `/replay` returns chronologically sorted events.
 
 ---
 
-## Reconnection Strategy
+<a name="planned-not-implemented"></a>
+## PLANNED / NOT IMPLEMENTED
 
-### Client-Side Logic
-```typescript
-class AutoReconnectingClient {
-  private ws: WebSocket | null = null;
-  private reconnectAttempts = 0;
-  private maxReconnectAttempts = 5;
-  private reconnectDelay = 1000;  // Start with 1s
-  
-  connect() {
-    this.ws = new WebSocket(this.url);
-    
-    this.ws.onclose = () => {
-      if (this.reconnectAttempts < this.maxReconnectAttempts) {
-        setTimeout(() => this.reconnect(), this.reconnectDelay);
-        this.reconnectDelay *= 2;  // Exponential backoff
-        this.reconnectAttempts++;
-      }
-    };
-    
-    this.ws.onopen = () => {
-      this.reconnectAttempts = 0;
-      this.reconnectDelay = 1000;
-    };
-  }
-  
-  reconnect() {
-    // Re-subscribe with last known sequence
-    const lastSeq = this.getLastSequence();
-    this.connectWithSequence(lastSeq);
-  }
-}
-```
+**None of the following exists in the code.** Earlier drafts of this document
+described them as if shipped; they are design targets only. There is no `TODO` branch
+carrying them — treat every item as unbuilt until a commit says otherwise.
 
-### Reconnection States
-```
-Disconnected
-    │
-    ├───► Reconnecting (1s delay)
-    │       │
-    │       ├───► Success → Resume streaming
-    │       │
-    │       └───► Failed ───────┐
-    │                           │
-    └───► Reconnecting (2s)     │
-            │                   │
-            ├───► Success       │
-            │                   │
-            └───► Failed ───────┤
-                                │
-                ... (up to 5 attempts)
-                                │
-    ┌───────────────────────────┘
-    │
-    ▼
-Failed to reconnect
-    │
-    ▼
-Show "Connection Lost" UI
-```
+| Planned feature | Status |
+|---|---|
+| Per-game URL `ws://…/ws/:gameId` | **NOT IMPLEMENTED.** The server mounts exactly one path, `/ws`; a per-game request path 404s at the HTTP upgrade. Game selection is the `JOIN_GAME` message. |
+| `SUBSCRIBE` with `viewMode` / `authToken` | **NOT IMPLEMENTED.** No view modes, no auth, no token downgrade on the WS path. |
+| `SUBSCRIBED` carrying `currentSeq`, `status`, `phase`, `dayNumber`, `aliveCount`, `winner`, `missedEvents` | **NOT IMPLEMENTED.** Live ack payload is `{ eventTypes }` or `{ eventTypes, gameId }` only. |
+| `lastSeq` resume + server-side event ring buffer | **NOT IMPLEMENTED.** No `EventBuffer` class exists; the EventBus keeps an in-memory history for its own API, but the WS layer never reads it. Drafts disagreed on capacity (100 vs 1000) — moot until built. |
+| `HEARTBEAT` frame with `gameStatus` | **NOT IMPLEMENTED.** No server-initiated keepalive of any kind. |
+| `PONG` with `serverSeq` / `roundTripMs`, `PING` with `clientSeq` | **NOT IMPLEMENTED.** Both payloads are empty. |
+| `ERROR` code taxonomy (`INVALID_GAME_ID`, `SEQUENCE_OUT_OF_RANGE`, …) and `fatal` flag | **NOT IMPLEMENTED.** `ERROR` carries a human-readable `message` only. |
+| Sequence-gap detection / client replay via `?fromSeq=` | **NOT IMPLEMENTED.** Events carry `metadata.sequence`, but nothing consumes it. |
+| `SNAPSHOT` message (snapshot + delta catch-up) | **NOT IMPLEMENTED.** |
+| Bulk stream fetch `GET /api/games/:gameId/stream` | **NOT IMPLEMENTED.** The live catch-up equivalents are the REST `/events` and `/replay` endpoints listed above. |
+| Visibility filtering on WS delivery (`PRIVATE`/`ADMIN` withheld from non-admins) | **NOT IMPLEMENTED** on the WS/SSE paths (REST `/events` filters). |
+| Performance targets (<10 ms broadcast, 1000 eps burst, 100 conns/game) | **ASPIRATIONAL.** No measurements back these numbers. |
 
----
-
-## Protocol Extensions
-
-### Bulk Event Fetch
-For replays or catch-up, server supports bulk fetch:
-
-**Request:**
-```http
-GET /api/games/:gameId/stream?fromSeq=0&toSeq=1000&format=ws
-```
-
-**Response:** WebSocket upgrade with immediate event burst.
-
-### Snapshot + Events
-For very large gaps, server can send snapshot + delta:
-
-```typescript
-interface SnapshotMessage {
-  type: 'SNAPSHOT';
-  sequence: number;
-  gameState: GameState;
-}
-
-// Followed by events: sequence+1, sequence+2, ...
-```
-
----
-
-## Implementation Example: Server
-
-```typescript
-// server/src/transport/WebSocketStream.ts
-
-export class WebSocketStream {
-  private wss: WebSocketServer;
-  private connections = new Map<string, Set<WebSocket>>;
-  private buffers = new Map<string, EventBuffer>;
-  
-  constructor(server: HTTPServer) {
-    this.wss = new WebSocketServer({ server, path: '/ws' });
-    
-    this.wss.on('connection', (ws, req) => {
-      const url = new URL(req.url!, `ws://localhost`);
-      const gameId = url.pathname.split('/')[2];
-      
-      const subscription = this.handleSubscription(ws, gameId, url);
-      
-      ws.on('message', (data) => {
-        const message = JSON.parse(data.toString());
-        this.handleClientMessage(ws, message, subscription);
-      });
-      
-      ws.on('close', () => {
-        this.connections.get(gameId)?.delete(ws);
-      });
-    });
-  }
-  
-  handleSubscription(ws: WebSocket, gameId: string, url: URL) {
-    const viewMode = url.searchParams.get('viewMode') as ViewMode || 'town';
-    const lastSeq = parseInt(url.searchParams.get('lastSeq') || '-1');
-    
-    // Validate game exists
-    const game = this.getGame(gameId);
-    if (!game) {
-      this.sendError(ws, 'INVALID_GAME_ID', 'Game not found', true);
-      ws.close();
-      return;
-    }
-    
-    // Check authorization
-    const authToken = url.searchParams.get('authToken');
-    const effectiveViewMode = this.authorizeViewMode(viewMode, authToken);
-    
-    // Send subscription confirmation
-    const missedEvents = lastSeq >= 0 
-      ? this.buffers.get(gameId)?.getFrom(lastSeq + 1)
-      : null;
-    
-    this.send(ws, {
-      type: 'SUBSCRIBED',
-      gameId,
-      currentSeq: game.lastSeq,
-      status: game.status,
-      phase: game.phase,
-      missedEvents: effectiveViewMode === 'admin' ? missedEvents : this.filterPrivate(missedEvents)
-    });
-    
-    // Store connection
-    if (!this.connections.has(gameId)) {
-      this.connections.set(gameId, new Set());
-    }
-    this.connections.get(gameId)!.add(ws);
-    
-    return { gameId, viewMode: effectiveViewMode };
-  }
-  
-  broadcastEvent(gameId: string, event: Event) {
-    const connections = this.connections.get(gameId);
-    if (!connections) return;
-    
-    // Store in buffer
-    this.buffers.get(gameId)?.append(event);
-    
-    // Broadcast to all connections
-    for (const ws of connections) {
-      const isAdmin = ws.subscription.viewMode === 'admin';
-      const visibleEvent = isAdmin ? event : this.filterPrivateEvents([event])[0];
-      
-      if (visibleEvent) {
-        this.send(ws, {
-          type: 'EVENT',
-          timestamp: Date.now(),
-          event: visibleEvent
-        });
-      }
-    }
-  }
-  
-  private filterPrivateEvents(events: Event[]): Event[] {
-    return events.filter(event => !event.private);
-  }
-}
-```
-
----
-
-## Testing the Protocol
-
-### Mock WebSocket Server
-```typescript
-// Test helper
-class MockWebSocketServer {
-  createConnection(): { client: MockWebSocket; server: MockWebSocket } {
-    // Create mock WebSocket pair
-  }
-}
-
-// Protocol test
-test('WebSocket streaming', async () => {
-  const { client, server } = mockWebSocketServer.createConnection();
-  const stream = new WebSocketStream(mockServer);
-  
-  // Subscribe
-  client.send(JSON.stringify({
-    type: 'SUBSCRIBE',
-    gameId: 'test-game'
-  }));
-  
-  // Wait for subscription
-  await waitForMessage(client, (msg) => msg.type === 'SUBSCRIBED');
-  
-  // Send event
-  stream.broadcastEvent('test-game', testEvent);
-  
-  // Verify client receives
-  const eventMsg = await waitForMessage(client, (msg) => msg.type === 'EVENT');
-  expect(eventMsg.event).toEqual(testEvent);
-});
-```
-
----
-
-## Performance Metrics
-
-### Target Latency
-- **Event generation to broadcast:** <10ms
-- **Client receive to render:** <30ms
-- **Total end-to-end latency:** <50ms
-
-### Throughput
-- **Max events per second:** 1000 (burst)
-- **Sustained events per second:** 100
-- **Concurrent connections:** 100 per game
-
-### Bandwidth
-- **Average event size:** 500 bytes
-- **Streaming overhead:** 50 bytes per message
-- **Recommended minimum bandwidth:** 1 Mbps
+If you need any of the above, file a board row (MAF-GAP-*) rather than assuming it
+exists — and when it lands, move it out of this section with grep-verified message
+types from `apps/server/src/websocket/index.ts`.
