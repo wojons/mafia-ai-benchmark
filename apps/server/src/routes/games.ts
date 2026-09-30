@@ -21,6 +21,25 @@ const gameSSESubscriptions: Map<string, Set<Response>> = new Map();
 const VALID_GAME_STATUSES: readonly string[] = ['SETUP', 'IN_PROGRESS', 'PAUSED', 'ENDED', 'CANCELLED'];
 
 /**
+ * MAF-REV-001: request-body constraints for POST /api/v1/games.
+ *
+ * The legacy engine throws "Minimum 5 players required" (game-engine.js:1769)
+ * — previously only AFTER the route had already answered 201 "starting", so
+ * the client learned about it by watching the game turn CANCELLED. Its role
+ * table is documented up to 15 players (specs/game-flow-and-rules.md), so
+ * 5-15 is the accepted range.
+ */
+const MIN_PLAYERS = 5;
+const MAX_PLAYERS = 15;
+
+/**
+ * Engine types the create-game route accepts: `legacy` (the adapter path, and
+ * the default) and `native` (the standard engine). Any other value used to be
+ * accepted and silently coerced to legacy.
+ */
+const VALID_ENGINE_TYPES: readonly string[] = ['legacy', 'native'];
+
+/**
  * Normalize a player extracted from the event stream into the API player
  * shape. The extractor only reports role/isMafia/isAlive when the events
  * actually revealed them; neutral defaults are applied otherwise.
@@ -321,6 +340,79 @@ export function createGamesRouter(
   // Create game - always uses legacy engine when available, fallback to standard
   router.post('/api/v1/games', (req: Request, res: Response) => {
     try {
+      // MAF-REV-001: reject an invalid body with 400 BEFORE any engine work.
+      // Previously numPlayers=2 reached the engine (201 "starting", then
+      // CANCELLED with the reason only in the server log), numPlayers='abc'
+      // was accepted as-is, and an unknown engineType was silently coerced to
+      // legacy. Only `undefined` counts as "omitted" — an explicit null is a
+      // client error, not a default.
+      const body: Record<string, unknown> =
+        req.body && typeof req.body === 'object' && !Array.isArray(req.body)
+          ? (req.body as Record<string, unknown>)
+          : {};
+
+      if (body.numPlayers !== undefined) {
+        const { numPlayers } = body;
+        if (
+          typeof numPlayers !== 'number' ||
+          !Number.isInteger(numPlayers) ||
+          numPlayers < MIN_PLAYERS ||
+          numPlayers > MAX_PLAYERS
+        ) {
+          res.status(400).json({
+            success: false,
+            error: `Invalid numPlayers ${JSON.stringify(numPlayers)}. Must be an integer between ${MIN_PLAYERS} and ${MAX_PLAYERS}`,
+          });
+          return;
+        }
+      }
+
+      if (body.engineType !== undefined) {
+        const { engineType } = body;
+        if (typeof engineType !== 'string' || !VALID_ENGINE_TYPES.includes(engineType)) {
+          res.status(400).json({
+            success: false,
+            error: `Invalid engineType ${JSON.stringify(engineType)}. Valid values: ${VALID_ENGINE_TYPES.join(', ')}`,
+          });
+          return;
+        }
+      }
+
+      if (body.roleModels !== undefined) {
+        const { roleModels } = body;
+        if (typeof roleModels !== 'object' || roleModels === null || Array.isArray(roleModels)) {
+          res.status(400).json({
+            success: false,
+            error: `Invalid roleModels ${JSON.stringify(roleModels)}. Must be an object mapping role names to model specs`,
+          });
+          return;
+        }
+        for (const [role, spec] of Object.entries(roleModels as Record<string, unknown>)) {
+          const specObject =
+            typeof spec === 'object' && spec !== null && !Array.isArray(spec)
+              ? (spec as { provider?: unknown; model?: unknown })
+              : null;
+          const isModelSpec = typeof spec === 'string' && spec.trim() !== '';
+          // The dashboard (apps/web GameList.tsx) posts per-role pickers as
+          // { provider, model } objects, so that well-formed shape is accepted.
+          // The legacy adapter consumes string specs only; numbers, arrays and
+          // half-filled objects are malformed and rejected.
+          const isDashboardSpec =
+            specObject !== null &&
+            typeof specObject.provider === 'string' &&
+            specObject.provider !== '' &&
+            typeof specObject.model === 'string' &&
+            specObject.model !== '';
+          if (!isModelSpec && !isDashboardSpec) {
+            res.status(400).json({
+              success: false,
+              error: `Invalid roleModels entry "${role}". Each value must be a "provider/model" string or a { provider, model } object`,
+            });
+            return;
+          }
+        }
+      }
+
       const {
         config,
         numPlayers,
