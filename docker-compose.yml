@@ -12,7 +12,11 @@ services:
     ports:
       - "3004:3000"
     env_file:
-      - .env
+      # Optional (Compose >=2.24 syntax): fresh clones without .env boot with
+      # LLM keys unset (game calls fail, health still passes); local dev
+      # follows README `cp .env.sample .env`.
+      - path: .env
+        required: false
     environment:
       # Container-internal port stays 3000 regardless of .env PORT (which may
       # be 3004 for direct runs on hosts where :3000 is DuckBrain's).

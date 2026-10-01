@@ -43,6 +43,10 @@ pnpm install
 # 2. Copy the sample env and add your API key (required!)
 cp .env.sample .env
 nano .env
+
+# Note: `docker compose up` works without .env (env_file is optional); the
+# server boots but LLM-backed games need real keys copied from .env.sample.
+
 # OPENAI_API_KEY=sk-or-v1-YOUR-KEY-HERE
 # OPENAI_BASE_URL and MODEL are also required — see .env.sample for all options
 
