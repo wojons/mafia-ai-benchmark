@@ -28,9 +28,14 @@
  *     different players (MAF-GAP-042 degenerate-output crawl: 4 canned
  *     duplicate SAYS across players in a 10p game)
  *
- * ESM (packages/shared is "type": "module"). game-engine.js loads it with
- * require() (Node >= 22.12 require(esm)); run-real-game.ts and tests import
- * it directly. Types live in response-parser.d.ts.
+ * Module shape: DUAL ESM + CommonJS in one file, so BOTH consumers work on
+ * any Node (including runners with require(esm) unavailable):
+ *   - `export function` keeps ESM named imports working
+ *     (run-real-game.ts and the vitest suite import it directly).
+ *   - a trailing `module.exports =` assignment gives the file a dual CJS
+ *     shape, which Node >= 20.19/22.12 require(esm) consumes as CJS — this
+ *     is what game-engine.js's require() resolves at line 698.
+ * Types live in response-parser.d.ts.
  */
 
 // Statements that carry no information and must never be broadcast.
@@ -60,7 +65,7 @@ function extractJson(text) {
     try {
       const parsed = JSON.parse(full);
       if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) return parsed;
-    } catch (e) {
+    } catch {
       // fall through to brace-scan
     }
   }
@@ -70,7 +75,7 @@ function extractJson(text) {
   try {
     const parsed = JSON.parse(braceMatch[0]);
     if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) return parsed;
-  } catch (e) {
+  } catch {
     return null;
   }
   return null;
@@ -221,4 +226,28 @@ export function createSayQualityGate() {
   }
 
   return { check, reset };
+}
+
+// Dual CJS shape for game-engine.js:698's plain require(). Under vitest's
+// loader the file stays pure ESM (the assignment is compiled away; the named
+// exports feed the import) — the guard keeps the assignment a no-op there.
+// Under plain Node require(esm) the same assignment IS the CJS shape (the
+// engine consumes it directly).
+/* global process, module */
+const __module_shape = { clean, parseAgentResponse, createSayQualityGate };
+if (
+  typeof process !== 'undefined' &&
+  process.versions &&
+  process.versions.node &&
+  !process.env.VITEST &&
+  !process.env.NODE_TEST_CONTEXT
+) {
+  try {
+    // Only reached on plain-Node require(esm); vitest's transform strips the
+    // call, and if the scope ever lacks `module` the throw is swallowed
+    // (the ESM shape is already serving every ESM consumer).
+    module.exports = __module_shape;
+  } catch {
+    // ESM scope without CJS bindings: keep the module ESM-only.
+  }
 }
