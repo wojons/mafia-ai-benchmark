@@ -151,50 +151,52 @@ See **[specs/persona-system.md](specs/persona-system.md)** for complete document
 
 ## 🎛️ Configuration System
 
-Full control over every aspect of the game:
+The CLI has two configuration surfaces: **run-game flags** (per-game overrides) and **persistent config** (stored in `mafia.config.json`).
 
-### Player & Role Settings
+### Run-Game Flags
 
-```bash
---players, -p [n]   Total players (default: 10)
---mafia, -M [n]     Mafia count (default: auto=floor(n/4))
---doctor [n]        Doctor count (default: 1)
---sheriff [n]       Sheriff count (default: 1)
---vigilante [n]     Vigilante count (default: 1)
-```
-
-### Messaging Settings
+Pass these to `run-game` to override defaults for a single game:
 
 ```bash
---mafia-msg-per [n]   Mafia messages per player (default: 3)
---mafia-msg-max [n]   Mafia max total messages (default: 10)
---town-msg-per [n]    Town messages per player (default: 2)
---town-msg-max [n]    Town max total messages (default: 15)
-```
+pnpm --filter @mafia/cli dev -- run-game [options]
 
-### Gameplay Settings
-
-```bash
---day-rounds [n]    Day discussion rounds (default: 1)
---model [name]      AI model (default: openai/gpt-4o-mini)
-```
-
-### Management
-
-```bash
---show, -s          Display current configuration
---menu, -m          Interactive configuration menu
---reset, -r         Reset to default settings
+Options:
+  --players <n>        Number of players (default: 10)
+  --provider <name>    LLM provider (default: "openai")
+  --model <name>       LLM model (default: "openai/gpt-4o-mini")
+  --auto, --yes        Run without confirmation prompt
+  --watch              Watch game in real-time
+  --server <url>       Server base URL (default: http://localhost:3004)
+  -c, --config <path>  Configuration file path (default: "./mafia.config.json")
 ```
 
 **Example:**
 
 ```bash
-pnpm --filter @mafia/cli config --players 10 --mafia 3 --mafia-msg-per 4 --town-msg-per 3 --day-rounds 2
-pnpm --filter @mafia/cli game:run
+# 7-player game with GPT-4o, auto-start, watch live
+pnpm --filter @mafia/cli dev -- run-game --players 7 --model openai/gpt-4o --auto --watch
 ```
 
-See **[CONFIG_GUIDE.md](CONFIG_GUIDE.md)** for complete documentation.
+### Persistent Config Commands
+
+The `config` subcommand manages `mafia.config.json` (game parameters that persist across runs):
+
+```bash
+# Show current configuration
+pnpm --filter @mafia/cli run config show
+
+# Set a configuration value (arbitrary JSON key)
+pnpm --filter @mafia/cli run config set <key> <value>
+
+# Reset to default settings
+pnpm --filter @mafia/cli run config reset
+```
+
+> **Note:** `pnpm --filter @mafia/cli config ...` is intercepted by pnpm's built-in `config` command (ERR_PNPM_RECURSIVE_RUN_NO_SCRIPT), so config subcommands use the `run config ...` form (see line 230 note).
+
+Role counts (mafia/doctor/sheriff/vigilante), messaging limits, and day-rounds are configured via `config set` or directly in `mafia.config.json` — they are NOT command-line flags.
+
+See **[CONFIG_GUIDE.md](CONFIG_GUIDE.md)** for complete documentation of all configurable parameters.
 
 ## 🎯 Game Flow (Corrected)
 
