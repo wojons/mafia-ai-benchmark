@@ -156,6 +156,39 @@ export function createBenchmarkRouter(context: ServerContext): Router {
     },
   );
 
+  // Get the RUN-SCOPED benchmark report (DF-MAFIA-AI-BENCHMARK-28).
+  //
+  // The global accumulated report (/api/v1/benchmark/report) mixes every
+  // run ever recorded, so the CLI's closing verdict for a fresh 2-game run
+  // quoted 88+ lifetime games (and legacy polluted rows — DF-25). This
+  // endpoint derives the verdict from THIS run's own benchmark_games +
+  // players rows only. Available regardless of run status; the report's
+  // fields are computed live (an in-flight run shows partials).
+  router.get(
+    '/api/v1/benchmark/runs/:runId/report',
+    (req: Request, res: Response) => {
+      try {
+        const { runId } = req.params;
+        const report = benchmarkRunner.getRunReport(runId);
+        if (!report) {
+          res.status(404).json({
+            success: false,
+            error: `Benchmark run ${runId} not found`,
+          });
+          return;
+        }
+        res.json({ success: true, data: report });
+      } catch {
+        res
+          .status(500)
+          .json({
+            success: false,
+            error: 'Failed to generate benchmark run report',
+          });
+      }
+    },
+  );
+
   // Get benchmark run status + progress (alias: /api/v1/benchmark/:id)
   router.get('/api/v1/benchmark/:runId', (req: Request, res: Response) => {
     try {

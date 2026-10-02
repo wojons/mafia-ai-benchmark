@@ -428,6 +428,56 @@ const REPORT_BODY = {
   recommendations: [],
 };
 
+/**
+ * A run-scoped report body (DF-MAFIA-AI-BENCHMARK-28): ONLY the run's own
+ * 2 games. Deliberately DIFFERENT from the polluted global REPORT_BODY
+ * shape so a test asserting the run verdict cannot pass off the
+ * accumulated report as the run's own.
+ */
+const RUN_REPORT_BODY = {
+  success: true,
+  data: {
+    runId: "run-heartbeat-1",
+    status: "COMPLETED",
+    generatedAt: new Date().toISOString(),
+    summary: { totalGames: 2, completedGames: 2, validGames: 2, failedGames: 0, gamesWithWinner: 2 },
+    modelPerformance: [
+      {
+        provider: "openai",
+        model: "gpt-4o",
+        gamesPlayed: 2,
+        wins: 2,
+        losses: 0,
+        winRate: 1,
+        avgTokens: 8000,
+        avgCost: 0.004,
+      },
+      {
+        provider: "openai",
+        model: "gpt-4o-mini",
+        gamesPlayed: 2,
+        wins: 0,
+        losses: 2,
+        winRate: 0,
+        avgTokens: 9000,
+        avgCost: 0.003,
+      },
+    ],
+    pairings: [
+      {
+        id: "openai/gpt-4o-mini__vs__openai/gpt-4o",
+        modelA: "openai/gpt-4o-mini",
+        modelB: "openai/gpt-4o",
+        games: 2,
+        completed: 2,
+        aWins: 0,
+        bWins: 2,
+        unattributed: 0,
+      },
+    ],
+  },
+};
+
 describe("benchmark single-model guard (MAF-GAP-047)", () => {
   it("rejects with a pairwise (head-to-head) explanation when only 1 model is given", async () => {
     const cmd = new BenchmarkCommand();
@@ -465,7 +515,9 @@ describe("benchmark progress heartbeat (MAF-GAP-047)", () => {
       .mockResolvedValueOnce(jsonResponse(statusBody("RUNNING", 0)))
       .mockResolvedValueOnce(jsonResponse(statusBody("RUNNING", 0)))
       .mockResolvedValueOnce(jsonResponse(statusBody("COMPLETED", 2)))
-      .mockResolvedValueOnce(jsonResponse(REPORT_BODY));
+      // DF-MAFIA-AI-BENCHMARK-28: after COMPLETED the CLI fetches the
+      // RUN-SCOPED report first; the mock serves it here.
+      .mockResolvedValueOnce(jsonResponse(RUN_REPORT_BODY));
     vi.stubGlobal("fetch", fetchMock);
     vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout", "Date"] });
 
@@ -494,7 +546,170 @@ describe("benchmark progress heartbeat (MAF-GAP-047)", () => {
   }, 10000);
 });
 
-// --- MAF-GAP-059: report presentation (mocked report, no live server) ---
+// --- DF-MAFIA-AI-BENCHMARK-28: the verdict is about YOUR run ---
+
+describe("benchmark verdict is run-scoped (DF-MAFIA-AI-BENCHMARK-28)", () => {
+  afterEach(() => {
+    vi.restoreAllMocks();
+    vi.useRealTimers();
+  });
+
+  it("derives the winner banner from the RUN's own 2 games, not the accumulated report", async () => {
+    const logSpy = vi.spyOn(console, "log").mockImplementation(() => {});
+
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(jsonResponse(START_BODY))
+      .mockResolvedValueOnce(jsonResponse(statusBody("COMPLETED", 2)))
+      .mockResolvedValueOnce(jsonResponse(RUN_REPORT_BODY));
+    vi.stubGlobal("fetch", fetchMock);
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout", "Date"] });
+
+    const cmd = new BenchmarkCommand();
+    const runPromise = runBenchmarkOf(cmd)("http://localhost:3004", {
+      games: "1",
+      models: "openai/gpt-4o-mini,openai/gpt-4o",
+    });
+    for (let i = 0; i < 6; i++) {
+      await vi.advanceTimersByTimeAsync(2000);
+    }
+    const report = (await runPromise) as Record<string, unknown>;
+
+    // The RETURNED report is the run-scoped one (marked + shaped so).
+    expect((report as { runScoped?: boolean }).runScoped).toBe(true);
+    expect((report as { runId?: string }).runId).toBe("run-heartbeat-1");
+    // 2 run games — NOT the accumulated table's totals.
+    expect((report as { summary?: { totalGames?: number } }).summary?.totalGames).toBe(2);
+    // The run-scoped fetch was made (display rendering is covered by the
+    // presentation describe below — runBenchmarkOf returns the report, it
+    // does not render it).
+    const printedRunScoped = logSpy.mock.calls.map((args) => args.join(" ")).join("\n");
+    expect(printedRunScoped).toContain("Fetch run-scoped report".replace("Fetch", "Fetching"));
+    expect(printedRunScoped).toContain("/api/v1/benchmark/runs/run-heartbeat-1/report");
+  }, 10000);
+
+  it("never calls the accumulated report endpoint while the run-scoped one serves", async () => {
+    vi.spyOn(console, "log").mockImplementation(() => {});
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(jsonResponse(START_BODY))
+      .mockResolvedValueOnce(jsonResponse(statusBody("COMPLETED", 2)))
+      .mockResolvedValueOnce(jsonResponse(RUN_REPORT_BODY));
+    vi.stubGlobal("fetch", fetchMock);
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout", "Date"] });
+
+    const cmd = new BenchmarkCommand();
+    const runPromise = runBenchmarkOf(cmd)("http://localhost:3004", {
+      games: "1",
+      models: "openai/gpt-4o-mini,openai/gpt-4o",
+    });
+    for (let i = 0; i < 6; i++) {
+      await vi.advanceTimersByTimeAsync(2000);
+    }
+    await runPromise;
+
+    const calledUrls = fetchMock.mock.calls.map((c) => String(c[0]));
+    // Exactly ONE report fetch, and it is the RUN-SCOPED url — the
+    // polluted accumulated endpoint (/api/v1/benchmark/report) is never
+    // consulted on the happy path.
+    const reportCalls = calledUrls.filter((u) => u.includes("/report"));
+    expect(reportCalls).toHaveLength(1);
+    expect(reportCalls[0]).toContain("/api/v1/benchmark/runs/run-heartbeat-1/report");
+    expect(calledUrls.some((u) => u.endsWith("/api/v1/benchmark/report"))).toBe(false);
+  }, 10000);
+
+  it("falls back LOUDLY to the accumulated report only on run-scoped 404 (older server)", async () => {
+    const logSpy = vi.spyOn(console, "log").mockImplementation(() => {});
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(jsonResponse(START_BODY))
+      .mockResolvedValueOnce(jsonResponse(statusBody("COMPLETED", 2)))
+      .mockResolvedValueOnce(jsonResponse({ success: false, error: "Benchmark run run-heartbeat-1 not found" }, 404))
+      .mockResolvedValueOnce(jsonResponse(REPORT_BODY));
+    vi.stubGlobal("fetch", fetchMock);
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout", "Date"] });
+
+    const cmd = new BenchmarkCommand();
+    const runPromise = runBenchmarkOf(cmd)("http://localhost:3004", {
+      games: "1",
+      models: "openai/gpt-4o-mini,openai/gpt-4o",
+    });
+    for (let i = 0; i < 8; i++) {
+      await vi.advanceTimersByTimeAsync(2000);
+    }
+    const report = (await runPromise) as Record<string, unknown>;
+
+    // The fallback is announced, not silent — the operator knows the
+    // verdict quotes accumulated data, not this run's.
+    const printed = logSpy.mock.calls.map((args) => args.join(" ")).join("\n");
+    expect(printed).toContain("Run-scoped report unavailable");
+    expect(printed).toContain("ACCUMULATED");
+    expect((report as { runScoped?: boolean }).runScoped).toBeUndefined();
+    expect((report as { summary?: { totalGames?: number } }).summary?.totalGames).toBe(
+      (REPORT_BODY.summary as { totalGames?: number }).totalGames,
+    );
+  }, 10000);
+});
+
+// --- DF-MAFIA-AI-BENCHMARK-28: presentation of run-scoped reports ---
+
+describe("run-scoped report presentation (DF-MAFIA-AI-BENCHMARK-28)", () => {
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  it("prints the per-model table with explicit losses (mini 2 real losses)", () => {
+    const logSpy = vi.spyOn(console, "log").mockImplementation(() => {});
+    displayResultsOf(new BenchmarkCommand())({ ...RUN_REPORT_BODY.data, runScoped: true });
+
+    const printed = logSpy.mock.calls.map((args) => args.join(" ")).join("\n");
+    // The run's own losses columns, straight from the server rows.
+    expect(printed).toMatch(/gpt-4o-mini\s+2\s+0\s+2\b/);
+    expect(printed).toMatch(/openai\/gpt-4o\s+2\s+2\s+0\b/);
+    // Head-to-head block with the per-pairing verdict + the run-scoped
+    // winner banner citing the run's own sample (2 games, 100% — NOT the
+    // accumulated report's 54/88-game headline).
+    expect(printed).toContain("⚔️  Head-to-Head (this run):");
+    expect(printed).toContain("openai/gpt-4o-mini__vs__openai/gpt-4o");
+    expect(printed).toContain("🏆 Winner: openai/gpt-4o (100.0% win rate, 2 games)");
+    expect(printed).not.toContain("no decided games");
+  });
+
+  it("a run with NO attributable games prints no winner instead of crowning a first row", () => {
+    const logSpy = vi.spyOn(console, "log").mockImplementation(() => {});
+    const allZero = {
+      runScoped: true,
+      summary: { totalGames: 2, completedGames: 2, validGames: 2, failedGames: 0, gamesWithWinner: 0 },
+      modelPerformance: [
+        { provider: "openai", model: "gpt-4o-mini", gamesPlayed: 2, wins: 0, losses: null, winRate: 0, avgTokens: 0, avgCost: 0 },
+        { provider: "openai", model: "gpt-4o", gamesPlayed: 2, wins: 0, losses: null, winRate: 0, avgTokens: 0, avgCost: 0 },
+      ],
+      pairings: [
+        { id: "p1", modelA: "openai/gpt-4o-mini", modelB: "openai/gpt-4o", games: 2, completed: 2, aWins: 0, bWins: 0, unattributed: 2 },
+      ],
+    };
+    displayResultsOf(new BenchmarkCommand())(allZero);
+
+    const printed = logSpy.mock.calls.map((args) => args.join(" ")).join("\n");
+    // The OLD reduce would crown gpt-4o-mini (first row) at 0.0% — the
+    // honest verdict names no winner.
+    expect(printed).toContain("Winner: none");
+    expect(printed).not.toMatch(/🏆 Winner: openai\//);
+    expect(printed).toContain("no decided games");
+    expect(printed).toContain("2 unattributed");
+  });
+
+  it("the accumulated (--quick) path keeps its exact legacy banner and derived losses", () => {
+    const logSpy = vi.spyOn(console, "log").mockImplementation(() => {});
+    displayResultsOf(new BenchmarkCommand())(GAP059_REPORT);
+
+    const printed = logSpy.mock.calls.map((args) => args.join(" ")).join("\n");
+    expect(printed).toContain("🏆 Winner: openai/gpt-4o (61.1% win rate, 54 games)");
+    // The unattributable legacy floor keeps its n/a (wins 0 + no explicit
+    // losses field on accumulated rows -> derived shape preserved).
+    expect(printed).toMatch(/CUSTOM\/openai\s+\d+\s+0\s+n\/a/);
+  });
+});
 
 type DisplayResultsFn = (report: unknown) => void;
 
