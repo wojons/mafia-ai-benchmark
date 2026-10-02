@@ -14,6 +14,7 @@
   },
   "scripts": {
     "dev": "turbo run dev",
+    "dev:web": "sh -c '[ \"$1\" = \"--\" ] && shift; exec pnpm --filter @mafia/web dev \"$@\"' dev:web",
     "build": "turbo run build",
     "test": "turbo run test:run",
     "test:counts": "node scripts/sync-test-counts.mjs",

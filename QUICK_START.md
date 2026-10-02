@@ -76,6 +76,9 @@ pnpm run server
 
 # Start the web UI (on port 5174)
 pnpm run web
+
+# Or start it on a custom port (vite accepts --port):
+pnpm run dev:web -- --port 5199
 ```
 
 Open http://localhost:5174 to watch games in real time.
@@ -141,6 +144,7 @@ The game will:
 | `pnpm install`                             | Install all dependencies       |
 | `pnpm run server`                          | Start the game server          |
 | `pnpm run web`                             | Start the web dashboard        |
+| `pnpm run dev:web -- --port N`             | Start web dashboard on port N  |
 | `pnpm test`                                | Run all tests                  |
 | `pnpm run build`                           | Build all workspaces           |
 
