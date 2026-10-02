@@ -1,0 +1,29 @@
+{
+ "scheduler_tick_id": "mafia-ai-benchmark-foreman-2026-10-02-13-29-37",
+ "board_tick": 219,
+ "base_head": "dd316ff9a44a1cb6c06353ef3ab783bbd2699a75",
+ "wave_budget": 4,
+ "tasks": [
+  {
+   "id": "MAF-REV-004",
+   "brief": "server token auth",
+   "cluster": "apps/server/src/middleware,index.ts,tests"
+  },
+  {
+   "id": "DF-MAFIA-AI-BENCHMARK-28",
+   "brief": "benchmark verdict per-run",
+   "cluster": "apps/cli benchmark.ts + server benchmark_runs"
+  },
+  {
+   "id": "DOC-5",
+   "brief": "specs api-specs rate-limit/cors realign",
+   "cluster": "specs/api-specs.md"
+  },
+  {
+   "id": "QA-MAFIA-AI-BENCHMARK-11",
+   "brief": "dev --port shape",
+   "cluster": "docs + package.json/turbo.json"
+  }
+ ],
+ "worker_model": "glm-5.3-flash@ollama-cloud"
+}
