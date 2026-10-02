@@ -1,5 +1,7 @@
 # API Specifications
 
+OpenAPI spec: `apps/server/openapi.yaml` (generated from the live route table, MAF-REV-005).
+
 ## Overview
 
 The backend server exposes both REST endpoints for control operations and WebSocket endpoints for real-time event streaming.

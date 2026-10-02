@@ -1,0 +1,2115 @@
+# OpenAPI 3.0 spec for the Mafia AI Benchmark server HTTP API (apps/server).
+#
+# Generated from the live route table (task MAF-REV-005):
+#   apps/server/src/index.ts (health, API info, 404/error fallbacks)
+#   apps/server/src/routes/{games,models,stats,benchmark,agents}.ts
+#
+# Shapes follow specs/api-specs.md (realigned to the live API at MAF-GAP-073)
+# with the route code as the tiebreaker. 43 operations across 41 paths.
+openapi: 3.0.3
+info:
+  title: Mafia AI Benchmark API
+  version: 1.0.0
+  description: |
+    Control-plane REST API for the Mafia AI Benchmark server.
+
+    All JSON responses use a `{ success, data, ... }` envelope on success and
+    `{ success: false, error }` on failure. `error` is a plain string on route
+    errors and an object `{ code, message }` on the global 404/500 fallback
+    handlers (apps/server/src/index.ts).
+
+    Conventions realigned to the live API (MAF-GAP-073):
+    - `GET /api/v1/benchmark/report` IS wrapped in the `{ success, data }`
+      envelope (the route wraps it; an earlier spec revision claimed otherwise).
+    - Epoch-millisecond numbers (not ISO strings) for dashboard/analytics
+      `recentGames` timestamps and benchmark run `createdAt`/`completedAt`.
+    - No rate limiting exists; CORS allows all origins with package defaults.
+servers:
+  - url: http://localhost:3004
+    description: Local server (docker-compose exposes API on :3004)
+tags:
+  - name: Health
+  - name: Info
+  - name: Games
+  - name: Game Actions
+  - name: Game Data
+  - name: Legacy Games
+  - name: Models
+  - name: Stats
+  - name: Benchmark
+  - name: Agents
+
+paths:
+  /health:
+    get:
+      tags: [Health]
+      summary: Liveness probe
+      responses:
+        '200':
+          description: Server health snapshot
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HealthStatus'
+  /api/v1/health:
+    get:
+      tags: [Health]
+      summary: Liveness probe (API-v1 alias)
+      responses:
+        '200':
+          description: Same payload as /health
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HealthStatus'
+  /api/v1:
+    get:
+      tags: [Info]
+      summary: API info
+      responses:
+        '200':
+          description: API name, version and a hint string listing the endpoint groups
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiInfo'
+
+  /api/v1/games:
+    get:
+      tags: [Games]
+      summary: List games (DB + legacy, deduped by id)
+      parameters:
+        - name: status
+          in: query
+          required: false
+          description: Canonical GameStatus filter; any other value is rejected with 400
+          schema:
+            $ref: '#/components/schemas/GameStatus'
+        - name: limit
+          in: query
+          required: false
+          description: Slice applied to the merged (DB + legacy) result. Default 50.
+          schema:
+            type: integer
+            default: 50
+        - name: offset
+          in: query
+          required: false
+          description: Offset honored for DB rows. Default 0.
+          schema:
+            type: integer
+            default: 0
+      responses:
+        '200':
+          description: Summary rows — `players` is a COUNT, not an array; no phase/winner fields
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/SuccessEnvelope'
+                  - type: object
+                    properties:
+                      data:
+                        type: array
+                        items:
+                          $ref: '#/components/schemas/GameSummary'
+                      count:
+                        type: integer
+        '400':
+          $ref: '#/components/responses/RouteError'
+        '500':
+          $ref: '#/components/responses/RouteError'
+    post:
+      tags: [Games]
+      summary: Create game (legacy engine by default; body validated up front)
+      description: |
+        Legacy path answers 201 with an acknowledgment `{ gameId, status: "starting", config }`;
+        the full game is read afterwards via GET /api/v1/games/{gameId}. Validation
+        (MAF-REV-001) rejects an invalid body with 400 BEFORE any engine work.
+        When the legacy adapter is unavailable the standard engine answers a full
+        `{ gameId, status, config }` object instead.
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateGameRequest'
+      responses:
+        '201':
+          description: Game starting (legacy) or created (standard engine fallback)
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/SuccessEnvelope'
+                  - type: object
+                    properties:
+                      data:
+                        type: object
+                        properties:
+                          gameId:
+                            type: string
+                          status:
+                            description: '"starting" on the legacy path; the created FSM status on the fallback path'
+                            type: string
+                          config:
+                            type: object
+                            additionalProperties: true
+        '400':
+          description: Invalid numPlayers (must be integer 5-15), engineType (legacy|native) or roleModels entry
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RouteErrorEnvelope'
+        '500':
+          $ref: '#/components/responses/RouteError'
+
+  /api/v1/games/{gameId}:
+    get:
+      tags: [Games]
+      summary: Get full game (players enriched with usage attribution on completed games)
+      parameters:
+        - $ref: '#/components/parameters/GameId'
+      responses:
+        '200':
+          description: Full game object; `winner` only when decided; `currentState` phase vocabulary documented in specs/api-specs.md
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/SuccessEnvelope'
+                  - type: object
+                    properties:
+                      data:
+                        $ref: '#/components/schemas/GameDetail'
+        '404':
+          $ref: '#/components/responses/GameNotFound'
+        '500':
+          $ref: '#/components/responses/RouteError'
+
+  /api/v1/games/{gameId}/events:
+    get:
+      tags: [Game Data]
+      summary: Get game events (REST JSON, or SSE stream with Accept text/event-stream)
+      description: |
+        REST JSON returns the full event objects under `data` with a `count`.
+        When the request carries `Accept: text/event-stream` the same route
+        switches to an SSE stream: an initial
+        `{"type":"connected","gameId":...,"timestamp":...}` frame, then one
+        `data: <event JSON>` frame per published event, `: keepalive` comments
+        every 30s. Requires the game to exist in the repository or the legacy
+        adapter (404 otherwise).
+      parameters:
+        - $ref: '#/components/parameters/GameId'
+        - name: visibility
+          in: query
+          required: false
+          description: Event filter (default "all" — no filter). Public-only fallback applies when admin auth is enforced (MAF-REV-004). Ignored for SSE.
+          schema:
+            type: string
+            enum: [all, public, private, admin]
+            default: all
+      responses:
+        '200':
+          description: Event list, or an SSE text/event-stream when requested
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/SuccessEnvelope'
+                  - type: object
+                    properties:
+                      data:
+                        type: array
+                        items:
+                          $ref: '#/components/schemas/GameEvent'
+                      count:
+                        type: integer
+            text/event-stream:
+              schema:
+                type: string
+                description: SSE frames (connected event, per-event data frames, keepalive comments)
+        '404':
+          $ref: '#/components/responses/GameNotFound'
+        '500':
+          $ref: '#/components/responses/RouteError'
+  /api/v1/games/{gameId}/replay:
+    get:
+      tags: [Game Data]
+      summary: Full event timeline sorted chronologically (oldest first)
+      parameters:
+        - $ref: '#/components/parameters/GameId'
+      responses:
+        '200':
+          description: Same full event objects as the events endpoint, sorted
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/SuccessEnvelope'
+                  - type: object
+                    properties:
+                      data:
+                        type: array
+                        items:
+                          $ref: '#/components/schemas/GameEvent'
+                      count:
+                        type: integer
+        '404':
+          $ref: '#/components/responses/GameNotFound'
+        '500':
+          $ref: '#/components/responses/RouteError'
+  /api/v1/games/{gameId}/sse-status:
+    get:
+      tags: [Game Data]
+      summary: Live SSE subscriber count for a game
+      parameters:
+        - $ref: '#/components/parameters/GameId'
+      responses:
+        '200':
+          description: Connection snapshot (this endpoint never 404s)
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/SuccessEnvelope'
+                  - type: object
+                    properties:
+                      data:
+                        type: object
+                        properties:
+                          gameId:
+                            type: string
+                          activeConnections:
+                            type: integer
+                          isStreaming:
+                            type: boolean
+  /api/v1/games/{gameId}/players:
+    get:
+      tags: [Game Data]
+      summary: Persisted player rows (slimmer than the detail endpoint's players[])
+      parameters:
+        - $ref: '#/components/parameters/GameId'
+      responses:
+        '200':
+          description: Player rows without usage attribution
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/SuccessEnvelope'
+                  - type: object
+                    properties:
+                      data:
+                        type: array
+                        items:
+                          $ref: '#/components/schemas/Player'
+        '500':
+          $ref: '#/components/responses/RouteError'
+
+  /api/v1/games/{gameId}/join:
+    post:
+      tags: [Game Actions]
+      summary: Join game
+      parameters:
+        - $ref: '#/components/parameters/GameId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                playerName:
+                  type: string
+                agentConfig:
+                  type: object
+                  additionalProperties: true
+      responses:
+        '201':
+          description: Event id of the JOINED event (or null)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/EventIdEnvelope'
+        '400':
+          $ref: '#/components/responses/EngineError'
+        '500':
+          $ref: '#/components/responses/RouteError'
+  /api/v1/games/{gameId}/start:
+    post:
+      tags: [Game Actions]
+      summary: Start game
+      parameters:
+        - $ref: '#/components/parameters/GameId'
+      responses:
+        '200':
+          description: Event id of the GAME_STARTED event (or null)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/EventIdEnvelope'
+        '400':
+          $ref: '#/components/responses/EngineError'
+        '500':
+          $ref: '#/components/responses/RouteError'
+  /api/v1/games/{gameId}/state:
+    get:
+      tags: [Game Actions]
+      summary: In-memory engine FSM state (standard-engine games)
+      parameters:
+        - $ref: '#/components/parameters/GameId'
+      responses:
+        '200':
+          description: The GameState object (phase/dayNumber/turnNumber/timeRemaining/activePlayers/eliminatedPlayers/votes/nightActions)
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/SuccessEnvelope'
+                  - type: object
+                    properties:
+                      data:
+                        type: object
+                        additionalProperties: true
+        '404':
+          $ref: '#/components/responses/GameNotFound'
+        '500':
+          $ref: '#/components/responses/RouteError'
+  /api/v1/games/{gameId}/night-action:
+    post:
+      tags: [Game Actions]
+      summary: Submit night action (records a PRIVATE NightActionSubmitted event)
+      parameters:
+        - $ref: '#/components/parameters/GameId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                playerId:
+                  type: string
+                action:
+                  type: string
+                  description: 'MafiaKill | DoctorProtect | SheriffInvestigate | VigilanteShoot (NightActionType; no server-side vocabulary validation)'
+                targetId:
+                  type: string
+      responses:
+        '200':
+          description: Event id of the night-action event (or null)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/EventIdEnvelope'
+        '400':
+          $ref: '#/components/responses/EngineError'
+        '500':
+          $ref: '#/components/responses/RouteError'
+  /api/v1/games/{gameId}/vote:
+    post:
+      tags: [Game Actions]
+      summary: Submit vote (records a PUBLIC VoteCast event)
+      parameters:
+        - $ref: '#/components/parameters/GameId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                voterId:
+                  type: string
+                targetId:
+                  type: string
+      responses:
+        '200':
+          description: Event id of the vote event (or null)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/EventIdEnvelope'
+        '400':
+          $ref: '#/components/responses/EngineError'
+        '500':
+          $ref: '#/components/responses/RouteError'
+  /api/v1/games/{gameId}/accusation:
+    post:
+      tags: [Game Actions]
+      summary: Make accusation (records a PUBLIC AccusationMade event)
+      parameters:
+        - $ref: '#/components/parameters/GameId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                accuserId:
+                  type: string
+                targetId:
+                  type: string
+                accusation:
+                  type: string
+                evidence:
+                  type: string
+      responses:
+        '200':
+          description: Event id of the accusation event (or null)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/EventIdEnvelope'
+        '400':
+          $ref: '#/components/responses/EngineError'
+        '500':
+          $ref: '#/components/responses/RouteError'
+  /api/v1/games/{gameId}/claim-role:
+    post:
+      tags: [Game Actions]
+      summary: Claim role (records a PUBLIC RoleClaimed event; claim recorded verbatim, not validated)
+      parameters:
+        - $ref: '#/components/parameters/GameId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                playerId:
+                  type: string
+                role:
+                  $ref: '#/components/schemas/RoleType'
+      responses:
+        '200':
+          description: Event id of the claim event (or null)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/EventIdEnvelope'
+        '400':
+          $ref: '#/components/responses/EngineError'
+        '500':
+          $ref: '#/components/responses/RouteError'
+
+  /api/v1/games/{gameId}/players/{playerIndex}/model:
+    post:
+      tags: [Models]
+      summary: Set model for a specific player in a game
+      description: Unknown games are refused with 404 Game not found plus the id
+      parameters:
+        - $ref: '#/components/parameters/GameId'
+        - name: playerIndex
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ModelAssignment'
+      responses:
+        '200':
+          description: Saved assignment row
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/SuccessEnvelope'
+                  - type: object
+                    properties:
+                      data:
+                        $ref: '#/components/schemas/ModelAssignmentRow'
+        '400':
+          description: provider and model are required
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RouteErrorEnvelope'
+        '404':
+          description: Game not found, with the id in the message
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RouteErrorEnvelope'
+        '500':
+          $ref: '#/components/responses/RouteError'
+  /api/v1/games/{gameId}/role/{role}/model:
+    post:
+      tags: [Models]
+      summary: Set model for all players with a specific role
+      description: Same body/response as the per-player route; `data` carries `role` instead of `playerIndex`.
+      parameters:
+        - $ref: '#/components/parameters/GameId'
+        - name: role
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ModelAssignment'
+      responses:
+        '200':
+          description: Saved assignment row (with role)
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/SuccessEnvelope'
+                  - type: object
+                    properties:
+                      data:
+                        type: object
+                        allOf:
+                          - $ref: '#/components/schemas/ModelAssignmentRow'
+                          - type: object
+                            properties:
+                              role:
+                                type: string
+        '400':
+          $ref: '#/components/responses/RouteError'
+        '404':
+          $ref: '#/components/responses/RouteError'
+        '500':
+          $ref: '#/components/responses/RouteError'
+  /api/v1/games/{gameId}/models/bulk:
+    post:
+      tags: [Models]
+      summary: Bulk update player models
+      parameters:
+        - $ref: '#/components/parameters/GameId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [assignments]
+              properties:
+                assignments:
+                  type: array
+                  items:
+                    type: object
+                    properties:
+                      playerIndex:
+                        type: integer
+                      role:
+                        type: string
+                        nullable: true
+                      provider:
+                        type: string
+                      model:
+                        type: string
+      responses:
+        '200':
+          description: Per-row results are status saved or failed with per-row error
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/SuccessEnvelope'
+                  - type: object
+                    properties:
+                      data:
+                        type: object
+                        properties:
+                          message:
+                            type: string
+                          results:
+                            type: array
+                            items:
+                              type: object
+                              properties:
+                                status:
+                                  type: string
+                                  enum: [saved, failed]
+                                id:
+                                  type: integer
+                                playerIndex:
+                                  type: integer
+                                role:
+                                  type: string
+                                  nullable: true
+                                provider:
+                                  type: string
+                                model:
+                                  type: string
+                                error:
+                                  type: string
+        '400':
+          description: assignments array is required
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RouteErrorEnvelope'
+        '404':
+          $ref: '#/components/responses/RouteError'
+        '500':
+          $ref: '#/components/responses/RouteError'
+
+  /api/v1/legacy-games:
+    get:
+      tags: [Legacy Games]
+      summary: List active legacy games (the legacy status vocabulary, NOT GameStatus)
+      responses:
+        '200':
+          description: One row per game still tracked by the legacy adapter
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/SuccessEnvelope'
+                  - type: object
+                    properties:
+                      data:
+                        type: array
+                        items:
+                          type: object
+                          properties:
+                            gameId:
+                              type: string
+                            status:
+                              type: string
+                              nullable: true
+                              description: Legacy vocabulary, e.g. RUNNING / COMPLETED
+                            eventCount:
+                              type: integer
+                              nullable: true
+                            startedAt:
+                              type: string
+                              nullable: true
+                            error:
+                              type: string
+                              nullable: true
+        '503':
+          description: Legacy engine not available
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RouteErrorEnvelope'
+  /api/v1/legacy-games/{gameId}/stop:
+    post:
+      tags: [Legacy Games]
+      summary: Stop a legacy game
+      parameters:
+        - $ref: '#/components/parameters/GameId'
+      responses:
+        '200':
+          description: The success boolean mirrors the adapter's stop result
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/SuccessEnvelope'
+                  - type: object
+                    properties:
+                      data:
+                        type: object
+                        properties:
+                          gameId:
+                            type: string
+                          stopped:
+                            type: boolean
+        '503':
+          description: Legacy engine not available
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RouteErrorEnvelope'
+
+  /api/v1/models:
+    get:
+      tags: [Models]
+      summary: List available models from the providers catalog
+      parameters:
+        - name: provider
+          in: query
+          required: false
+          description: Filter to a single provider (case-sensitive, e.g. DEEPSEEK)
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Provider-filtered rows (with count) or the full providers+models catalog
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/SuccessEnvelope'
+                  - type: object
+                    properties:
+                      data:
+                        oneOf:
+                          - type: array
+                            description: Provider filter present — cached model rows
+                            items:
+                              type: object
+                              additionalProperties: true
+                          - type: object
+                            description: No filter — providers list + per-provider models (up to 20 each)
+                            properties:
+                              providers:
+                                type: array
+                                items:
+                                  type: string
+                              models:
+                                type: array
+                                items:
+                                  type: object
+                                  properties:
+                                    provider:
+                                      type: string
+                                    modelId:
+                                      type: string
+                                    displayName:
+                                      type: string
+                              totalCached:
+                                type: integer
+                              cacheAge:
+                                type: number
+                                description: Metadata cache age in seconds
+                      count:
+                        type: integer
+                        description: Present only when the provider filter is used
+        '500':
+          $ref: '#/components/responses/RouteError'
+  /api/v1/models/pricing:
+    get:
+      tags: [Models]
+      summary: Model pricing (specific model, or a cache overview + hint)
+      parameters:
+        - name: model
+          in: query
+          required: false
+          description: Provider-prefixed model string, e.g. openai/gpt-4o-mini
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Per-model pricing (with noPricingMarker sentinel) or cache overview
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/SuccessEnvelope'
+                  - type: object
+                    properties:
+                      data:
+                        oneOf:
+                          - type: object
+                            description: Model given, with pricing fields plus noPricingMarker
+                            properties:
+                              modelId:
+                                type: string
+                              noPricingMarker:
+                                type: number
+                            additionalProperties: true
+                          - type: object
+                            description: no model — hint + cache stats
+                            properties:
+                              message:
+                                type: string
+                              cachedModels:
+                                type: integer
+                              cacheAge:
+                                type: number
+                              noPricingMarker:
+                                type: number
+        '500':
+          $ref: '#/components/responses/RouteError'
+  /api/v1/models/calculate-cost:
+    post:
+      tags: [Models]
+      summary: Calculate cost for a request
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [modelId, inputTokens, outputTokens]
+              properties:
+                modelId:
+                  type: string
+                inputTokens:
+                  type: integer
+                outputTokens:
+                  type: integer
+      responses:
+        '200':
+          description: Calculated cost result
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/SuccessEnvelope'
+                  - type: object
+                    properties:
+                      data:
+                        type: object
+                        additionalProperties: true
+        '400':
+          description: modelId, inputTokens, and outputTokens are required
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RouteErrorEnvelope'
+        '500':
+          $ref: '#/components/responses/RouteError'
+
+  /api/v1/stats:
+    get:
+      tags: [Stats]
+      summary: Aggregated game statistics
+      responses:
+        '200':
+          description: Same source as the benchmark report summary; carries degenerateGames on current builds
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/SuccessEnvelope'
+                  - type: object
+                    properties:
+                      data:
+                        $ref: '#/components/schemas/GameStats'
+        '500':
+          $ref: '#/components/responses/RouteError'
+  /api/v1/stats/models:
+    get:
+      tags: [Stats]
+      summary: Per-model comparison rows
+      responses:
+        '200':
+          description: Same row shape as benchmark report modelPerformance[]
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/SuccessEnvelope'
+                  - type: object
+                    properties:
+                      data:
+                        type: array
+                        items:
+                          $ref: '#/components/schemas/ModelPerformance'
+        '500':
+          $ref: '#/components/responses/RouteError'
+  /api/v1/stats/matchups:
+    get:
+      tags: [Stats]
+      summary: Head-to-head matchup rows (top 20 by games played)
+      responses:
+        '200':
+          description: From the model_matchups table; [] when nothing recorded
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/SuccessEnvelope'
+                  - type: object
+                    properties:
+                      data:
+                        type: array
+                        items:
+                          $ref: '#/components/schemas/MatchupRow'
+        '500':
+          $ref: '#/components/responses/RouteError'
+  /api/v1/dashboard:
+    get:
+      tags: [Stats]
+      summary: Dashboard aggregates
+      responses:
+        '200':
+          description: totals/statusBreakdown/wins/avgDuration + 10 most recent games with EPOCH-MILLIS createdAt/endedAt
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/SuccessEnvelope'
+                  - type: object
+                    properties:
+                      data:
+                        type: object
+                        properties:
+                          totals:
+                            type: object
+                            properties:
+                              total:
+                                type: integer
+                              active:
+                                type: integer
+                              completed:
+                                type: integer
+                          statusBreakdown:
+                            type: object
+                            properties:
+                              ENDED:
+                                type: integer
+                              IN_PROGRESS:
+                                type: integer
+                              CANCELLED:
+                                type: integer
+                                description: Always 0
+                          wins:
+                            type: object
+                            properties:
+                              mafia:
+                                type: integer
+                              town:
+                                type: integer
+                          avgDuration:
+                            type: number
+                          recentGames:
+                            type: array
+                            items:
+                              type: object
+                              properties:
+                                id:
+                                  type: string
+                                status:
+                                  $ref: '#/components/schemas/GameStatus'
+                                createdAt:
+                                  type: integer
+                                endedAt:
+                                  type: integer
+                                  nullable: true
+        '500':
+          $ref: '#/components/responses/RouteError'
+  /api/v1/analytics:
+    get:
+      tags: [Stats]
+      summary: Analytics aggregates
+      responses:
+        '200':
+          description: totals (events/agents currently always 0), eventBreakdown, 50-game timeline, top-10 model/agent performance
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/SuccessEnvelope'
+                  - type: object
+                    properties:
+                      data:
+                        type: object
+                        properties:
+                          totals:
+                            type: object
+                            properties:
+                              games:
+                                type: integer
+                              events:
+                                type: integer
+                              agents:
+                                type: integer
+                              models:
+                                type: integer
+                          eventBreakdown:
+                            type: object
+                            additionalProperties: true
+                          gameTimeline:
+                            type: array
+                            items:
+                              type: object
+                              properties:
+                                id:
+                                  type: string
+                                status:
+                                  $ref: '#/components/schemas/GameStatus'
+                                players:
+                                  type: integer
+                                createdAt:
+                                  type: integer
+                          performance:
+                            type: object
+                            properties:
+                              models:
+                                type: array
+                                items:
+                                  $ref: '#/components/schemas/ModelPerformance'
+                              agents:
+                                type: array
+                                items:
+                                  $ref: '#/components/schemas/AgentStat'
+        '500':
+          $ref: '#/components/responses/RouteError'
+
+  /api/v1/benchmark:
+    post:
+      tags: [Benchmark]
+      summary: Start a benchmark run
+      description: 'Invalid config (fewer than 2 unique models, etc.) surfaces as 500 "Failed to start benchmark: <reason>"'
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                config:
+                  type: object
+                  properties:
+                    models:
+                      type: array
+                      minItems: 2
+                      description: At least 2 unique provider-prefixed model strings (required inside config)
+                      items:
+                        type: string
+                    gamesPerPairing:
+                      type: integer
+                      description: Positive integer (floored). Default 2.
+                    numPlayers:
+                      type: integer
+                      description: '>= 5 (floored). Default 10.'
+                    temperature:
+                      type: number
+                      description: Default 0.7
+      responses:
+        '201':
+          description: Run started
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/SuccessEnvelope'
+                  - type: object
+                    properties:
+                      data:
+                        type: object
+                        properties:
+                          runId:
+                            type: string
+                          totalGames:
+                            type: integer
+                          pairings:
+                            type: array
+                            items:
+                              type: object
+                              properties:
+                                id:
+                                  type: string
+                                modelA:
+                                  type: string
+                                modelB:
+                                  type: string
+                                games:
+                                  type: integer
+                          message:
+                            type: string
+        '500':
+          $ref: '#/components/responses/RouteError'
+  /api/v1/benchmark/report:
+    get:
+      tags: [Benchmark]
+      summary: Global accumulated benchmark report (wrapped in the success/data envelope)
+      description: |
+        The report object — { generatedAt, summary, modelPerformance, agentStats,
+        recommendations } — lives under `data` (the route wraps it; an earlier
+        revision of specs/api-specs.md claimed otherwise, see MAF-GAP-073).
+      parameters:
+        - name: gameId
+          in: query
+          required: false
+          description: Include a per-game detail block for the given game
+          schema:
+            type: string
+        - name: format
+          in: query
+          required: false
+          schema:
+            type: string
+            enum: [json, csv]
+            default: json
+      responses:
+        '200':
+          description: Report JSON or CSV text
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/SuccessEnvelope'
+                  - type: object
+                    properties:
+                      data:
+                        $ref: '#/components/schemas/BenchmarkReport'
+            text/csv:
+              schema:
+                type: string
+        '500':
+          $ref: '#/components/responses/RouteError'
+  /api/v1/benchmark/export:
+    get:
+      tags: [Benchmark]
+      summary: Comprehensive export report (per-game rows with players/events/costBreakdown)
+      parameters:
+        - name: format
+          in: query
+          required: false
+          schema:
+            type: string
+            enum: [json, csv]
+            default: json
+        - name: games
+          in: query
+          required: false
+          description: Cap on the number of games included in data.games (default 50 when omitted)
+          schema:
+            type: integer
+      responses:
+        '200':
+          description: Export report JSON or CSV (CSV adds Content-Disposition attachment)
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/SuccessEnvelope'
+                  - type: object
+                    properties:
+                      data:
+                        $ref: '#/components/schemas/ExportReport'
+            text/csv:
+              schema:
+                type: string
+        '500':
+          $ref: '#/components/responses/RouteError'
+  /api/v1/benchmark/compare:
+    get:
+      tags: [Benchmark]
+      summary: Compare models head-to-head
+      parameters:
+        - name: models
+          in: query
+          required: false
+          description: Comma-separated model strings to include (entries trimmed, empties dropped); omitted = all models
+          schema:
+            type: string
+      responses:
+        '200':
+          description: models, headToHead and trends arrays; headToHead/trends are [] when no underlying data
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/SuccessEnvelope'
+                  - type: object
+                    properties:
+                      data:
+                        type: object
+                        properties:
+                          models:
+                            type: array
+                            items:
+                              type: object
+                              allOf:
+                                - $ref: '#/components/schemas/ModelPerformance'
+                                - type: object
+                                  properties:
+                                    avgTokensPerGame:
+                                      type: number
+                                    avgCostPerGame:
+                                      type: number
+                                    avgRolePerformance:
+                                      type: number
+                                    rolePerformance:
+                                      type: object
+                                      description: Per-role { gamesPlayed, wins, winRate } keyed by the roles the model actually played
+                                      additionalProperties:
+                                        type: object
+                                        properties:
+                                          gamesPlayed:
+                                            type: integer
+                                          wins:
+                                            type: integer
+                                          winRate:
+                                            type: number
+                          headToHead:
+                            type: array
+                            items:
+                              $ref: '#/components/schemas/MatchupRow'
+                          trends:
+                            type: array
+                            items:
+                              type: object
+                              properties:
+                                model:
+                                  type: string
+                                games:
+                                  type: array
+                                  items:
+                                    type: object
+                                    properties:
+                                      gameId:
+                                        type: string
+                                      won:
+                                        type: boolean
+                                      role:
+                                        type: string
+                                      tokensUsed:
+                                        type: integer
+                                      createdAt:
+                                        type: string
+                                cumulativeWinRate:
+                                  type: array
+                                  items:
+                                    type: number
+        '500':
+          $ref: '#/components/responses/RouteError'
+  /api/v1/benchmark/runs:
+    get:
+      tags: [Benchmark]
+      summary: List benchmark runs (most recent first)
+      responses:
+        '200':
+          description: Full status record per run (epoch-millis timestamps)
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/SuccessEnvelope'
+                  - type: object
+                    properties:
+                      data:
+                        type: array
+                        items:
+                          $ref: '#/components/schemas/BenchmarkRunStatus'
+        '500':
+          $ref: '#/components/responses/RouteError'
+  /api/v1/benchmark/runs/{runId}:
+    get:
+      tags: [Benchmark]
+      summary: Get benchmark run status and live progress
+      parameters:
+        - $ref: '#/components/parameters/RunId'
+      responses:
+        '200':
+          description: data carries status and progress objects
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/SuccessEnvelope'
+                  - type: object
+                    properties:
+                      data:
+                        type: object
+                        properties:
+                          status:
+                            $ref: '#/components/schemas/BenchmarkRunStatus'
+                          progress:
+                            $ref: '#/components/schemas/BenchmarkRunProgress'
+        '404':
+          description: Benchmark run not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RouteErrorEnvelope'
+        '500':
+          $ref: '#/components/responses/RouteError'
+  /api/v1/benchmark/runs/{runId}/report:
+    get:
+      tags: [Benchmark]
+      summary: RUN-SCOPED benchmark report (this run's own games, not lifetime aggregates)
+      description: |
+        Derives the verdict from THIS run's benchmark_games + players rows only
+        (DF-MAFIA-AI-BENCHMARK-28); available regardless of run status, fields
+        computed live (an in-flight run shows partials). Same report shape as
+        the global /api/v1/benchmark/report.
+      parameters:
+        - $ref: '#/components/parameters/RunId'
+      responses:
+        '200':
+          description: The run report under the standard envelope
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/SuccessEnvelope'
+                  - type: object
+                    properties:
+                      data:
+                        $ref: '#/components/schemas/BenchmarkReport'
+        '404':
+          description: Benchmark run not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RouteErrorEnvelope'
+        '500':
+          $ref: '#/components/responses/RouteError'
+  /api/v1/benchmark/{runId}:
+    get:
+      tags: [Benchmark]
+      summary: Get benchmark run status (short-path alias)
+      description: Same success shape as /api/v1/benchmark/runs/{runId}; 404 error message is "Run not found".
+      parameters:
+        - $ref: '#/components/parameters/RunId'
+      responses:
+        '200':
+          description: data carries status and progress objects
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/SuccessEnvelope'
+                  - type: object
+                    properties:
+                      data:
+                        type: object
+                        properties:
+                          status:
+                            $ref: '#/components/schemas/BenchmarkRunStatus'
+                          progress:
+                            $ref: '#/components/schemas/BenchmarkRunProgress'
+        '404':
+          description: Run not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RouteErrorEnvelope'
+        '500':
+          $ref: '#/components/responses/RouteError'
+  /api/v1/benchmark/runs/{runId}/cancel:
+    post:
+      tags: [Benchmark]
+      summary: Cancel a benchmark run
+      description: Marks the run CANCELLED; already-launched games wind down naturally. FAILED runs can also be cancelled (only COMPLETED and CANCELLED refuse).
+      parameters:
+        - $ref: '#/components/parameters/RunId'
+      responses:
+        '200':
+          description: Run cancelled
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/SuccessEnvelope'
+                  - type: object
+                    properties:
+                      data:
+                        type: object
+                        properties:
+                          runId:
+                            type: string
+                          message:
+                            type: string
+        '404':
+          description: Benchmark run not found or already terminal
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RouteErrorEnvelope'
+        '500':
+          $ref: '#/components/responses/RouteError'
+  /api/v1/benchmark/{runId}/cancel:
+    post:
+      tags: [Benchmark]
+      summary: Cancel a benchmark run (short-path alias)
+      description: Same success shape as the runs-path cancel; 404 error message is "Run not found".
+      parameters:
+        - $ref: '#/components/parameters/RunId'
+      responses:
+        '200':
+          description: Run cancelled
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/SuccessEnvelope'
+                  - type: object
+                    properties:
+                      data:
+                        type: object
+                        properties:
+                          runId:
+                            type: string
+                          message:
+                            type: string
+        '404':
+          description: Run not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RouteErrorEnvelope'
+        '500':
+          $ref: '#/components/responses/RouteError'
+
+  /api/v1/agents:
+    get:
+      tags: [Agents]
+      summary: List registered agents
+      responses:
+        '200':
+          description: Coordinator's registered agents ([] in the default single-process setup)
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/SuccessEnvelope'
+                  - type: object
+                    properties:
+                      data:
+                        type: array
+                        items:
+                          type: object
+                          additionalProperties: true
+        '500':
+          $ref: '#/components/responses/RouteError'
+    post:
+      tags: [Agents]
+      summary: Register an agent
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                id:
+                  type: string
+                name:
+                  type: string
+                provider:
+                  type: string
+                model:
+                  type: string
+                temperature:
+                  type: number
+                maxTokens:
+                  type: integer
+                apiKey:
+                  type: string
+                  description: Optional
+                baseUrl:
+                  type: string
+                  description: Optional
+      responses:
+        '201':
+          description: Echo of { id, name, provider, model }
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/SuccessEnvelope'
+                  - type: object
+                    properties:
+                      data:
+                        type: object
+                        properties:
+                          id:
+                            type: string
+                          name:
+                            type: string
+                          provider:
+                            type: string
+                          model:
+                            type: string
+        '500':
+          $ref: '#/components/responses/RouteError'
+  /api/v1/agents/stats:
+    get:
+      tags: [Agents]
+      summary: Per-agent execution aggregates
+      responses:
+        '200':
+          description: Grouped by provider/model in live data
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/SuccessEnvelope'
+                  - type: object
+                    properties:
+                      data:
+                        type: array
+                        items:
+                          $ref: '#/components/schemas/AgentStat'
+        '500':
+          $ref: '#/components/responses/RouteError'
+
+components:
+  parameters:
+    GameId:
+      name: gameId
+      in: path
+      required: true
+      schema:
+        type: string
+    RunId:
+      name: runId
+      in: path
+      required: true
+      schema:
+        type: string
+  responses:
+    RouteError:
+      description: Route-level error envelope (plain-string error)
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/RouteErrorEnvelope'
+    EngineError:
+      description: Engine rejection with its error string
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/RouteErrorEnvelope'
+    GameNotFound:
+      description: 'Game not found'
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/RouteErrorEnvelope'
+  schemas:
+    GameStatus:
+      type: string
+      enum: [SETUP, IN_PROGRESS, PAUSED, ENDED, CANCELLED]
+    RoleType:
+      type: string
+      description: 'MAFIA | DOCTOR | SHERIFF | VIGILANTE | VILLAGER | UNASSIGNED'
+    SuccessEnvelope:
+      type: object
+      required: [success]
+      properties:
+        success:
+          type: boolean
+          enum: [true]
+    RouteErrorEnvelope:
+      type: object
+      required: [success, error]
+      properties:
+        success:
+          type: boolean
+          enum: [false]
+        error:
+          oneOf:
+            - type: string
+              description: Route-level error string
+            - type: object
+              description: Global 404/500 fallback handlers carry { code, message }
+              properties:
+                code:
+                  type: string
+                message:
+                  type: string
+    HealthStatus:
+      type: object
+      properties:
+        status:
+          type: string
+        timestamp:
+          type: string
+          format: date-time
+        uptime:
+          type: number
+        memory:
+          type: object
+          description: process.memoryUsage() snapshot
+          additionalProperties: true
+    ApiInfo:
+      type: object
+      properties:
+        version:
+          type: string
+        name:
+          type: string
+        endpoints:
+          type: string
+    CreateGameRequest:
+      type: object
+      description: All fields optional; explicit nulls are client errors (MAF-REV-001)
+      properties:
+        numPlayers:
+          type: integer
+          minimum: 5
+          maximum: 15
+          default: 5
+        personaSeeds:
+          type: array
+          items: {}
+        config:
+          type: object
+          additionalProperties: true
+          description: Legacy engine config (also home of config.roleModels)
+        legacyConfig:
+          type: object
+          additionalProperties: true
+        models:
+          type: object
+          additionalProperties: true
+          description: Alias source of roleModels
+        roleModels:
+          type: object
+          description: Per-role model overrides — each value a "provider/model" string or { provider, model }
+          additionalProperties:
+            oneOf:
+              - type: string
+              - type: object
+                required: [provider, model]
+                properties:
+                  provider:
+                    type: string
+                  model:
+                    type: string
+        hostName:
+          type: string
+          description: Standard-engine fallback path only
+    Player:
+      type: object
+      properties:
+        id:
+          type: string
+        name:
+          type: string
+        role:
+          $ref: '#/components/schemas/RoleType'
+        isAlive:
+          type: boolean
+        isMafia:
+          type: boolean
+        joinOrder:
+          type: integer
+        won:
+          type: integer
+          description: 1 = winning side, 0 = losing side; attached only when the game has a decided winner (MAF-GAP-056)
+          enum: [0, 1]
+        provider:
+          type: string
+          nullable: true
+        model:
+          type: string
+          nullable: true
+        tokensUsed:
+          type: integer
+          nullable: true
+        apiCalls:
+          type: integer
+          nullable: true
+    GameSummary:
+      type: object
+      description: List row — players is a COUNT, not an array
+      properties:
+        id:
+          type: string
+        status:
+          $ref: '#/components/schemas/GameStatus'
+        players:
+          type: integer
+        createdAt:
+          type: string
+          format: date-time
+        config:
+          type: object
+          additionalProperties: true
+    GameDetail:
+      type: object
+      properties:
+        id:
+          type: string
+        status:
+          $ref: '#/components/schemas/GameStatus'
+        winner:
+          type: string
+          enum: [MAFIA, TOWN]
+          nullable: true
+          description: Only present when the outcome is decided
+        config:
+          type: object
+          additionalProperties: true
+        eventCount:
+          type: integer
+          description: Present on the legacy-fallback payload
+        startedAt:
+          description: Present on the legacy-fallback payload
+        endedAt:
+          type: string
+          format: date-time
+          nullable: true
+        currentState:
+          type: object
+          additionalProperties: true
+          description: FSM state; omitted on running legacy games with no result state
+        players:
+          type: array
+          items:
+            $ref: '#/components/schemas/Player'
+        events:
+          type: array
+          items:
+            $ref: '#/components/schemas/GameEvent'
+    GameEvent:
+      type: object
+      properties:
+        id:
+          type: string
+        gameId:
+          type: string
+        type:
+          type: string
+        timestamp:
+          type: string
+          format: date-time
+        visibility:
+          type: string
+          enum: [PUBLIC, PRIVATE, ADMIN]
+        actorId:
+          type: string
+          nullable: true
+        targetId:
+          type: string
+          nullable: true
+        data:
+          type: object
+          additionalProperties: true
+        metadata:
+          type: object
+          additionalProperties: true
+    EventIdEnvelope:
+      allOf:
+        - $ref: '#/components/schemas/SuccessEnvelope'
+        - type: object
+          properties:
+            data:
+              type: object
+              properties:
+                eventId:
+                  type: string
+                  nullable: true
+    ModelAssignment:
+      type: object
+      required: [provider, model]
+      properties:
+        provider:
+          type: string
+        model:
+          type: string
+        temperature:
+          type: number
+          default: 0.7
+        maxTokens:
+          type: integer
+          default: 500
+        priority:
+          type: integer
+          default: 0
+    ModelAssignmentRow:
+      type: object
+      properties:
+        id:
+          type: integer
+        gameId:
+          type: string
+        role:
+          type: string
+          nullable: true
+        provider:
+          type: string
+        model:
+          type: string
+        temperature:
+          type: number
+        maxTokens:
+          type: integer
+        priority:
+          type: integer
+        createdAt:
+          type: string
+    GameStats:
+      type: object
+      properties:
+        totalGames:
+          type: integer
+        activeGames:
+          type: integer
+        completedGames:
+          type: integer
+        failedGames:
+          type: integer
+        failedGameIds:
+          type: array
+          items:
+            type: object
+            properties:
+              id:
+                type: string
+              status:
+                type: string
+              createdAt:
+                type: string
+                format: date-time
+              endedAt:
+                type: string
+                format: date-time
+                nullable: true
+        mafiaWins:
+          type: integer
+        townWins:
+          type: integer
+        mafiaWinRate:
+          type: number
+        avgDuration:
+          type: number
+        degenerateGames:
+          type: integer
+          description: Games excluded from win stats as degenerate (DF-MAFIA-AI-BENCHMARK-18) — present on current builds
+    ModelPerformance:
+      type: object
+      properties:
+        provider:
+          type: string
+        model:
+          type: string
+        gamesPlayed:
+          type: integer
+        wins:
+          type: integer
+          description: 0 when unattributable (legacy usage-only rows), per MAF-GAP-039
+        winRate:
+          type: number
+        avgTokens:
+          type: number
+        avgCost:
+          type: number
+        avgLatency:
+          type: number
+    MatchupRow:
+      type: object
+      properties:
+        modelA:
+          type: string
+          description: provider/model composite string
+        modelB:
+          type: string
+          description: provider/model composite string
+        gamesPlayed:
+          type: integer
+        modelAWins:
+          type: integer
+        modelBWins:
+          type: integer
+        ties:
+          type: integer
+    AgentStat:
+      type: object
+      properties:
+        agentId:
+          type: string
+        name:
+          type: string
+          nullable: true
+        provider:
+          type: string
+          nullable: true
+        model:
+          type: string
+          nullable: true
+        executions:
+          type: integer
+        successes:
+          type: integer
+        successRate:
+          type: number
+        totalLatency:
+          type: number
+        totalTokens:
+          type: integer
+        totalCost:
+          type: number
+        avgLatency:
+          type: number
+    BenchmarkReport:
+      type: object
+      description: The report body — lives under the standard { success, data } envelope
+      properties:
+        generatedAt:
+          type: string
+          format: date-time
+        summary:
+          $ref: '#/components/schemas/GameStats'
+        modelPerformance:
+          type: array
+          items:
+            $ref: '#/components/schemas/ModelPerformance'
+        agentStats:
+          type: array
+          items:
+            $ref: '#/components/schemas/AgentStat'
+        recommendations:
+          type: array
+          items:
+            type: string
+    ExportReport:
+      type: object
+      properties:
+        generatedAt:
+          type: string
+          format: date-time
+        summary:
+          $ref: '#/components/schemas/GameStats'
+        games:
+          type: array
+          items:
+            type: object
+            properties:
+              gameId:
+                type: string
+              status:
+                $ref: '#/components/schemas/GameStatus'
+              dayCount:
+                type: integer
+              playerCount:
+                type: integer
+              duration:
+                type: integer
+                nullable: true
+              winner:
+                type: string
+                nullable: true
+              players:
+                type: array
+                items:
+                  type: object
+                  properties:
+                    playerId:
+                      type: string
+                    name:
+                      type: string
+                    role:
+                      type: string
+                    provider:
+                      type: string
+                    model:
+                      type: string
+                    survived:
+                      type: boolean
+                    won:
+                      type: boolean
+                    tokensUsed:
+                      type: integer
+                    apiCalls:
+                      type: integer
+              events:
+                type: array
+                items:
+                  type: object
+                  properties:
+                    id:
+                      type: string
+                    type:
+                      type: string
+                    description:
+                      type: string
+                      nullable: true
+                    playerId:
+                      type: string
+                      nullable: true
+                    timestamp:
+                      type: string
+                      format: date-time
+                    turnNumber:
+                      type: integer
+                    phase:
+                      type: string
+              costBreakdown:
+                type: object
+                properties:
+                  totalCost:
+                    type: number
+                  totalTokens:
+                    type: integer
+                  promptTokens:
+                    type: integer
+                  completionTokens:
+                    type: integer
+                  apiCalls:
+                    type: integer
+                  errorRate:
+                    type: number
+                  byModel:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        provider:
+                          type: string
+                        model:
+                          type: string
+                        cost:
+                          type: number
+                        tokens:
+                          type: integer
+        modelAggregates:
+          type: array
+          items:
+            $ref: '#/components/schemas/ModelPerformance'
+        headToHead:
+          type: array
+          items:
+            $ref: '#/components/schemas/MatchupRow'
+    BenchmarkRunStatus:
+      type: object
+      properties:
+        runId:
+          type: string
+        status:
+          type: string
+          enum: [QUEUED, RUNNING, COMPLETED, CANCELLED, FAILED]
+        config:
+          type: object
+          additionalProperties: true
+        createdAt:
+          type: integer
+          description: EPOCH MILLISECONDS
+        completedAt:
+          type: integer
+          nullable: true
+          description: Epoch millis; null until a terminal status
+        summary:
+          type: object
+          additionalProperties: true
+          nullable: true
+        error:
+          type: string
+          nullable: true
+        totalGames:
+          type: integer
+    BenchmarkRunProgress:
+      type: object
+      properties:
+        runId:
+          type: string
+        status:
+          type: string
+          enum: [QUEUED, RUNNING, COMPLETED, CANCELLED, FAILED]
+        totalGames:
+          type: integer
+        completedGames:
+          type: integer
+        validGames:
+          type: integer
+        failedGames:
+          type: integer
+        pairings:
+          type: array
+          items:
+            type: object
+            properties:
+              id:
+                type: string
+              modelA:
+                type: string
+              modelB:
+                type: string
+              games:
+                type: integer
+              completed:
+                type: integer

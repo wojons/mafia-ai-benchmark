@@ -127,6 +127,7 @@ runs what it was built with — see the **Docker Deployment** section of
 | **[specs/correct-night-flow.md](specs/correct-night-flow.md)** | Game flow specification            |
 | **[specs/persona-system.md](specs/persona-system.md)**         | Persona system documentation       |
 | **[docs/api-reference.md](docs/api-reference.md)**             | API reference & integration guide  |
+| OpenAPI spec: `apps/server/openapi.yaml`                       | Machine-readable API spec          |
 
 ## 🎭 Persona System
 
