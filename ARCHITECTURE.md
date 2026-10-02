@@ -380,13 +380,16 @@ curl -N http://localhost:3004/api/v1/games/<game-id>/stream
 curl http://localhost:3004/api/v1/games/<game-id>
 ```
 
-### Option 3: Web UI Mode (Coming Soon)
+### Option 3: Web UI Mode
 
 ```bash
-# Start the web UI
-cd apps/web && npm run dev
+# Start the web UI from the repo root
+pnpm run web
 
-# Open browser to http://localhost:5173
+# Custom port: `pnpm run dev:web -- --port <N>` (vite accepts --port;
+# do NOT use `pnpm run dev -- --port N` — turbo rejects the passthrough)
+
+# Open browser to http://localhost:5174
 # Click "Create Game" → "Start Game"
 # Watch real-time updates via SSE
 ```
