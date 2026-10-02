@@ -3514,6 +3514,21 @@ class MafiaGame {
         console.log("  " + E.THINK + " THINK: " + response.think);
         console.log("  " + E.SAYS + ' SAYS:  "' + response.says + '"\n');
 
+        // MAF-REV-003: THINK as first-class events (admin visibility only).
+        this.emitAgentThinkStarted(
+          gameId,
+          mafia,
+          "MAFIA_CHAT",
+          this.dayNumber || 0,
+        );
+        this.emitAgentThinkCompleted(
+          gameId,
+          mafia,
+          "MAFIA_CHAT",
+          this.dayNumber || 0,
+          response.think,
+        );
+
         if (response.says) {
           this.gameEvents.push(
             createGameEvent(
@@ -3590,6 +3605,21 @@ class MafiaGame {
         };
 
         const response = await this.getAIResponse(mafia, gameState);
+
+        // MAF-REV-003: THINK as first-class events (admin visibility only).
+        this.emitAgentThinkStarted(
+          gameId,
+          mafia,
+          "MAFIA_KILL_VOTE",
+          this.dayNumber || 0,
+        );
+        this.emitAgentThinkCompleted(
+          gameId,
+          mafia,
+          "MAFIA_KILL_VOTE",
+          this.dayNumber || 0,
+          response.think,
+        );
 
         const targetName =
           response.action?.target ||
@@ -3686,6 +3716,21 @@ class MafiaGame {
             persuader.name +
             " argues: " +
             response.says,
+        );
+
+        // MAF-REV-003: THINK as first-class events (admin visibility only).
+        this.emitAgentThinkStarted(
+          gameId,
+          persuader,
+          "MAFIA_PERSUADE",
+          this.dayNumber || 0,
+        );
+        this.emitAgentThinkCompleted(
+          gameId,
+          persuader,
+          "MAFIA_PERSUADE",
+          this.dayNumber || 0,
+          response.think,
         );
 
         persuasionMessages.push({
@@ -3877,6 +3922,21 @@ class MafiaGame {
 
         const response = await this.getAIResponse(doctor, gameState);
 
+        // MAF-REV-003: THINK as first-class events (admin visibility only).
+        this.emitAgentThinkStarted(
+          gameId,
+          doctor,
+          "DOCTOR_ACTION",
+          this.dayNumber || 0,
+        );
+        this.emitAgentThinkCompleted(
+          gameId,
+          doctor,
+          "DOCTOR_ACTION",
+          this.dayNumber || 0,
+          response.think,
+        );
+
         const targetName =
           response.action?.target ||
           alivePlayers[Math.floor(Math.random() * alivePlayers.length)].name;
@@ -3972,6 +4032,21 @@ class MafiaGame {
         };
 
         const response = await this.getAIResponse(sheriff, gameState);
+
+        // MAF-REV-003: THINK as first-class events (admin visibility only).
+        this.emitAgentThinkStarted(
+          gameId,
+          sheriff,
+          "SHERIFF_INVESTIGATION",
+          this.dayNumber || 0,
+        );
+        this.emitAgentThinkCompleted(
+          gameId,
+          sheriff,
+          "SHERIFF_INVESTIGATION",
+          this.dayNumber || 0,
+          response.think,
+        );
 
         let targetName =
           response.action?.target ||
@@ -4126,6 +4201,21 @@ class MafiaGame {
       console.log("  " + E.THINK + " THINK: " + response.think);
       console.log("  " + E.SAYS + ' SAYS:  "' + response.says + '"');
 
+      // MAF-REV-003: THINK as first-class events (admin visibility only).
+      this.emitAgentThinkStarted(
+        gameId,
+        vig,
+        "VIGILANTE_ACTION",
+        this.dayNumber || 0,
+      );
+      this.emitAgentThinkCompleted(
+        gameId,
+        vig,
+        "VIGILANTE_ACTION",
+        this.dayNumber || 0,
+        response.think,
+      );
+
       const shouldShoot = response.action?.action === "SHOOT";
 
       if (shouldShoot) {
@@ -4181,7 +4271,12 @@ class MafiaGame {
       const shotTarget = vigilante.nightTarget;
       shotTarget.isAlive = false;
       this.deadPlayers.push(shotTarget);
-      deaths.push({ ...shotTarget, deathType: "SHOT" });
+      // MAF-REV-003 (payload hygiene, proven by a test-run crash): nightTarget
+      // is a LIVE player reference — doctor self-protection makes it circular
+      // (p.nightTarget === p), which throws inside JSON.stringify both in the
+      // bridge's stdout serializer (bridge dies mid-game) and the DB
+      // appendEvent serializer. Death payloads never need it.
+      deaths.push({ ...shotTarget, nightTarget: undefined, deathType: "SHOT" });
       console.log(
         "  " +
           E.SHOOT +
@@ -4202,7 +4297,9 @@ class MafiaGame {
       if (!protectedBy) {
         this.mafiaKillTarget.isAlive = false;
         this.deadPlayers.push(this.mafiaKillTarget);
-        deaths.push({ ...this.mafiaKillTarget, deathType: "KILLED" });
+        // MAF-REV-003 (payload hygiene): strip the live nightTarget reference
+        // — same circular-JSON crash shape as the SHOT path above.
+        deaths.push({ ...this.mafiaKillTarget, nightTarget: undefined, deathType: "KILLED" });
         console.log(
           "  " +
             E.KILL +
@@ -4385,6 +4482,22 @@ class MafiaGame {
       console.log("  " + E.THINK + " THINK: " + response.think);
       console.log("  " + E.SAYS + ' SAYS:  "' + response.says + '"');
 
+      // MAF-REV-003: THINK as first-class events (admin visibility only;
+      // the PUBLIC MESSAGE below carries ONLY the public statement).
+      this.emitAgentThinkStarted(
+        gameId,
+        player,
+        "DAY_DISCUSSION",
+        this.dayNumber || 0,
+      );
+      this.emitAgentThinkCompleted(
+        gameId,
+        player,
+        "DAY_DISCUSSION",
+        this.dayNumber || 0,
+        response.think,
+      );
+
       if (response.says) {
         this.gameEvents.push(
           createGameEvent(
@@ -4471,6 +4584,21 @@ class MafiaGame {
 
       votes[target.id] = (votes[target.id] || 0) + 1;
 
+      // MAF-REV-003: THINK as first-class events (admin visibility only).
+      this.emitAgentThinkStarted(
+        gameId,
+        player,
+        "VOTING",
+        this.dayNumber || 0,
+      );
+      this.emitAgentThinkCompleted(
+        gameId,
+        player,
+        "VOTING",
+        this.dayNumber || 0,
+        response.think,
+      );
+
       // Think→Speak pattern for voting
       console.log(player.name + " -> VOTES: " + target.name);
       console.log("  " + E.THINK + " THINK: " + response.think);
@@ -4487,7 +4615,6 @@ class MafiaGame {
           {
             targetId: target.id,
             targetName: target.name,
-            think: response.think,
             says: response.says,
           },
           this,
@@ -4506,7 +4633,8 @@ class MafiaGame {
           "ABSTAIN",
           "PUBLIC",
           {
-            think: abstention.think,
+            // MAF-REV-003: no think on PUBLIC events — the abstention's
+            // THINK was already emitted as AGENT_THINK_COMPLETED (ADMIN).
             says: abstention.says,
           },
           this,
@@ -4564,6 +4692,10 @@ class MafiaGame {
       // MORNING_REVEAL deaths payload (full player objects); the adapter
       // maps PLAYER_LYNCHED and extractPlayersFromEvents marks the actor
       // dead. Night kills keep flowing through MORNING_REVEAL.
+      // MAF-REV-003 (payload hygiene): strip the live nightTarget reference —
+      // a doctor who self-protected earlier that night carries
+      // nightTarget === self (circular) and JSON.stringify throws, killing
+      // the bridge mid-game (reproduced: 1 in ~10 mock games).
       this.gameEvents.push(
         createGameEvent(
           gameId,
@@ -4572,7 +4704,7 @@ class MafiaGame {
           null,
           "PLAYER_LYNCHED",
           "PUBLIC",
-          { deaths: [eliminated] },
+          { deaths: [{ ...eliminated, nightTarget: undefined }] },
         ),
       );
     } else if (tiedIds.length === 1 && maxVoteCount === 1) {
@@ -4661,6 +4793,60 @@ class MafiaGame {
     this.players.forEach((p) => delete p.nightTarget);
 
     await this.runNightPhase(gameId);
+  }
+
+  /**
+   * MAF-REV-003: emit the agent's THINK turn as TWO first-class events so
+   * THINK persists in the event stream (the split-pane THINK pane and the
+   * adapter's EventMapper consume AGENT_THINK_STARTED/COMPLETED; previously
+   * think survived only as a field inside private MESSAGE payloads).
+   *
+   * Emission convention intentionally mirrors the sibling engine calls:
+   * createGameEvent(gameId, round, <phase>, player, <eventType>,
+   * <visibility>, content) pushed onto this.gameEvents — the bridge copies
+   * every pushed event verbatim and the adapter's typeMapping already
+   * carries both types ('ADMIN_ONLY' maps to 'ADMIN' visibility).
+   *
+   * THINK is admin/private visibility ONLY: it must never be flattened into
+   * a PUBLIC-visibility event (see emitAgentThinkCompleted's caller sites).
+   */
+  emitAgentThinkStarted(gameId, player, phase, dayNumber) {
+    this.gameEvents.push(
+      createGameEvent(
+        gameId,
+        this.round,
+        phase,
+        player,
+        "AGENT_THINK_STARTED",
+        "ADMIN_ONLY",
+        {
+          agentId: player.id || player.name,
+          playerId: player.id || player.name,
+          role: player.role || player.persona?.gameRole || null,
+          dayNumber: dayNumber,
+        },
+      ),
+    );
+  }
+
+  emitAgentThinkCompleted(gameId, player, phase, dayNumber, think) {
+    this.gameEvents.push(
+      createGameEvent(
+        gameId,
+        this.round,
+        phase,
+        player,
+        "AGENT_THINK_COMPLETED",
+        "ADMIN_ONLY",
+        {
+          agentId: player.id || player.name,
+          playerId: player.id || player.name,
+          role: player.role || player.persona?.gameRole || null,
+          dayNumber: dayNumber,
+          think: think || "",
+        },
+      ),
+    );
   }
 
   async getAIResponse(player, gameState, retryCount = 0, skipResponseFormat = false) {
