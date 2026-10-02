@@ -1719,30 +1719,50 @@ All errors follow this response format:
 
 ## Rate Limiting
 
-**WebSocket Connections:**
+> **Note (DOC-5):** This section previously described enforced connection and
+> request limits ("max 100 concurrent connections per IP", "10 requests/second
+> per IP", etc.). **No such limits exist in the server.**
 
-- Max 100 concurrent connections per IP
-- Connection idle timeout: 60 minutes
+**No rate limiting is implemented.** The server does not register any
+rate-limiting middleware — requests to the REST API and
+WebSocket connections are unthrottled, and per-IP connection caps and idle
+timeouts are not enforced. The only application-level throttling in the
+codebase is an internal delay between agent turns in
+`apps/server/src/services/agent-coordinator.ts` (an implementation detail of
+turn scheduling, not an HTTP rate limit).
 
-**REST API:**
-
-- GET/POST /api/v1/games: 10 requests/second per IP
-- Other endpoints: 100 requests/minute per IP
+This is a known limitation. A future ticket could add request throttling
+(e.g. via `express-rate-limit`) and WebSocket connection limits if unbounded
+load becomes a problem in practice.
 
 ---
 
 ## CORS Configuration
 
-Development:
+The server enables CORS with default options:
+
+```ts
+app.use(cors());
+```
+
+`apps/server/src/index.ts` (middleware stack, after `helmet()`), using the
+`cors` package (^2.8.5) defaults:
 
 ```
 Access-Control-Allow-Origin: *
-Access-Control-Allow-Methods: GET, POST, PUT, DELETE, OPTIONS
-Access-Control-Allow-Headers: Content-Type, Authorization
-Access-Control-Allow-Credentials: true
+Access-Control-Allow-Methods: GET,HEAD,PUT,PATCH,POST,DELETE
+Access-Control-Allow-Credentials: <not sent>
 ```
 
-Production (when deployed):
+- All origins are allowed (`Access-Control-Allow-Origin: *`).
+- All standard methods are allowed: `GET,HEAD,PUT,PATCH,POST,DELETE`.
+- No `Access-Control-Allow-Credentials` header is sent (the `credentials`
+  option defaults to `false`, so credentialed cookies/HTTP auth are not
+  supported cross-origin by the server).
+- On preflight (`OPTIONS`) requests, `Access-Control-Allow-Headers` reflects
+  whatever headers the client requested in
+  `Access-Control-Request-Headers` (the package's built-in behavior when
+  none are configured).
 
-- Origin restricted to specific domains
-- Credentials may be required for authentication
+These defaults apply identically in development and production — there is
+no environment-specific CORS configuration.
