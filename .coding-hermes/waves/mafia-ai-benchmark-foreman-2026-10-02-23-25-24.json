@@ -1,0 +1,31 @@
+{
+  "scheduler_tick_id": "mafia-ai-benchmark-foreman-2026-10-02-23-25-24",
+  "board_tick": 220,
+  "created_at": "2026-10-02T23:40:00Z",
+  "wave_budget": 8,
+  "workers": [
+    {
+      "task_id": "MAF-GAP-074",
+      "worktree": "/home/kara/worktrees/mafia-ai-benchmark-MAF-GAP-074",
+      "branch": "wt/MAF-GAP-074",
+      "model": "glm-5.3-flash",
+      "provider": "ollama-cloud",
+      "scope": "Orphaned integration.test.js (server 649L + cli 261L): port valuable coverage into vitest .test.ts convention or archive with README note; PASS = no orphaned unreferenced integration.test.js remains, or registered in a runner"
+    },
+    {
+      "task_id": "MAF-REV-005",
+      "worktree": "/home/kara/worktrees/mafia-ai-benchmark-MAF-REV-005",
+      "branch": "wt/MAF-REV-005",
+      "model": "glm-5.3-flash",
+      "provider": "ollama-cloud",
+      "scope": "Still-true half only: generate apps/server OpenAPI spec from live route table + README pointer. WS_PORT half already resolved by 7e68c0d — out of scope."
+    }
+  ],
+  "foreman_direct": [
+    {
+      "task_id": "RELENG-MAFIA-20260928-01",
+      "reason": "Read-only readiness re-sweep; premise stale (DF-26/DF-27 complete, verified live 09-30). No code change — foreman executes directly."
+    }
+  ],
+  "merge_plan": "serial merges wt/MAF-GAP-074 then wt/MAF-REV-005, full battery gate before each merge, push after each"
+}
