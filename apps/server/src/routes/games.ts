@@ -8,6 +8,7 @@ import { Router, Request, Response } from 'express';
 import { ServerContext } from '../index.js';
 import { LegacyGameAdapter } from '../services/legacy-game-adapter.js';
 import { enrichPlayersWithAttribution } from '../services/player-attribution.js';
+import { publicOnlyFallbackVisibility } from '../middleware/auth.js';
 import type { Player, GameStatus } from '@mafia/shared/types';
 
 // Store for SSE connections per game (shared across game routes)
@@ -134,6 +135,13 @@ export function createGamesRouter(
     // ===== REST JSON EVENTS =====
     const visibility = (req.query.visibility as string) || 'all';
 
+    // MAF-REV-004 defense in depth: when admin token auth is enforced and the
+    // request carries NO admin credentials, clamp the filter to public-only
+    // rather than serving the exposing 'all' default — even if this router is
+    // mounted without the global middleware.
+    const clampVisibility = publicOnlyFallbackVisibility(req);
+    const effectiveVisibility = clampVisibility ?? visibility;
+
     try {
       // Check if game exists (both repository and legacy)
       const game = gameRepository.getGame(gameId);
@@ -152,9 +160,9 @@ export function createGamesRouter(
       let events = gameRepository.getEvents(gameId);
 
       // Apply visibility filter
-      if (visibility === 'public') {
+      if (effectiveVisibility === 'public') {
         events = events.filter((e) => e.visibility === 'PUBLIC');
-      } else if (visibility === 'private') {
+      } else if (effectiveVisibility === 'private') {
         events = events.filter((e) => e.visibility === 'PRIVATE');
       }
       // 'all' — no filter

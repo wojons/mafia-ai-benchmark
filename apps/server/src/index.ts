@@ -21,6 +21,7 @@ import { createDatabase } from './db/migrate.js';
 import { setupRoutes } from './routes/index.js';
 import { setupWebSocket } from './websocket/index.js';
 import { bodyParseErrorHandler } from './middleware/body-parse-error.js';
+import { adminAuthMiddleware } from './middleware/auth.js';
 import { DEFAULT_PORT } from './config.js';
 
 dotenv.config();
@@ -96,6 +97,11 @@ async function main(): Promise<void> {
   app.use(compression());
   app.use(express.json());
   app.use(express.urlencoded({ extended: true }));
+
+  // MAF-REV-004: optional admin token auth. Passthrough (disabled) while
+  // ADMIN_AUTH_TOKEN is unset; enforces admin credentials for ADMIN-visibility
+  // event reads and game creation once it is set.
+  app.use(adminAuthMiddleware());
 
   app.use((req, res, next) => {
     const start = Date.now();
