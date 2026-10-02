@@ -23,6 +23,25 @@ import { displayName } from '../report-format.js';
 /** Default model pair when --games is given without --models. */
 const DEFAULT_MODELS = ['openai/gpt-4o-mini', 'openai/gpt-4o'];
 
+/**
+ * Split a benchmark model spec ('provider/model' | 'provider:model', the
+ * strings benchmark_games.model_a/model_b carry) into the [provider, model]
+ * pair displayName() renders — mirror of the server's parseModel ordering
+ * (slash wins over colon). Bare model names render as CUSTOM/<model>, the
+ * same legacy floor the API rows use.
+ */
+function splitSpec(spec: string): [string, string] {
+  const colonIdx = spec.indexOf(':');
+  const slashIdx = spec.indexOf('/');
+  if (slashIdx !== -1 && (colonIdx === -1 || slashIdx < colonIdx)) {
+    return [spec.slice(0, slashIdx), spec.slice(slashIdx + 1)];
+  }
+  if (colonIdx !== -1) {
+    return [spec.slice(0, colonIdx), spec.slice(colonIdx + 1)];
+  }
+  return ['CUSTOM', spec];
+}
+
 /** Run status values (mirror server BenchmarkRunStatusValue). */
 type RunStatus = 'QUEUED' | 'RUNNING' | 'COMPLETED' | 'CANCELLED' | 'FAILED';
 const TERMINAL: ReadonlySet<RunStatus> = new Set(['COMPLETED', 'CANCELLED', 'FAILED']);
@@ -53,6 +72,7 @@ interface BenchmarkReport {
     model: string;
     gamesPlayed: number;
     wins: number;
+    losses?: number | null;
     winRate: number;
     avgTokens: number;
     avgCost: number;
@@ -60,6 +80,40 @@ interface BenchmarkReport {
   }>;
   agentStats?: unknown[];
   recommendations?: string[];
+}
+
+/** Run-scoped report (DF-MAFIA-AI-BENCHMARK-28) — GET /api/v1/benchmark/runs/:runId/report. */
+interface RunScopedReport {
+  runId: string;
+  status: RunStatus;
+  generatedAt: string;
+  summary: {
+    totalGames: number;
+    completedGames: number;
+    validGames: number;
+    failedGames: number;
+    gamesWithWinner: number;
+  };
+  modelPerformance: Array<{
+    provider: string;
+    model: string;
+    gamesPlayed: number;
+    wins: number;
+    losses: number | null;
+    winRate: number;
+    avgTokens: number;
+    avgCost: number;
+  }>;
+  pairings: Array<{
+    id: string;
+    modelA: string;
+    modelB: string;
+    games: number;
+    completed: number;
+    aWins: number;
+    bWins: number;
+    unattributed: number;
+  }>;
 }
 
 interface BenchmarkPairing {
@@ -285,9 +339,34 @@ export class BenchmarkCommand extends Command {
 
     if (progress.status === 'COMPLETED') {
       console.log(chalk.green(`🎉 Benchmark run ${runId} completed — ${progress.completedGames}/${progress.totalGames} games (${progress.validGames} valid, ${progress.failedGames} failed).`));
-      console.log(chalk.gray(`   Fetching accumulated report ...`));
       console.log('');
-      return await this.fetchReport(serverUrl);
+      // DF-MAFIA-AI-BENCHMARK-28: the verdict must be about THIS run.
+      // The accumulated report (GET /api/v1/benchmark/report) mixes every
+      // run ever recorded (and legacy polluted rows, DF-25), so the
+      // 'Winner' banner used to quote 88 lifetime games for a 2-game run.
+      // The run-scoped report (GET /api/v1/benchmark/runs/:id/report)
+      // derives the winner from this run's own benchmark_games +
+      // players rows. The accumulated report is used ONLY when this
+      // server predates the run-scoped endpoint (404) — never silently
+      // as the primary source.
+      console.log(chalk.gray('   Fetching run-scoped report ...'));
+      try {
+        const runReport = await this.fetchRunReport(serverUrl, runId);
+        console.log('');
+        return { ...runReport, runScoped: true } as unknown as BenchmarkReport;
+      } catch (error: unknown) {
+        const err = error as { message?: string };
+        // Only a 404 (server without the run-scoped endpoint) falls back
+        // to the accumulated report — and it must say so loudly.
+        if (err?.message?.includes('404')) {
+          console.log(chalk.yellow('   ⚠️  Run-scoped report unavailable (server predates DF-28)'));
+          console.log(chalk.yellow('   ⚠️  Falling back to the ACCUMULATED report — its verdict covers ALL runs, not just this one.'));
+          console.log(chalk.gray('   Fetching accumulated report ...'));
+          console.log('');
+          return await this.fetchReport(serverUrl);
+        }
+        throw error;
+      }
     }
 
     // FAILED or CANCELLED
@@ -328,6 +407,38 @@ export class BenchmarkCommand extends Command {
     return `⏳ [${progress.status}] ${progress.completedGames}/${progress.totalGames} games completed` +
       (progress.failedGames > 0 ? `, ${progress.failedGames} failed` : '') +
       ` (elapsed ${elapsedSec}s)`;
+  }
+
+  /**
+   * Fetch the RUN-SCOPED report for one benchmark run
+   * (GET /api/v1/benchmark/runs/:runId/report — DF-MAFIA-AI-BENCHMARK-28).
+   * Throws on any non-OK response (the 404 case is handled by the caller's
+   * fallback to the accumulated report).
+   */
+  private async fetchRunReport(serverUrl: string, runId: string): Promise<RunScopedReport> {
+    const url = `${serverUrl}/api/v1/benchmark/runs/${runId}/report`;
+
+    console.log(chalk.gray(`📡 Fetching run-scoped report from ${url}...`));
+
+    const response = await fetch(url, {
+      method: 'GET',
+      headers: { 'Accept': 'application/json' },
+      signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
+    });
+
+    if (!response.ok) {
+      const errorText = await response.text().catch(() => '');
+      throw new Error(`Server returned ${response.status}: ${errorText || response.statusText}`);
+    }
+
+    const body = (await response.json()) as
+      | { success: true; data: RunScopedReport }
+      | { success: false; error?: string };
+
+    if ('success' in body && body.success === true && 'data' in body && body.data) {
+      return body.data;
+    }
+    throw new Error(`Server refused run report: ${('error' in body && body.error) || 'unknown error'}`);
   }
 
   private async fetchReport(serverUrl: string): Promise<BenchmarkReport> {
@@ -372,9 +483,13 @@ export class BenchmarkCommand extends Command {
   private displayResults(report: BenchmarkReport): void {
     const summary = report.summary || { totalGames: 0 };
     const results = report.modelPerformance || [];
-    const recommendations = report.recommendations || [];
+    const recommendations = (report as unknown as { recommendations?: string[] }).recommendations || [];
+    // DF-MAFIA-AI-BENCHMARK-28: a run-scoped report announces itself and
+    // prints the per-pairing results — the verdict is about THIS run.
+    const runScoped = (report as unknown as { runScoped?: boolean; pairings?: Array<{ id: string; modelA: string; modelB: string; games: number; completed: number; aWins: number; bWins: number; unattributed: number }> }).runScoped === true;
+    const pairings = (report as unknown as { pairings?: Array<{ id: string; modelA: string; modelB: string; games: number; completed: number; aWins: number; bWins: number; unattributed: number }> }).pairings || [];
 
-    console.log(chalk.green('\n✅ Benchmark Report\n'));
+    console.log(chalk.green(runScoped ? '\n✅ Benchmark Report (this run)\n' : '\n✅ Benchmark Report\n'));
 
     console.log(chalk.white('Summary:'));
     console.log(`  Total Games:      ${chalk.yellow((summary.totalGames ?? 0).toString())}`);
@@ -408,9 +523,15 @@ export class BenchmarkCommand extends Command {
       // MAF-GAP-059: a 0-win row has no side data (documented honest floor,
       // MAF-GAP-036/039) — its games are unattributable, not defeats.
       // Real win counts are kept for rows that DO have wins.
-      const losses = (wins === 0)
-        ? 'n/a'.padStart(6)
-        : (gamesPlayed - wins).toString().padStart(6);
+      // DF-MAFIA-AI-BENCHMARK-28: run-scoped rows carry an EXPLICIT losses
+      // column from the server (null = unattributable run) — prefer it;
+      // the derived games-wins shape stays for accumulated rows.
+      const reportedLosses = r.losses;
+      const losses = (typeof reportedLosses === 'number')
+        ? (reportedLosses as number).toString().padStart(6)
+        : (reportedLosses === null || wins === 0)
+          ? 'n/a'.padStart(6)
+          : (gamesPlayed - wins).toString().padStart(6);
       const winRate = ((r.winRate ?? 0) * 100).toFixed(1).padStart(8) + '%';
       const tokens = ((r.avgTokens ?? 0) / 1000).toFixed(1).padStart(10) + 'K';
       const cost = '$' + (r.avgCost ?? 0).toFixed(2).padStart(7);
@@ -418,12 +539,42 @@ export class BenchmarkCommand extends Command {
       console.log(`  ${model} ${games}  ${winsStr}  ${losses}  ${winRate}  ${tokens}  ${cost}`);
     });
 
+    // DF-MAFIA-AI-BENCHMARK-28: run-scoped reports print the per-pairing
+    // head-to-head results (which model of the pair won each game).
+    if (runScoped && pairings.length > 0) {
+      console.log(chalk.white('\n⚔️  Head-to-Head (this run):'));
+      for (const p of pairings) {
+        const parts: string[] = [];
+        if (p.aWins > 0) parts.push(`${displayName(...splitSpec(p.modelA))}: ${p.aWins}`);
+        if (p.bWins > 0) parts.push(`${displayName(...splitSpec(p.modelB))}: ${p.bWins}`);
+        const verdict = parts.length > 0 ? parts.join(', ') : 'no decided games';
+        const notes: string[] = [];
+        if (p.unattributed > 0) notes.push(`${p.unattributed} unattributed`);
+        console.log(`  ${p.id} — ${p.completed}/${p.games} completed — ${verdict}` +
+          (notes.length > 0 ? chalk.gray(` (${notes.join(', ')})`) : ''));
+      }
+      console.log('');
+    }
+
     if (results.length > 0) {
-      const winner = results.reduce((best, m) => (m.winRate ?? 0) > (best.winRate ?? 0) ? m : best, results[0]);
       // MAF-GAP-059: sample size is part of the headline — a 54-game win rate
       // must be readable as such next to a 1000+-game rival.
-      console.log(chalk.green('\n🏆 Winner: ') + chalk.yellow(displayName(winner.provider, winner.model)) +
-                  chalk.gray(` (${((winner.winRate ?? 0) * 100).toFixed(1)}% win rate, ${(winner.gamesPlayed ?? 0)} games)\n`));
+      // DF-MAFIA-AI-BENCHMARK-28: a model with ZERO wins cannot be the
+      // winner even when every other row also has zero wins — the
+      // reduce-below would crown the FIRST row of an all-zero table. Pick
+      // the highest win rate among rows that actually won something; with
+      // no decided games at all, say so instead of naming a winner.
+      const winners = results.filter((m) => (m.wins ?? 0) > 0);
+      if (winners.length > 0) {
+        const winner = winners.reduce(
+          (best, m) => (m.winRate ?? 0) > (best.winRate ?? 0) ? m : best,
+          winners[0],
+        );
+        console.log(chalk.green('\n🏆 Winner: ') + chalk.yellow(displayName(winner.provider, winner.model)) +
+                    chalk.gray(` (${((winner.winRate ?? 0) * 100).toFixed(1)}% win rate, ${(winner.gamesPlayed ?? 0)} games)\n`));
+      } else {
+        console.log(chalk.yellow('\n🏆 Winner: none — no game in this run had a decided, attributable outcome.\n'));
+      }
     }
 
     // Recommendations come from the server report

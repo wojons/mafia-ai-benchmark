@@ -13,14 +13,71 @@ import type { AgentCoordinator } from './agent-coordinator.js';
 import type { EventBus } from './event-bus.js';
 import type { StatsCollector } from './stats-collector.js';
 import type { GameRepository } from '../db/repository.js';
+import { GameRepository as GameRepositoryClass } from '../db/repository.js';
 import type { LegacyGameAdapter } from './legacy-game-adapter.js';
 
-/** Configuration accepted by POST /api/v1/benchmark. */
+/**
+ * Configuration accepted by POST /api/v1/benchmark.
+ */
 export interface BenchmarkConfig {
   models: string[];
   gamesPerPairing?: number;
   numPlayers?: number;
   temperature?: number;
+}
+
+// ==================== Module-level SQL helpers (DF-MAFIA-AI-BENCHMARK-28) ====================
+//
+// Local copies of the canonical model/provider normalization from
+// stats-collector/models.ts (module-private there). Same shape and
+// semantics (MAF-GAP-036/045): a model string that itself carries a
+// provider prefix collapses to the canonical key so prefixed spellings
+// merge into ONE row. Keep in sync with models.ts — a drift here would
+// split a model into two rows in run reports only.
+
+/**
+ * SQL expression selecting the canonical MODEL string for a table alias:
+ * the provider prefix inside the model column is stripped before
+ * aggregation ('openai' + 'openai/gpt-4o-mini' -> model 'gpt-4o-mini').
+ */
+function normalizedModelSql(alias: string): string {
+  return `CASE WHEN instr(${alias}.model, '/') > 0
+    THEN substr(${alias}.model, instr(${alias}.model, '/') + 1)
+    ELSE ${alias}.model END`;
+}
+
+/**
+ * SQL expression selecting the canonical PROVIDER for a table alias: the
+ * model string's own prefix IS the provider when present (regardless of
+ * the stored provider — legacy 'CUSTOM' rows); otherwise the stored
+ * provider wins. Models without a slash keep the stored provider.
+ */
+function normalizedProviderSql(alias: string): string {
+  return `CASE
+    WHEN instr(${alias}.model, '/') > 0
+      AND lower(substr(${alias}.model, 1, instr(${alias}.model, '/') - 1)) = lower(${alias}.provider)
+    THEN ${alias}.provider
+    WHEN instr(${alias}.model, '/') > 0
+    THEN substr(${alias}.model, 1, instr(${alias}.model, '/') - 1)
+    ELSE ${alias}.provider END`;
+}
+
+/**
+ * Parse a benchmark model spec ('provider/model' | 'provider:model') into
+ * [provider, model] in TypeScript (mirror of BenchmarkRunner.parseModel,
+ * module-level so the pairing-report helpers can use it without an
+ * instance). Bare model names get the CUSTOM passthrough.
+ */
+function parseModelSpec(spec: string): [string, string] {
+  const colonIdx = spec.indexOf(':');
+  const slashIdx = spec.indexOf('/');
+  if (slashIdx !== -1 && (colonIdx === -1 || slashIdx < colonIdx)) {
+    return [spec.slice(0, slashIdx), spec.slice(slashIdx + 1)];
+  }
+  if (colonIdx !== -1) {
+    return [spec.slice(0, colonIdx), spec.slice(colonIdx + 1)];
+  }
+  return ['CUSTOM', spec];
 }
 
 export type BenchmarkRunStatusValue =
@@ -66,6 +123,59 @@ export interface BenchmarkProgress {
     games: number;
     completed: number;
   }>;
+}
+
+/**
+ * Run-scoped report row (DF-MAFIA-AI-BENCHMARK-28): one per model that played
+ * in this run. gamesPlayed counts DISTINCT games the model appeared in; wins
+ * count games where the model's side won. A game with no decided winner
+ * (winner NULL) contributes to neither side's wins — it is played but
+ * unattributable, exactly like the global report treats it.
+ */
+export interface BenchmarkRunModelRow {
+  provider: string;
+  model: string;
+  gamesPlayed: number;
+  wins: number;
+  losses: number | null;
+  winRate: number;
+  avgTokens: number;
+  avgCost: number;
+}
+
+/** Run-scoped pairing result (winner = which MODEL side won that game). */
+export interface BenchmarkRunPairingResult {
+  id: string;
+  modelA: string;
+  modelB: string;
+  games: number;
+  completed: number;
+  aWins: number;
+  bWins: number;
+  unattributed: number;
+}
+
+/**
+ * Run-scoped report (DF-MAFIA-AI-BENCHMARK-28): what THIS run showed, derived
+ * only from the run's own benchmark_games + players rows — never the
+ * polluted global accumulated report (DF-25). Shape mirrors the parts of
+ * the global report the CLI renders (summary + modelPerformance + pairing
+ * results), so the CLI's display path is shared.
+ */
+export interface BenchmarkRunReport {
+  runId: string;
+  status: BenchmarkRunStatusValue;
+  generatedAt: string;
+  summary: {
+    totalGames: number;
+    completedGames: number;
+    validGames: number;
+    failedGames: number;
+    /** Games with a decided winner (attributable to a side). */
+    gamesWithWinner: number;
+  };
+  modelPerformance: BenchmarkRunModelRow[];
+  pairings: BenchmarkRunPairingResult[];
 }
 
 /** Aggregate result of one pass of {@link BenchmarkRunner.reconcileStrandedRuns}. */
@@ -295,6 +405,353 @@ export class BenchmarkRunner {
     };
   }
 
+  /**
+   * Run-scoped report (DF-MAFIA-AI-BENCHMARK-28): the verdict for THIS run
+   * only. The global accumulated report (GET /api/v1/benchmark/report)
+   * mixes every run ever recorded (and its legacy rows are polluted —
+   * DF-25), so a fresh 2-game run's 'Winner' banner used to quote 88
+   * lifetime games. This method derives everything from the run's OWN
+   * benchmark_games rows joined to their players rows, applying the same
+   * winner semantics as the global aggregates:
+   *
+   *   - wins = games where the model's SIDE won (a model plays ~10 player
+   *     slots per game; one win per game per model — never a per-player
+   *     count), from players.won written by setPlayersWon at game end
+   *     (MAF-GAP-043). The games-level winner column (benchmark_games
+   *     .winner, written by the terminal-event subscription) is the
+   *     cross-check; games that disagree with their players rows or carry
+   *     no decided winner contribute games but no wins.
+   *   - loss columns count DEFEATS only when the model has at least one
+   *     win somewhere in the run (the same honest n/a floor as the CLI's
+   *     display — a 0-win legacy row's games are unattributable, not
+   *     defeats).
+   *   - degenerate (DF-18) and mock (DF-12) games are excluded exactly via
+   *     the same shared SQL predicates the global aggregates use.
+   *
+   * Returns null when the runId is unknown.
+   */
+  getRunReport(runId: string): BenchmarkRunReport | null {
+    const status = this.getStatus(runId);
+    if (!status) return null;
+
+    const games = this.db
+      .prepare('SELECT * FROM benchmark_games WHERE run_id = ?')
+      .all(runId) as BenchmarkGameRow[];
+
+    const completedGames = games.filter((g) => g.completed_at !== null).length;
+    const failedGames = games.filter((g) => g.error !== null).length;
+    const validGames = games.filter((g) => g.valid === 1).length;
+    const gamesWithWinner = games.filter(
+      (g) => g.winner === 'MAFIA' || g.winner === 'TOWN',
+    ).length;
+
+    // Per-game winner from the players rows (players.won), matching what
+    // the global per-model aggregates attribute. A game whose players rows
+    // are missing or whose per-player won columns are not written yields
+    // NO attribution — honest absence, never a fabricated win.
+    const gameWinnerFromPlayers = new Map<string, 'MAFIA' | 'TOWN' | null>();
+    if (games.length > 0) {
+      const placeholders = games.map(() => '?').join(', ');
+      const playerRows = this.db
+        .prepare(
+          `SELECT game_id, is_mafia, won FROM players
+             WHERE game_id IN (${placeholders})
+               AND won IS NOT NULL
+               AND is_mafia IS NOT NULL`,
+        )
+        .all(...games.map((g) => g.game_id)) as Array<{
+        game_id: string;
+        is_mafia: number;
+        won: number;
+      }>;
+      const perGame = new Map<string, { mafiaWon: boolean; townWon: boolean; rows: number }>();
+      for (const p of playerRows) {
+        let entry = perGame.get(p.game_id);
+        if (!entry) {
+          entry = { mafiaWon: false, townWon: false, rows: 0 };
+          perGame.set(p.game_id, entry);
+        }
+        entry.rows++;
+        if (p.won === 1) {
+          if (p.is_mafia === 1) entry.mafiaWon = true;
+          else entry.townWon = true;
+        }
+      }
+      for (const g of games) {
+        const e = perGame.get(g.game_id);
+        // Exactly one side wins a real game: both flags set (or none) means
+        // the players rows cannot attribute the game (corrupt/degenerate).
+        if (e && e.mafiaWon !== e.townWon) {
+          gameWinnerFromPlayers.set(g.game_id, e.mafiaWon ? 'MAFIA' : 'TOWN');
+        } else {
+          gameWinnerFromPlayers.set(g.game_id, null);
+        }
+      }
+    }
+
+    // Which model won each game: the model WHOSE SIDE won. Uses the
+    // benchmark_games side winner joined to the game's role assignments;
+    // falls back to the players-row winner when the side column is NULL.
+    // The result maps game_id -> the model key that won (or null).
+    const gameWinnerModelKey = new Map<string, string | null>();
+    for (const g of games) {
+      const teamWinner = g.winner === 'MAFIA' || g.winner === 'TOWN' ? g.winner : gameWinnerFromPlayers.get(g.game_id) ?? null;
+      if (!teamWinner) {
+        gameWinnerModelKey.set(g.game_id, null);
+        continue;
+      }
+      // Both pairing models are recorded on the row; the winner is the
+      // model whose players' side won. Determine it from the players rows
+      // of that model (is_mafia vs teamWinner); the pairing model that had
+      // NO mafia players wins when TOWN wins, and vice versa — read from
+      // real player attribution, never from the fixed role split.
+      const sideOf = this.modelSidesForGame(g.game_id);
+      const winnerSideIsMafia = teamWinner === 'MAFIA';
+      let winnerKey: string | null = null;
+      for (const [key, isMafiaSide] of sideOf) {
+        if (isMafiaSide === winnerSideIsMafia) {
+          // Lowercase key — the model aggregation maps group case-insensitively.
+          winnerKey = key.toLowerCase();
+          break;
+        }
+      }
+      gameWinnerModelKey.set(g.game_id, winnerKey);
+    }
+
+    // ===== Per-model rows =====
+    interface ModelAgg {
+      provider: string;
+      model: string;
+      gameIds: Set<string>;
+      wins: number;
+      /** Sum of per-player token counts + row count (mean over rows). */
+      tokensSum: number;
+      tokensN: number;
+      cost: number;
+    }
+    const modelAggs = new Map<string, ModelAgg>();
+    /** Game ids whose side outcome IS attributable (usable + winner model found). */
+    const attributedGameIds = new Set<string>();
+
+    for (const g of games) {
+      const isUsable = this.isUsableRunGame(g);
+      // Per-model participation from the players rows (the real wire data:
+      // the actual model strings each player served), normalized to the
+      // canonical provider/model key so prefixed spellings merge.
+      const placeholders = [g.game_id];
+      const rows = this.db
+        .prepare(
+          `SELECT p.game_id as game_id,
+                  ${normalizedProviderSql('p')} as provider,
+                  ${normalizedModelSql('p')} as model,
+                  SUM(p.tokens_used) as tokens_sum,
+                  COUNT(*) as n
+             FROM players p
+            WHERE p.game_id = ?
+              AND p.provider IS NOT NULL AND p.model IS NOT NULL
+            GROUP BY p.game_id, ${normalizedProviderSql('p')}, ${normalizedModelSql('p')}`,
+        )
+        .all(...placeholders) as Array<{
+        game_id: string;
+        provider: string;
+        model: string;
+        tokens_sum: number | null;
+        n: number;
+      }>;
+      const winnerKey = gameWinnerModelKey.get(g.game_id) ?? null;
+      // Per-(game, model) rows from the players table — case-insensitive
+      // canonical grouping plus p.game_id in the GROUP BY so each game's
+      // per-model contribution is one row (the earlier bare-group shape
+      // collapsed ALL of a model's games into one row and mis-folded the
+      // wins). Per-player token sums are accumulated so the final
+      // avgTokens is the mean over the model's own player rows — a model
+      // serving several slots in a game is weighted by its slots, exactly
+      // like the real token spend it produced.
+      const gameKeys = new Set<string>();
+      for (const p of rows) {
+        if (!p.provider || !p.model) continue;
+        const key = `${p.provider}/${p.model}`.toLowerCase();
+        let agg = modelAggs.get(key);
+        if (!agg) {
+          agg = { provider: p.provider, model: p.model, gameIds: new Set<string>(), wins: 0, tokensSum: 0, tokensN: 0, cost: 0 };
+          modelAggs.set(key, agg);
+        }
+        agg.gameIds.add(p.game_id);
+        agg.tokensSum += p.tokens_sum ?? 0;
+        agg.tokensN += p.n;
+        gameKeys.add(key);
+      }
+      // Wins: ONE per game, credited to the game's winning model — never
+      // per player row (a model serving several slots must not multiply
+      // the win), and only for a usable game it actually played in.
+      if (isUsable && winnerKey && gameKeys.has(winnerKey)) {
+        const winnerAgg = modelAggs.get(winnerKey);
+        if (winnerAgg) {
+          winnerAgg.wins += 1;
+          attributedGameIds.add(g.game_id);
+        }
+      }
+      // Cost lives in token_usage per player; SUM the game's rows per model key.
+      const costRows = this.db
+        .prepare(
+          `SELECT ${normalizedProviderSql('tu')} as provider,
+                  ${normalizedModelSql('tu')} as model,
+                  COALESCE(SUM(tu.cost), 0) as cost
+             FROM token_usage tu
+            WHERE tu.game_id = ?
+            GROUP BY ${normalizedProviderSql('tu')}, ${normalizedModelSql('tu')}`,
+        )
+        .all(...placeholders) as Array<{ provider: string; model: string; cost: number }>;
+      for (const c of costRows) {
+        if (!c.provider || !c.model) continue;
+        const key = `${c.provider}/${c.model}`.toLowerCase();
+        let agg = modelAggs.get(key);
+        if (!agg) {
+          // A model with recorded cost but no players rows still played —
+          // count the game it appears in (honest participation from usage).
+          agg = { provider: c.provider, model: c.model, gameIds: new Set<string>(), wins: 0, tokensSum: 0, tokensN: 0, cost: 0 };
+          modelAggs.set(key, agg);
+        }
+        agg.cost += c.cost;
+      }
+    }
+
+    // Losses are countable whenever the run HAS at least one decided,
+    // attributed game — a 0-win model in such a run really lost its games
+    // (its games were played and another model's side won). Only a fully
+    // unattributable run keeps null, matching the CLI's n/a floor.
+    const hasAnyAttributedGame = attributedGameIds.size > 0;
+    const modelPerformance: BenchmarkRunModelRow[] = Array.from(modelAggs.values())
+      .map((a) => {
+        const gamesPlayed = a.gameIds.size;
+        const winRate = gamesPlayed > 0 ? a.wins / gamesPlayed : 0;
+        return {
+          provider: a.provider,
+          model: a.model,
+          gamesPlayed,
+          wins: a.wins,
+          losses: hasAnyAttributedGame ? gamesPlayed - a.wins : null,
+          winRate,
+          avgTokens: a.tokensN > 0 ? a.tokensSum / a.tokensN : 0,
+          avgCost: gamesPlayed > 0 ? a.cost / gamesPlayed : 0,
+        };
+      })
+      .sort((x, y) => y.gamesPlayed - x.gamesPlayed);
+
+    // ===== Per-pairing rows =====
+    const pairingMap = new Map<string, BenchmarkRunPairingResult>();
+    for (const g of games) {
+      let entry = pairingMap.get(g.pairing_id);
+      if (!entry) {
+        entry = {
+          id: g.pairing_id,
+          modelA: g.model_a,
+          modelB: g.model_b,
+          games: 0,
+          completed: 0,
+          aWins: 0,
+          bWins: 0,
+          unattributed: 0,
+        };
+        pairingMap.set(g.pairing_id, entry);
+      }
+      entry.games++;
+      if (g.completed_at !== null) entry.completed++;
+      const winnerKey = gameWinnerModelKey.get(g.game_id);
+      // The aWins/bWins discrimination keys on the model THAT WON the game
+      // (from the players rows). The spec's head-to-head (modelAWins)
+      // wants which side of the PAIRING won — a modelA win means the game
+      // winner's model key matched model_a's participation key. The same
+      // usable-game gate the per-model wins apply governs the pairing:
+      // a mock/degenerate decided game is not real win evidence (DF-12/18).
+      const usable = this.isUsableRunGame(g);
+      if (usable && winnerKey) {
+        const aKey = this.participationKeyForModel(g.game_id, g.model_a);
+        const bKey = this.participationKeyForModel(g.game_id, g.model_b);
+        if (aKey && winnerKey === aKey.toLowerCase()) entry.aWins++;
+        else if (bKey && winnerKey === bKey.toLowerCase()) entry.bWins++;
+        else entry.unattributed++;
+      } else {
+        entry.unattributed++;
+      }
+    }
+
+    return {
+      runId,
+      status: status.status,
+      generatedAt: new Date().toISOString(),
+      summary: {
+        totalGames: games.length,
+        completedGames,
+        validGames,
+        failedGames,
+        gamesWithWinner,
+      },
+      modelPerformance,
+      pairings: Array.from(pairingMap.values()),
+    };
+  }
+
+  /**
+   * A game row usable for win attribution in a run report: non-failed and
+   * passing the shared degenerate/mock exclusions (the same predicates the
+   * global aggregates use — reading them via the games table's config).
+   */
+  private isUsableRunGame(g: BenchmarkGameRow): boolean {
+    if (g.error !== null || g.winner === null) return false;
+    const row = this.db
+      .prepare(
+        `SELECT COALESCE((${GameRepositoryClass.DEGENERATE_GAME_SQL}), 0) = 0
+               AND COALESCE((${GameRepositoryClass.MOCK_GAME_SQL}), 0) = 0
+            AS usable
+           FROM games g WHERE g.id = ?`,
+      )
+      .get(g.game_id) as { usable: number } | undefined;
+    return row ? row.usable === 1 : false;
+  }
+
+  /**
+   * For one game: whether each model key's players are mafia-side
+   * (map<modelKey, isMafiaSide | null>). Derived from the players rows —
+   * never from the fixed role split.
+   */
+  private modelSidesForGame(gameId: string): Map<string, boolean> {
+    const rows = this.db
+      .prepare(
+        `SELECT DISTINCT ${normalizedProviderSql('p')} as provider,
+                ${normalizedModelSql('p')} as model,
+                MAX(p.is_mafia) as mafia_present
+           FROM players p
+          WHERE p.game_id = ?
+            AND p.provider IS NOT NULL AND p.model IS NOT NULL
+          GROUP BY ${normalizedProviderSql('p')}, ${normalizedModelSql('p')}`,
+      )
+      .all(gameId) as Array<{ provider: string; model: string; mafia_present: number }>;
+    const map = new Map<string, boolean>();
+    for (const r of rows) {
+      if (!r.provider || !r.model) continue;
+      map.set(`${r.provider}/${r.model}`, r.mafia_present === 1);
+    }
+    return map;
+  }
+
+  /**
+   * The canonical model key ('provider/model') a benchmark pairing spec
+   * (model_a / model_b, e.g. 'openai/gpt-4o-mini') maps to in a game's
+   * players rows, or null when that model has no players rows in the game.
+   */
+  private participationKeyForModel(gameId: string, spec: string): string | null {
+    const [provider, model] = parseModelSpec(spec);
+    if (!provider || !model) return null;
+    const key = `${provider}/${model}`.toLowerCase();
+    for (const existing of this.modelSidesForGame(gameId).keys()) {
+      // modelSidesForGame keys are 'provider/model' with the canonical
+      // normalization already applied (slash stripped from the model).
+      if (existing.toLowerCase() === key) return existing;
+    }
+    return null;
+  }
+
   /** Mark a run as CANCELLED. Running games are left to wind down naturally. */
   cancel(runId: string): boolean {
     const existing = this.getStatus(runId);
@@ -448,12 +905,11 @@ export class BenchmarkRunner {
     const failed = games.filter((g) => g.error !== null);
     const errored = failed.length > 0;
 
-    const summaryPayload = {
-      totalGames: games.length,
-      completedGames: games.filter((g) => g.completed_at !== null).length,
-      failedGames: failed.length,
-      recovered: true,
-    };
+    // Summary persisted from the same game evidence getProgress() reports —
+    // now via the shared builder (DF-MAFIA-AI-BENCHMARK-28), so a
+    // restart-recovered run is self-describing exactly like a live-completed
+    // one (plain counts + per-pairing/per-model verdict enrichment).
+    const summaryPayload = this.buildRunSummary(runId);
 
     if (errored) {
       // FAILED: surface the durable error evidence; when several games
@@ -470,7 +926,7 @@ export class BenchmarkRunner {
              SET status = ?, error = ?, completed_at = ?, summary = ?, updated_at = ?
            WHERE id = ? AND status IN ('QUEUED', 'RUNNING')`,
         )
-        .run('FAILED', messages, now, JSON.stringify(summaryPayload), now, runId);
+        .run('FAILED', messages, now, summaryPayload, now, runId);
     } else {
       // COMPLETED: persist the summary from the same game evidence
       // getProgress() reports.
@@ -480,12 +936,19 @@ export class BenchmarkRunner {
              SET status = ?, completed_at = ?, summary = ?, updated_at = ?
            WHERE id = ? AND status IN ('QUEUED', 'RUNNING')`,
         )
-        .run('COMPLETED', now, JSON.stringify(summaryPayload), now, runId);
+        .run('COMPLETED', now, summaryPayload, now, runId);
     }
 
+    const parsed = (() => {
+      try {
+        return JSON.parse(summaryPayload) as { completedGames: number; failedGames: number };
+      } catch {
+        return null;
+      }
+    })();
     console.log(
       `[BenchmarkRunner] Run ${runId} recovered as ${errored ? 'FAILED' : 'COMPLETED'} ` +
-        `(${summaryPayload.completedGames} completed, ${summaryPayload.failedGames} failed game(s))`,
+        `(${parsed ? parsed.completedGames : '?'} completed, ${parsed ? parsed.failedGames : '?'} failed game(s))`,
     );
     return true;
   }
@@ -940,10 +1403,58 @@ export class BenchmarkRunner {
     const errored = games.some((g) => g.error !== null);
     this.db
       .prepare(
-        'UPDATE benchmark_runs SET status = ?, completed_at = ?, updated_at = ? WHERE id = ?',
+        'UPDATE benchmark_runs SET status = ?, completed_at = ?, summary = ?, updated_at = ? WHERE id = ?',
       )
-      .run(errored ? 'FAILED' : 'COMPLETED', now, now, runId);
+      .run(errored ? 'FAILED' : 'COMPLETED', now, this.buildRunSummary(runId), now, runId);
 
     console.log(`[BenchmarkRunner] Run ${runId} ${errored ? 'failed' : 'completed'}`);
+  }
+
+  /**
+   * Build the run summary payload persisted into benchmark_runs.summary at
+   * the terminal transition (DF-MAFIA-AI-BENCHMARK-28). Shape mirrors the
+   * reconcile path's summary (totalGames/completedGames/failedGames) plus
+   * the per-pairing and per-model winner results so the run record is
+   * self-describing without a join. Best-effort: a failure to compute the
+   * enrichment NEVER prevents the run transition (the plain counts are the
+   * contract; the enrichment is additive).
+   */
+  private buildRunSummary(runId: string): string {
+    const games = this.db
+      .prepare('SELECT * FROM benchmark_games WHERE run_id = ?')
+      .all(runId) as BenchmarkGameRow[];
+    const failed = games.filter((g) => g.error !== null);
+
+    const base: Record<string, unknown> = {
+      totalGames: games.length,
+      completedGames: games.filter((g) => g.completed_at !== null).length,
+      failedGames: failed.length,
+    };
+
+    const errored = failed.length > 0;
+    if (errored) {
+      // FAILED: surface the durable error evidence; when several games
+      // failed, join their messages so the run row explains itself.
+      base.errorSummary = failed
+        .map((g) => `game ${g.game_id}: ${g.error}`)
+        .join('; ');
+      return JSON.stringify(base);
+    }
+
+    // COMPLETED: fold in the run-scoped report (per-pairing winner counts,
+    // per-model rows) so the run record carries its own verdict.
+    try {
+      const report = this.getRunReport(runId);
+      if (report) {
+        base.pairings = report.pairings;
+        base.modelPerformance = report.modelPerformance;
+      }
+    } catch (e) {
+      console.error(
+        `[BenchmarkRunner] Run ${runId}: run-report enrichment for summary unavailable: ` +
+          (e instanceof Error ? e.message : String(e)),
+      );
+    }
+    return JSON.stringify(base);
   }
 }

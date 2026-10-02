@@ -136,6 +136,54 @@ describe('Benchmark routes', () => {
   });
 
   // ==========================================================================
+  // GET /api/v1/benchmark/runs/:runId/report (DF-MAFIA-AI-BENCHMARK-28)
+  // ==========================================================================
+
+  describe('GET /api/v1/benchmark/runs/:runId/report', () => {
+    it('serves the run-scoped report for a seeded run (200 + envelope)', async () => {
+      repo.insertBenchmarkRun({
+        id: 'run-1',
+        config: { models: ['a', 'b'], gamesPerPairing: 1, numPlayers: 5, temperature: 0.7 },
+        status: 'COMPLETED',
+        completed_at: Date.now(),
+      });
+      repo.seedGame({ id: 'g1', status: 'ENDED', winner: 'TOWN', endedAt: Date.now(), duration: 200_000 });
+      repo.insertBenchmarkGame({
+        game_id: 'g1',
+        run_id: 'run-1',
+        pairing_id: 'a__vs__b',
+        model_a: 'a',
+        model_b: 'b',
+        seed: 0,
+        model_a_role: 'VILLAGER',
+        model_b_role: 'VILLAGER',
+        completed_at: Date.now(),
+        winner: 'TOWN',
+      });
+
+      const response = await fetch(`${baseUrl}/api/v1/benchmark/runs/run-1/report`);
+      expect(response.status).toBe(200);
+      const body = await response.json();
+      expect(body.success).toBe(true);
+      // The report is scoped to THE RUN's own games — one game, not the
+      // global accumulated total.
+      expect(body.data.runId).toBe('run-1');
+      expect(body.data.summary.totalGames).toBe(1);
+      expect(Array.isArray(body.data.modelPerformance)).toBe(true);
+      expect(Array.isArray(body.data.pairings)).toBe(true);
+      expect(body.data.pairings[0].id).toBe('a__vs__b');
+    });
+
+    it('returns 404 for an unknown run id', async () => {
+      const response = await fetch(`${baseUrl}/api/v1/benchmark/runs/nonexistent/report`);
+      expect(response.status).toBe(404);
+      const body = await response.json();
+      expect(body.success).toBe(false);
+      expect(body.error).toBe('Benchmark run nonexistent not found');
+    });
+  });
+
+  // ==========================================================================
   // POST /api/v1/benchmark/:id/cancel
   // ==========================================================================
 
