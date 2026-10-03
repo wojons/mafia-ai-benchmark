@@ -14,7 +14,7 @@
  * in-process fetch (same pattern as apps/server api.test.ts), not a
  * throwaway `node -e` child.
  */
-import { describe, it, expect, afterEach, vi } from "vitest";
+import { describe, it, expect, beforeAll, afterAll, afterEach, vi } from "vitest";
 import { execFile } from "child_process";
 import { promisify } from "util";
 import { mkdtempSync, existsSync, rmSync, readFileSync } from "fs";
@@ -224,16 +224,80 @@ describe("benchmark --help (parse level, in-process)", () => {
   }, 10000);
 });
 
-describe("benchmark report (live server)", () => {
-  it("--quick --json prints the REAL report fields, matching a direct fetch", async (ctx) => {
-    if (await skipWithoutServer(ctx)) return;
+// ---------------------------------------------------------------------------
+// MAF-FLAKE-001: these two tests used to fetch the report from the shared
+// LIVE :3004 server and then fetch it AGAIN directly, asserting equality.
+// The live server creates games continuously, so the second fetch saw a
+// NEWER report (observed totalGames 3721 vs 3725) and the equality failed.
+// They now run against a hermetic local stub server serving a FIXED report:
+// the CLI subprocess boundary is preserved, the envelope-unwrap contract is
+// preserved, and the equality assertions become race-free (the reference
+// cannot drift between the CLI's fetch and the test's fetch). The opt-in
+// fresh-run test below still exercises the real live server.
+// ---------------------------------------------------------------------------
+
+/** Fixed report body the stub serves — realistic accumulated-report shapes. */
+const STUB_REPORT = {
+  summary: { totalGames: 4213, completedGames: 4096, failedGames: 117 },
+  modelPerformance: [
+    {
+      provider: "openai",
+      model: "gpt-4o-mini",
+      gamesPlayed: 3200,
+      wins: 1450,
+      losses: 1750,
+      winRate: 0.453,
+      avgTokens: 60116,
+      avgCost: 0.0118,
+    },
+    {
+      provider: "openai",
+      model: "gpt-4o",
+      gamesPlayed: 1013,
+      wins: 620,
+      losses: 393,
+      winRate: 0.612,
+      avgTokens: 110572,
+      avgCost: 0.0059,
+    },
+  ],
+  recommendations: ["openai/gpt-4o wins more often per game played"],
+};
+
+let stubServer: ReturnType<typeof import("http").createServer>;
+let stubBaseUrl = "";
+
+beforeAll(async () => {
+  const http = await import("http");
+  stubServer = http.createServer((req, res) => {
+    if (req.url?.startsWith("/api/v1/benchmark/report")) {
+      res.writeHead(200, { "Content-Type": "application/json" });
+      res.end(JSON.stringify({ success: true, data: STUB_REPORT }));
+      return;
+    }
+    res.writeHead(404, { "Content-Type": "application/json" });
+    res.end(JSON.stringify({ success: false, error: "not found" }));
+  });
+  await new Promise<void>((resolve) => stubServer.listen(0, "127.0.0.1", resolve));
+  const address = stubServer.address() as { port: number };
+  stubBaseUrl = `http://127.0.0.1:${address.port}`;
+});
+
+afterAll(async () => {
+  await new Promise<void>((resolve, reject) =>
+    stubServer.close((err) => (err ? reject(err) : resolve())),
+  );
+});
+
+describe("benchmark report (hermetic report stub, MAF-FLAKE-001)", () => {
+  it("--quick --json prints the served report fields, matching a direct fetch", async () => {
     const cwd = makeTempCwd();
     const { stdout, stderr, code } = await runCli(cwd, [
       "benchmark",
       "--quick",
       "--json",
       "--server",
-      TEST_BASE_URL,
+      stubBaseUrl,
     ]);
 
     expect(stderr).toBe("");
@@ -243,9 +307,11 @@ describe("benchmark report (live server)", () => {
     expect(typeof printed.summary?.totalGames).toBe("number");
     expect(Array.isArray(printed.modelPerformance)).toBe(true);
 
-    // The printed values must equal the server's real report — not
+    // The printed values must equal the report the server serves — not
     // Math.random fabrications (e.g. avgCost in the old invented 1-3 range).
-    const response = await fetch(`${TEST_BASE_URL}/api/v1/benchmark/report`, {
+    // Same-source equality: the stub data is fixed, so this can no longer
+    // race a live server mutating between the two fetches.
+    const response = await fetch(`${stubBaseUrl}/api/v1/benchmark/report`, {
       signal: AbortSignal.timeout(30000),
     });
     expect(response.ok).toBe(true);
@@ -261,8 +327,7 @@ describe("benchmark report (live server)", () => {
     expect(printed.recommendations).toEqual(serverReport.recommendations);
   }, 90000);
 
-  it("--export writes the fetched report to the file", async (ctx) => {
-    if (await skipWithoutServer(ctx)) return;
+  it("--export writes the fetched report to the file", async () => {
     const cwd = makeTempCwd();
     const outPath = path.join(cwd, "report.json");
     const { stdout, stderr, code } = await runCli(cwd, [
@@ -271,7 +336,7 @@ describe("benchmark report (live server)", () => {
       "--export",
       outPath,
       "--server",
-      TEST_BASE_URL,
+      stubBaseUrl,
     ]);
 
     expect(stderr).toBe("");
@@ -280,8 +345,8 @@ describe("benchmark report (live server)", () => {
 
     expect(existsSync(outPath)).toBe(true);
     const written = JSON.parse(readFileSync(outPath, "utf-8"));
-    expect(typeof written.summary?.totalGames).toBe("number");
-    expect(Array.isArray(written.modelPerformance)).toBe(true);
+    expect(written.summary).toEqual(STUB_REPORT.summary);
+    expect(written.modelPerformance).toEqual(STUB_REPORT.modelPerformance);
   }, 90000);
 });
 

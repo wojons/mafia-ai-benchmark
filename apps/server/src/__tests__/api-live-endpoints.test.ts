@@ -29,12 +29,21 @@
  * repository is out of MAF-GAP-074's scope (test-resurrection row); the port
  * pins the deterministic 400/404 arms so the routes' wiring is still guarded.
  *
- * Like api.test.ts / health.test.ts, these tests need a LIVE mafia server
- * (probeMafiaServer; skipped cleanly otherwise) and honor TEST_BASE_URL.
+ * Like api.test.ts / health.test.ts, the REST endpoint tests need a LIVE
+ * mafia server (probeMafiaServer; skipped cleanly otherwise) and honor
+ * TEST_BASE_URL. The SSE block (MAF-FLAKE-001) is hermetic instead: it
+ * boots the real games router on an ephemeral port and never touches
+ * :3004 — see its header below.
  */
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import net from 'node:net';
+import express from 'express';
+import type { Server } from 'http';
 import { BASE_URL, probeMafiaServer } from './helpers/mafia-server';
+import { createGamesRouter } from '../routes/games.js';
+import { EventBus } from '../services/event-bus.js';
+import { createSqliteBackedRepository } from './services/mocks.js';
+import type { ServerContext } from '../index.js';
 
 const SERVER_PROBE = await probeMafiaServer(BASE_URL);
 
@@ -275,7 +284,58 @@ describe.skipIf(!SERVER_PROBE.available)('Model assignment routes (validation ar
 // ---------------------------------------------------------------------------
 // SSE event streaming (orphan: testSSEConnection, testSSEStatus) — carried
 // with a raw-socket client whose disconnect the server can observe.
+//
+// MAF-FLAKE-001: these tests used to run against the shared LIVE :3004
+// server and raced it twice — (a) the fixed 800/1500ms "read some bytes"
+// sleeps were flaky 200-first-chunk timing under load, and (b) the
+// counter assertions assumed the whole process had no other SSE
+// subscribers, which the live server's active games violate. They now run
+// hermetically: the REAL games router over an in-memory SQLite repo and a
+// REAL EventBus on an EPHEMERAL port (the boot pattern of
+// routes/games.validation.test.ts), where the only subscribers are the
+// test's own. Streaming is asserted with marker-conditioned reads (read
+// UNTIL the stream contains the expected bytes), not fixed sleeps; the
+// counter is per-test gameId, so no shared counter exists to race.
+//
+// The SSE arm of GET /api/v1/games/:id/events and the sse-status route
+// never consult game existence (no 404 arm on either), so no game needs
+// creating: a synthetic gameId exercises the full surface. These tests are
+// hermetic, so unlike the rest of this file they run WITHOUT a live server.
 // ---------------------------------------------------------------------------
+
+let sseServer: Server;
+let sseBaseUrl: string;
+
+beforeAll(async () => {
+  const repo = createSqliteBackedRepository();
+  const app = express();
+  app.use(express.json());
+  app.use(
+    '/',
+    createGamesRouter(
+      {
+        gameEngine: {},
+        gameRepository: repo,
+        eventBus: new EventBus(),
+      } as unknown as ServerContext,
+      null,
+    ),
+  );
+  sseServer = await new Promise<Server>((resolve) => {
+    const s = app.listen(0, '127.0.0.1', () => resolve(s));
+  });
+  const address = sseServer.address() as { port: number };
+  sseBaseUrl = `http://127.0.0.1:${address.port}`;
+});
+
+afterAll(async () => {
+  await new Promise<void>((resolve, reject) =>
+    sseServer.close((err) => (err ? reject(err) : resolve())),
+  );
+});
+
+/** Synthetic id — the SSE + sse-status routes never look the game up. */
+const SSE_TEST_GAME_ID = 'sse-hermetic-game';
 
 /**
  * Opens a raw TCP connection speaking minimal HTTP with Accept:
@@ -286,11 +346,12 @@ describe.skipIf(!SERVER_PROBE.available)('Model assignment routes (validation ar
  */
 function openSSE(gameId: string): Promise<net.Socket> {
   return new Promise((resolve, reject) => {
-    const socket = net.createConnection(new URL(BASE_URL).port ? Number(new URL(BASE_URL).port) : 3004, new URL(BASE_URL).hostname);
+    const url = new URL(sseBaseUrl);
+    const socket = net.createConnection(Number(url.port), url.hostname);
     socket.setTimeout(10000);
     socket.on('connect', () => {
       socket.write(
-        `GET /api/v1/games/${gameId}/events HTTP/1.1\r\nHost: ${new URL(BASE_URL).host}\r\nAccept: text/event-stream\r\n\r\n`,
+        `GET /api/v1/games/${gameId}/events HTTP/1.1\r\nHost: ${url.host}\r\nAccept: text/event-stream\r\n\r\n`,
       );
       resolve(socket);
     });
@@ -302,6 +363,7 @@ function openSSE(gameId: string): Promise<net.Socket> {
   });
 }
 
+/** Read whatever arrives on the SSE socket within `ms`. */
 async function readSSEFor(socket: net.Socket, ms: number): Promise<string> {
   const chunks: Buffer[] = [];
   const onData = (chunk: Buffer) => chunks.push(chunk);
@@ -311,40 +373,64 @@ async function readSSEFor(socket: net.Socket, ms: number): Promise<string> {
   return Buffer.concat(chunks).toString();
 }
 
+/**
+ * MAF-FLAKE-001: read from the SSE socket UNTIL the accumulated stream
+ * contains `marker` (bounded by a 5s deadline). Replaces the fixed
+ * sleep-then-grep reads whose 800/1500ms budgets flaked under load —
+ * first-chunk timing is now waited for, not assumed.
+ */
+async function readSSEUntil(socket: net.Socket, marker: string, deadlineMs = 5000): Promise<string> {
+  let stream = '';
+  const start = Date.now();
+  while (!stream.includes(marker) && Date.now() - start < deadlineMs) {
+    stream += await readSSEFor(socket, 100);
+  }
+  expect(stream.includes(marker)).toBe(true);
+  return stream;
+}
+
 async function sseStatus(gameId: string): Promise<{ activeConnections: number; isStreaming: boolean }> {
-  const response = await fetch(`${BASE_URL}/api/v1/games/${gameId}/sse-status`);
+  const response = await fetch(`${sseBaseUrl}/api/v1/games/${gameId}/sse-status`);
   expect(response.status).toBe(200);
   const body = await response.json();
   return body.data;
 }
 
-describe.skipIf(!SERVER_PROBE.available)('SSE event streaming', () => {
+/** Poll sse-status until the predicate holds (bounded); returns the last read. */
+async function waitForStatus(
+  gameId: string,
+  predicate: (data: { activeConnections: number; isStreaming: boolean }) => boolean,
+  attempts = 25,
+): Promise<{ activeConnections: number; isStreaming: boolean }> {
+  let data = await sseStatus(gameId);
+  for (let i = 0; i < attempts && !predicate(data); i++) {
+    await new Promise((resolve) => setTimeout(resolve, 200));
+    data = await sseStatus(gameId);
+  }
+  return data;
+}
+
+describe('SSE event streaming (hermetic router on ephemeral port)', () => {
   it('streams a connected event for a game and reports it in sse-status', async () => {
-    const gameId = await createGame();
+    const gameId = SSE_TEST_GAME_ID;
 
     const socket = await openSSE(gameId);
     try {
-      const stream = await readSSEFor(socket, 1500);
+      const stream = await readSSEUntil(socket, '"type":"connected"');
       expect(stream).toContain('HTTP/1.1 200');
       expect(stream).toContain('text/event-stream');
-      // The route writes an initial connection event on subscribe.
-      expect(stream).toContain('"type":"connected"');
     } finally {
       socket.destroy();
     }
 
     // After the disconnect is processed the counter must return to 0.
-    let data = await sseStatus(gameId);
-    for (let i = 0; i < 10 && data.activeConnections !== 0; i++) {
-      await new Promise((resolve) => setTimeout(resolve, 200));
-      data = await sseStatus(gameId);
-    }
+    const data = await waitForStatus(gameId, (d) => d.activeConnections === 0);
     expect(data.activeConnections).toBe(0);
     expect(data.isStreaming).toBe(false);
   }, 20000);
 
   it('reports activeConnections 1 + isStreaming while a client is connected', async () => {
-    const gameId = await createGame();
+    const gameId = SSE_TEST_GAME_ID;
 
     expect((await sseStatus(gameId)).activeConnections).toBe(0);
 
@@ -352,7 +438,7 @@ describe.skipIf(!SERVER_PROBE.available)('SSE event streaming', () => {
     try {
       // Consume the response head + connected event so the server registers
       // the subscription, then check the counter from a separate connection.
-      await readSSEFor(socket, 800);
+      await readSSEUntil(socket, '"type":"connected"');
       const data = await sseStatus(gameId);
       expect(data.activeConnections).toBe(1);
       expect(data.isStreaming).toBe(true);
@@ -362,11 +448,7 @@ describe.skipIf(!SERVER_PROBE.available)('SSE event streaming', () => {
 
     // Wait for the server to process the disconnect before the suite ends,
     // so no subscription leaks into other tests.
-    let data = await sseStatus(gameId);
-    for (let i = 0; i < 10 && data.activeConnections !== 0; i++) {
-      await new Promise((resolve) => setTimeout(resolve, 200));
-      data = await sseStatus(gameId);
-    }
+    const data = await waitForStatus(gameId, (d) => d.activeConnections === 0);
     expect(data.activeConnections).toBe(0);
   }, 20000);
 });
