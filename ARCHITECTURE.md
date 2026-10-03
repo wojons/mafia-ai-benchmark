@@ -132,7 +132,8 @@ mafia/
 │   ├── apps/server/src/
 │   │   ├── index.js                   # Main server (Express + WS)
 │   │   ├── index.ts                   # TypeScript entry
-│   │   ├── integration.test.js        # 31 API integration tests ✅
+│   │   ├── __tests__/                 # vitest suites (api.test.ts carries
+│   │   │                              # the live-API integration coverage)
 │   │   │
 │   │   ├── routes/
 │   │   │   └── index.ts               # All REST API endpoints
@@ -209,7 +210,7 @@ mafia/
 │
 ├── 🧪 TESTS
 │   ├── apps/server/src/
-│   │   ├── integration.test.js        # 31 API tests ✅ PASSING
+│   ├── apps/server/src/__tests__/     # vitest live-API suites ✅ RUNNING
 │   │   └── services/event-bus.test.ts # 40+ unit tests ✅ CREATED
 │   │
 │   └── packages/shared/src/__tests__/ # Shared package tests
@@ -508,7 +509,7 @@ pnpm run web
 | Start Game | `node cli.js games start <game-id>` |
 | List Games | `node cli.js games list` |
 | View Stats | `node cli.js stats` |
-| Run Tests | `node apps/server/src/integration.test.js` |
+| Run Tests | `pnpm --filter @mafia/server test:run` |
 | Help | `node cli.js help` |
 
 ---
