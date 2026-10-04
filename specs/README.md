@@ -8,7 +8,7 @@ This directory contains detailed technical specifications for the Mafia AI Bench
 2. **[Split-Pane Consciousness](./split-pane-consciousness.md)** - Core innovation: THINK vs SAYS streams
 3. **[Multi-Agent AI Architecture](./multi-agent-ai-architecture.md)** - Complete system architecture
 
-## Specification Files (20 total)
+## Specification Files (45 total)
 
 ### ⭐ Core Innovation - Split-Pane Consciousness
 - **`split-pane-consciousness.md`** - Core architecture enabling:
@@ -86,6 +86,47 @@ This directory contains detailed technical specifications for the Mafia AI Bench
 ### Implementation Planning
 - `implementation-overview.md` - Complete implementation roadmap with 8 phases
 - `README.md` - This file
+
+## Additional Specs (26 files not indexed above — discovered 2026-10-04, DOC-13)
+
+> These files were present in `specs/` but never linked from this README. Most are
+> historical planning/audit artifacts, implementation notes, or auxiliary specs.
+> They are indexed here verbatim so every file is one hop from this README; titles
+> are taken from each file's first heading.
+
+### Product & architecture background
+- `00-PRD.md` - PRD (original product requirements document)
+- `01-Architecture.md` - Architecture (original architecture document)
+- `game-flow-and-rules.md` - Game Flow & Rules Specification
+- `correct-night-flow.md` - Correct Night Phase with Mafia Team Discussion & Personas
+- `game-flow.md` - Correct Game Flow
+- `multi-role-coordination.md` - Multiple Same-Role Player Coordination Spec
+- `persona-system.md` - Persona System
+- `player-model-assignment.md` - Player Model Assignment
+- `game-explained.md` - "The Architecture of Deception" - comprehensive game analysis
+- `game-explained-insights.md` - Mafia Game Insights from `game-explained.md`
+
+### Server & operations
+- `production-server-specs.md` - Production Server Specifications
+- `game-persistence.md` - Game Persistence & Recovery Specification
+- `logging-system.md` - Logging System Specification
+- `sync-integration.md` - Sync-Twin Integration Contract
+- `admin-dashboard.md` - Admin Dashboard Specification
+
+### Benchmark & AI implementation notes
+- `benchmark-methodology.md` - Benchmark Methodology
+- `benchmark-runner.md` - Benchmark Runner
+- `ai-prompting-enhancement.md` - AI Prompting Enhancement Implementation
+- `AI_PROMPTING_QUICK_REFERENCE.md` - AI Prompting Changes - Quick Reference
+- `IMPLEMENTATION_PROMPTING_STATUS.md` - AI Prompting Enhancement - Implementation Progress
+- `structured-output-implementation.md` - Structured Output & Configurable Model System Implementation
+
+### Historical audit / planning artifacts (superseded - kept for provenance)
+- `AUDIT_RESULTS.md` - Critical Issues Found - Audit Results
+- `IMPLEMENTATION_PLAN.md` - Implementation Plan to Fix Critical Issues
+- `_index.md` - Specs Index
+- `_prompt.md` - Specs Folder Prompt
+- `AGENTS.md` - specs/ directory agent instructions
 
 ## Role Configuration (Default 10-player)
 
