@@ -10,7 +10,11 @@ How this repo ships. The release surface is three layers, all required:
 ## Version authority
 
 The version lives in 5 manifests: `package.json` + `apps/{cli,server,web}/package.json`
-+ `packages/shared/package.json`. All must agree. `CHANGELOG.md`'s newest
++ `packages/shared/package.json`. All must agree. The root `VERSION` file is a
+6th synced surface: it is a legacy consumer convenience (last external
+reader predates the monorepo) and **must be bumped to the same value in
+every release** — `scripts/release.sh` does not read it, so keep it in sync
+manually. `CHANGELOG.md`'s newest
 `## [X.Y.Z]` heading must carry that same version with a real date
 (`{{INSTALL_DATE}}` tokens are a release-blocking defect). The root manifest is
 `private: true`, as are all workspace manifests — **nothing from this repo is

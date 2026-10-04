@@ -26,13 +26,24 @@ const game = new MafiaGame({
 
 await game.startGame(6); // 6 players
 
-// After game ends, get cost report
+// IMPORTANT: `game.costTracker` does NOT exist on the instance right after
+// construction. It is created inside startGame() after the async database
+// connect resolves (game-engine.js:2304), so check for it only AFTER
+// startGame() has begun/completed — a freshly constructed MafiaGame object
+// has no costTracker property and the check below would always be false
+// before startGame.
 if (game.costTracker) {
   const report = game.costTracker.getCostReport(game.gameId);
   console.log(`Total Cost: $${report.totalCost}`);
   console.log(`Budget Used: ${(report.budgetUsedPct * 100).toFixed(2)}%`);
 }
 ```
+
+> **Timing note:** because `costTracker` is initialized inside `startGame()`
+> (after the DB connect, `game-engine.js:2304`), any code that reads it must
+> run after `await game.startGame(...)` — including the budget-limit env
+> vars below, which are read at that same initialization point
+> (`game-engine.js:2306-2310`).
 
 ## Configuration
 

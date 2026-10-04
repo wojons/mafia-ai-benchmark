@@ -245,6 +245,9 @@ changing them requires a new game, not a server restart.
 | `RETRY_DELAY_MS` | engine child | `game-engine.js:1735` | `1000` |
 | `ALLOW_MULTI_ROLE` | engine child | `game-engine.js:1744` (`"true"` enables) | `false` |
 | `LOG_LEVEL` | engine child | `game-engine.js:21` (pino structured logging; inert when `LOG_STRUCTURED=false`) | `info` |
+| `COST_PER_PLAYER_PER_TURN` | engine child | `game-engine.js:2306` (budget limit: max cost per player per turn, USD) | `0.50` |
+| `COST_PER_GAME_TOTAL` | engine child | `game-engine.js:2308` (budget limit: max total cost per game, USD) | `10.00` |
+| `COST_WARNING_THRESHOLD` | engine child | `game-engine.js:2310` (budget warning fires at this fraction of the per-game limit, 0–1) | `0.80` |
 | `PORT` | server | `apps/server/src/index.ts:28` (container port pinned to 3000 by compose) | 3000 (`DEFAULT_PORT`) |
 | `DB_PATH` | server | `apps/server/src/index.ts:43` (SQLite database path) | `./data/mafia.db` |
 | `NODE_ENV` | server | `apps/server/src/index.ts:128` (`production` hides internal error details in API error responses) | — |
