@@ -1545,7 +1545,12 @@ array → `400 { "success": false, "error": "assignments array is required" }`.
 
 **Protocol:** WebSocket with JSON message format
 
-**Authentication:** None (local development only)
+**Authentication:** None on the WebSocket itself (local development only).
+Note: if the optional `ADMIN_AUTH_TOKEN` is set on the server, the HTTP admin
+surface (admin-visibility event reads, game creation) requires the token via
+`Authorization: Bearer <token>` or `X-Admin-Token: <token>` — see
+[CONFIG_GUIDE.md](../CONFIG_GUIDE.md) ("Optional admin auth"). The WS endpoint
+`/ws` itself has no auth handshake.
 
 **Connection Flow:**
 

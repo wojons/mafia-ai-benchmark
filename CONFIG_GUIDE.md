@@ -251,6 +251,24 @@ changing them requires a new game, not a server restart.
 | `PORT` | server | `apps/server/src/index.ts:28` (container port pinned to 3000 by compose) | 3000 (`DEFAULT_PORT`) |
 | `DB_PATH` | server | `apps/server/src/index.ts:43` (SQLite database path) | `./data/mafia.db` |
 | `NODE_ENV` | server | `apps/server/src/index.ts:128` (`production` hides internal error details in API error responses) | — |
+| `ADMIN_AUTH_TOKEN` | server | `apps/server/src/middleware/auth.ts:51` (optional admin API token; see below) | — (auth disabled) |
+
+### 🔐 Optional admin auth (`ADMIN_AUTH_TOKEN`)
+
+Shipped code (`apps/server/src/middleware/auth.ts`, mounted at
+`apps/server/src/index.ts:102`) enforces an **opt-in** admin token:
+
+- **Unset (or empty) = auth fully disabled.** Every request passes through
+  untouched — localhost dev, dashboard and tests behave exactly as before.
+- **When set**, clients must carry the token to:
+  1. read ADMIN-visibility events: `GET /api/v1/games/:gameId/events` with
+     `visibility` `all` / `private` / `admin` (public-visibility reads stay open), and
+  2. create games: `POST /api/v1/games`.
+- **Header syntax (either):** `Authorization: Bearer <token>` or `X-Admin-Token: <token>`.
+- Failures answer `401` with `{ "success": false, "error": "unauthorized" }`.
+
+The token is re-read from the environment on every request (no restart needed
+to rotate it). `.env.sample:93-100` documents the same contract.
 
 Notes:
 - The engine child also inherits `OPENAI_API_KEY`/`DEFAULT_MODEL` from the
