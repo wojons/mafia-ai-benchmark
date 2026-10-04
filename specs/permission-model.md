@@ -9,8 +9,10 @@ Three distinct view modes control what data clients can see. This enables both e
 **Full visibility - for game developers, video creators, analysts**
 
 **Access:**
-- Requires `ADMIN_TOKEN` environment variable
-- Pass token in WebSocket header or query param
+- Server serves ADMIN-visibility events with no authentication by default (localhost dev). Optional opt-in auth (MAF-REV-004): set `ADMIN_AUTH_TOKEN` to require the token for (a) exposing ADMIN-visibility events and (b) game creation.
+- Token transport on REST: `Authorization: Bearer <token>` or `X-Admin-Token: <token>` header. Failures answer `401 {"success": false, "error": "unauthorized"}`. When `ADMIN_AUTH_TOKEN` is unset the auth layer is DISABLED and every request passes through.
+
+**Status note (2026-10-04, DOC-12):** the access-control surface below was rewritten to match the shipped implementation (`apps/server/src/middleware/auth.ts`, `apps/server/src/routes/games.ts`). Earlier revisions described a `?authToken=`/`viewMode=` WebSocket handshake, `pause`/`step` admin routes, and a `PROTECTED` visibility level — none of those exist in shipped code. The conceptual view-mode/event-matrix narrative that follows (Admin/Town/Replay modes, examples) is kept as DESIGN INTENT, clearly labeled; the "as shipped" sections (API Authorization, WebSocket Behavior, CLI Authorization) are the real surface.
 
 **Can See:**
 - ✅ ALL events (public, private, admin)
@@ -26,12 +28,17 @@ Three distinct view modes control what data clients can see. This enables both e
 - Analyzing game strategies
 - Testing new features
 
-**Example Admin Client:**
+**Example Admin Client (design intent — shipped WS has no auth params):**
 ```typescript
-// WebSocket connection with admin token
-const ws = new WebSocket(`ws://localhost:3004/ws/game-123?authToken=${ADMIN_TOKEN}`);
+// REST reads with opt-in admin auth
+const res = await fetch('http://localhost:3004/api/v1/games/123/events?visibility=all', {
+  headers: { Authorization: `Bearer ${process.env.ADMIN_AUTH_TOKEN}` },
+});
 
 // Connection established with admin privileges
+// ADMIN-visibility events (AGENT_THINK_STARTED / AGENT_THINK_COMPLETED,
+// mapped from the legacy engine's ADMIN_ONLY events) are included when auth
+// permits; PRIVATE events appear per the visibility filter.
 ws.onmessage = (event) => {
   const message = JSON.parse(event.data);
   
@@ -53,7 +60,7 @@ ws.onmessage = (event) => {
 ### 2. Town/Public Mode
 **Limited visibility - what a regular player would see**
 
-**Access:**
+**Access (design intent — see "as shipped" sections):**
 - Default mode, no authentication required
 - WebSocket: `?viewMode=town` (or omit parameter)
 
@@ -97,9 +104,9 @@ function filterEventForTownMode(event: Event): Event | null {
 }
 ```
 
-**Example Town Client:**
+**Example Town Client (design intent — shipped WS has no viewMode param):**
 ```typescript
-const ws = new WebSocket('ws://localhost:3004/ws/game-123?viewMode=town');
+const ws = new WebSocket('ws://localhost:3004/ws/game-123');
 
 ws.onmessage = (event) => {
   const message = JSON.parse(event.data);
@@ -191,78 +198,37 @@ function ReplayViewer({ events }) {
 
 ---
 
-## API Authorization
+## API Authorization (as shipped)
 
-### REST Endpoints
+**REST endpoints (`/api/v1`, see `apps/server/src/routes/games.ts`):**
 
-**Public Endpoints (no auth):**
-- `GET /api/games` - List games
-- `GET /api/games/:id` - Basic status (no private fields)
-- `GET /api/games/:id/events?includePrivate=false` - Public events only
+- `GET /api/v1/games` — list games (no auth)
+- `GET /api/v1/games/:id` — game detail (no auth)
+- `GET /api/v1/games/:gameId/events?visibility=public|private|admin|all` — event read with server-side visibility filter (default `all`); `public` returns only PUBLIC events, `private` only PRIVATE ones.
+- `POST /api/v1/games` — create a game (token-gated when `ADMIN_AUTH_TOKEN` is set)
 
-**Admin Endpoints (require token):**
-- `POST /api/games/:id/pause` - Control game
-- `GET /api/games/:id/events?includePrivate=true` - All events
-- `POST /api/games/:id/step` - Manual step
+There are no `pause` / `step` admin routes in shipped code; the engine does not expose manual stepping.
 
-**Token Validation:**
+**Optional admin auth (`ADMIN_AUTH_TOKEN`, MAF-REV-004 — `apps/server/src/middleware/auth.ts`):**
+
 ```typescript
-function validateAdminToken(token: string): boolean {
-  return token === process.env.ADMIN_TOKEN;
-}
+// Opt-in: env var unset (or empty) => layer DISABLED, every request passes.
+// When set, requests must carry the token to:
+//   (a) expose ADMIN-visibility events via GET .../events, and
+//   (b) create games via POST /api/v1/games.
+// Transport: `Authorization: Bearer <token>` or `X-Admin-Token: <token>` header.
+// Failure: 401 JSON { success: false, error: 'unauthorized' }
+// The token is re-read from env on every request; a test override exists
+// (setAdminAuthOverride(token | null | undefined)) so tests avoid env races.
 ```
 
-**Example middleware:**
-```typescript
-function requireAdmin(req: Request, res: Response, next: NextFunction) {
-  const token = req.headers['authorization']?.replace('Bearer ', '');
-  
-  if (!validateAdminToken(token)) {
-    return res.status(403).json({
-      error: {
-        code: 'UNAUTHORIZED',
-        message: 'Admin token required'
-      }
-    });
-  }
-  
-  next();
-}
+**Token Validation (shipped):** constant-time comparison (`timingSafeEqual`) against the effective `ADMIN_AUTH_TOKEN`, never a plain `===` on env.
 
-// Use for admin routes
-app.post('/api/games/:id/pause', requireAdmin, pauseHandler);
-```
+## WebSocket Behavior (as shipped)
 
----
+The server mounts a WebSocket endpoint at `/ws` (`apps/server/src/websocket/index.ts`, `ws` library). There is **no connection-level auth and no `?authToken=` / `viewMode=` query parameters** — the WS layer is a broadcast/event fan-out surface, not a per-connection view-mode filter. Visibility filtering happens on the REST events endpoint (server-side `?visibility=` filter above), not per-WebSocket-connection. Private/admin event content is not gated by a per-client view mode over WS; use the opt-in REST auth + visibility filter for controlled reads.
 
-## WebSocket Authorization
-
-### Connection-Level Auth
-```typescript
-// Server-side WebSocket auth
-wsServer.on('connection', (ws, req) => {
-  const url = new URL(req.url!, 'ws://localhost');
-  const token = url.searchParams.get('authToken');
-  const requestedMode = url.searchParams.get('viewMode') as ViewMode;
-  
-  // Determine effective view mode
-  const effectiveMode = token === ADMIN_TOKEN 
-    ? requestedMode  // Admin can choose any mode
-    : 'town';         // Others get town mode
-  
-  // Store on connection
-  ws.viewMode = effectiveMode;
-  
-  // Send subscription confirmation
-  ws.send(JSON.stringify({
-    type: 'SUBSCRIBED',
-    viewMode: effectiveMode,
-    // ... other fields
-  }));
-});
-```
-
-### Event Filtering per Connection
+### Event Filtering per Connection (design intent — not implemented as shown; see WS note above)
 ```typescript
 function broadcastEvent(gameId: string, event: Event) {
   const connections = connectionsMap.get(gameId);
@@ -298,34 +264,7 @@ function filterEventForViewMode(event: Event, viewMode: ViewMode): Event | null 
 
 ## CLI Authorization
 
-### Admin Mode
-```bash
-# Provide admin token
-mafiactl attach game-123 --admin-token my-secret-token --verbose
-
-# Token can also be in environment
-export MAFIA_ADMIN_TOKEN=my-secret-token
-mafiactl attach game-123 --verbose
-```
-
-### Visibility Flags
-```bash
-# Town mode (default) - public only
-mafiactl attach game-123
-
-# Shows SAY only
-# Alice: "I think Bob is suspicious"
-# Bob: "That's not true!"
-
-# Admin mode - everything
-mafiactl attach game-123 --admin-token xyz --verbose
-
-# Shows SAY and THINK
-# Alice (THINK): "Bob defended Charlie, likely mafia teammate"
-# Alice (SAYS): "I think Bob is suspicious"
-# Bob (THINK): "They're onto me, need to deflect"
-# Bob (SAYS): "That's not true!"
-```
+The shipped CLI does not implement an `attach --admin-token` / `MAFIA_ADMIN_TOKEN` admin mode. Event visibility from the CLI is governed by the same REST `?visibility=` filter and optional `ADMIN_AUTH_TOKEN` described above (set `ADMIN_AUTH_TOKEN` in the environment and the CLI's API reads carry the token, or read public events unauthenticated).
 
 ---
 
@@ -361,11 +300,14 @@ mafiactl attach game-123 --admin-token xyz --verbose
 ### Event Envelope with Visibility
 ```typescript
 enum Visibility {
-  PUBLIC = 'public',      // Everyone sees
-  PROTECTED = 'protected', // Partially redacted
-  PRIVATE = 'private',    // Admin only
-  ADMIN = 'admin'         // System/admin metadata
+  PUBLIC = 'PUBLIC',      // Everyone sees
+  PRIVATE = 'PRIVATE',    // Admin/auth-gated reads only
+  ADMIN = 'ADMIN'         // Admin-visibility (THINK streams, ADMIN_ONLY-mapped legacy events)
 }
+
+// Shipped shape (packages/shared/src/events/index.ts): EventVisibility =
+// 'PUBLIC' | 'PRIVATE' | 'ADMIN'. There is no PROTECTED level in shipped code;
+// the example below is design intent from the original draft.
 
 interface EventEnvelope {
   eventType: string;
@@ -376,22 +318,18 @@ interface EventEnvelope {
   payload: any;
 }
 
-// Example: Night resolved (PROTECTED - public sees outcome but not details)
+// Example (illustrative): night outcome with public detail only
 {
-  eventType: 'NIGHT_RESOLVED',
-  visibility: Visibility.PROTECTED,
+  eventType: 'NIGHT_ENDED',
+  visibility: 'PUBLIC',
   payload: {
-    killedId: "p5",          // Hidden in town mode
-    killedName: "Charlie",   // Hidden in town mode
-    protectedId: "p5",       // Hidden in town mode
-    protectedName: "Charlie", // Hidden in town mode
     prevented: true,         // Visible to all
-    publicMessage: "No one died"  // Visible to all
+    publicMessage: 'No one died'  // Visible to all
   }
 }
 ```
 
-### View Mode Filters
+### View Mode Filters (design intent — shipped filtering is the REST `?visibility=` switch)
 ```typescript
 const VIEW_MODE_FILTERS = {
   'town': (event: EventEnvelope) => {
@@ -415,7 +353,10 @@ const VIEW_MODE_FILTERS = {
 
 ## Testing Authorization
 
-### Unit Tests
+### Unit Tests (design intent)
+
+Shipped auth tests live in `apps/server/src/__tests__/middleware/auth.test.ts` (opt-in token enforcement, 401 shape, override toggling). The filter unit tests below are retained as design intent for the conceptual view-mode model.
+
 ```typescript
 describe('View Mode Filters', () => {
   const thinkEvent = {
@@ -444,7 +385,8 @@ describe('View Mode Filters', () => {
 });
 ```
 
-### Integration Tests
+### Integration Tests (design intent — shipped WS has no per-connection auth/view modes; see WS note above)
+
 ```typescript
 // Test WebSocket connection with different view modes
 test('WebSocket respects view mode', async () => {
@@ -480,7 +422,7 @@ test('WebSocket respects view mode', async () => {
 ## Security Considerations
 
 ### Token Management
-- Store `ADMIN_TOKEN` in environment variable
+- Store `ADMIN_AUTH_TOKEN` in environment variable (see `.env.sample`); it is optional — unset means auth disabled
 - Never log token values
 - Rotate tokens periodically
 - Use secure token generation: `crypto.randomBytes(32).toString('hex')`
