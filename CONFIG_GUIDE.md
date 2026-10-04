@@ -251,6 +251,9 @@ changing them requires a new game, not a server restart.
 | `PORT` | server | `apps/server/src/index.ts:28` (container port pinned to 3000 by compose) | 3000 (`DEFAULT_PORT`) |
 | `DB_PATH` | server | `apps/server/src/index.ts:43` (SQLite database path) | `./data/mafia.db` |
 | `NODE_ENV` | server | `apps/server/src/index.ts:128` (`production` hides internal error details in API error responses) | — |
+| `ENABLE_DATABASE` | engine child | `game-engine.js:1750` (legacy engine: `"true"` enables SQLite persistence of legacy-engine games) | `false` |
+| `TEST_BASE_URL` | test-only | `apps/server/src/__tests__/helpers/mafia-server.ts:10` (base URL the server integration suite targets; CI pins it per `.github/workflows/ci.yml`) | `http://localhost:3004` |
+| `OPENROUTER_API_KEY` | test-only | `packages/shared/src/__tests__/integration/real-game.test.ts:25` (fallback for `OPENAI_API_KEY` in the real-game integration test) | — |
 | `ADMIN_AUTH_TOKEN` | server | `apps/server/src/middleware/auth.ts:51` (optional admin API token; see below) | — (auth disabled) |
 
 ### 🔐 Optional admin auth (`ADMIN_AUTH_TOKEN`)
