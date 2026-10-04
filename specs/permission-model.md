@@ -264,7 +264,7 @@ function filterEventForViewMode(event: Event, viewMode: ViewMode): Event | null 
 
 ## CLI Authorization
 
-The shipped CLI does not implement an `attach --admin-token` / `MAFIA_ADMIN_TOKEN` admin mode. Event visibility from the CLI is governed by the same REST `?visibility=` filter and optional `ADMIN_AUTH_TOKEN` described above (set `ADMIN_AUTH_TOKEN` in the environment and the CLI's API reads carry the token, or read public events unauthenticated).
+The shipped CLI does not implement an `attach` admin-token mode (an `--admin-token` flag or an admin token env var is not a shipped option). Event visibility from the CLI is governed by the same REST `?visibility=` filter and optional `ADMIN_AUTH_TOKEN` described above (set `ADMIN_AUTH_TOKEN` in the environment and the CLI's API reads carry the token, or read public events unauthenticated).
 
 ---
 
@@ -387,35 +387,7 @@ describe('View Mode Filters', () => {
 
 ### Integration Tests (design intent — shipped WS has no per-connection auth/view modes; see WS note above)
 
-```typescript
-// Test WebSocket connection with different view modes
-test('WebSocket respects view mode', async () => {
-  // Admin connection
-  const adminWs = new WebSocket(`ws://localhost:3004/ws/game-123?authToken=${ADMIN_TOKEN}`);
-  await waitForOpen(adminWs);
-  
-  const adminSubscribed = await waitForMessage(adminWs);
-  expect(adminSubscribed.viewMode).toBe('admin');
-  
-  // Town connection (no token)
-  const townWs = new WebSocket('ws://localhost:3004/ws/game-123');
-  await waitForOpen(townWs);
-  
-  const townSubscribed = await waitForMessage(townWs);
-  expect(townSubscribed.viewMode).toBe('town');
-  
-  // Send a private event
-  server.broadcastEvent('game-123', privateThinkEvent);
-  
-  // Admin should receive
-  const adminEvent = await waitForMessage(adminWs);
-  expect(adminEvent.event.eventType).toBe('AGENT_THINK_CHUNK');
-  
-  // Town should NOT receive
-  const townTimeout = waitForMessage(townWs, 1000);
-  await expect(townTimeout).rejects.toThrow('Timeout');
-});
-```
+Not shown: shipped tests cover the opt-in REST auth directly (`apps/server/src/__tests__/middleware/auth.test.ts`); the WS per-connection handshake sketch from earlier drafts has no shipped equivalent (it would require the design-intent connection-level auth to exist) and has been removed.
 
 ---
 
