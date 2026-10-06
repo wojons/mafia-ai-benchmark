@@ -154,10 +154,11 @@ An empty value at any role level inherits the next level down.
 | `mafia.config.json` (repo root, gitignored) | JSON `{ "llmModel": "provider/model", ... }` | `mafiactl config` / `./mafia.sh config` |
 | `.env` (repo root, gitignored) | `MAFIA_MODEL=openai/gpt-4` etc. | game-engine.js at game start + server adapter |
 | Game config `roleModels` | JSON map | server adapter (per-game, persisted with the game) |
+| `player_model_assignments` (SQLite) | rows per game/role/player | server adapter (written per game with `roleModels`, read by usage/stat collectors) |
 
-The old `player_model_assignments` / `bulk_model_assignments` /
-`player_config_templates` database tables from earlier drafts of this guide
-are not read by the current engine — removed from this document.
+The old `bulk_model_assignments` / `player_config_templates` database tables
+are schema-only — no non-test source reads them. Removed from this document:
+the retired `config-players` CLI that pretended to manage them.
 
 ---
 
