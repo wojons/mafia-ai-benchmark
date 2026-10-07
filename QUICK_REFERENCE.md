@@ -173,6 +173,18 @@ NOT routed here (see AGENTS.md "Repo layout exceptions").
 │                                                                        │
 └────────────────────────────────────────────────────────────────────────┘
 
+## Legacy / auxiliary entry points (DOC-16, verified 2026-10-07)
+
+Five executable entry points outside the pnpm workspaces — live vs dead:
+
+| Entry point | Status | Notes |
+|---|---|---|
+| `scripts/tools/cli.js` | live | `node scripts/tools/cli.js --help` — targets :3004; `games stop <id>` uses POST /api/v1/legacy-games/:gameId/stop. |
+| `games/run-tests.js` | live (legacy harness) | `node games/run-tests.js --quick` — defaults to http://localhost:3004 (MAFIA_SERVER_URL overrides). Prints "Passed: 0, Failed: 0" against the compose stack — a silent no-op, NOT a green result. |
+| `scripts/tools/persona-evolution.js` | legacy | Unreferenced by any doc or workspace script; inspect before use. |
+| `scripts/tools/integrated-demo.js` | dead | Cannot start: requires './dashboard-server' which does not exist under scripts/tools/ (actual file: src/core-systems/dashboard-server.js) — module-not-found (dated comment in file). |
+| `run-real-game.ts` (repo root) | legacy | Header usage says `node run-real-game.js` — a .js name for a .ts file; no build step produces it. Use the workspace CLI instead (`pnpm --filter @mafia/cli dev -- run-game`). |
+
 🎉 Everything above is wired to the monorepo — run any command to play!
 
 ╔════════════════════════════════════════════════════════════════════╗
