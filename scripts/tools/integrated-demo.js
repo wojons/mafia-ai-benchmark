@@ -2,6 +2,11 @@
 // INTEGRATED DEMO - Run everything together
 // Dashboard server + 3D visualization + Game
 // ============================================
+// LEGACY / DEAD (2026-10-07, DOC-16): this script cannot start — its requires
+// './game-engine' and './dashboard-server' do not exist under scripts/tools/
+// (the real dashboard server lives at src/core-systems/dashboard-server.js),
+// so it dies with module-not-found. Left as-is; see AGENTS.md
+// "Repo layout exceptions › Scripts" for the probe evidence.
 
 require("dotenv").config();
 

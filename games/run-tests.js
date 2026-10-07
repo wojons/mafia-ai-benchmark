@@ -17,7 +17,7 @@ const http = require("http");
 const { URL } = require("url");
 
 // Configuration
-const SERVER_URL = process.env.MAFIA_SERVER_URL || "http://localhost:3000";
+const SERVER_URL = process.env.MAFIA_SERVER_URL || "http://localhost:3004";
 
 // ANSI colors
 const C = {
@@ -39,7 +39,7 @@ async function apiRequest(method, path, body = null) {
       {
         method,
         hostname: url.hostname,
-        port: url.port || 3000,
+        port: url.port || 3004,
         path: url.pathname + url.search,
         headers: { "Content-Type": "application/json" },
       },

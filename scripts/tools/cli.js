@@ -231,7 +231,7 @@ ${colors.white('Examples:')}
       return;
     }
     
-    const res = await apiRequest('POST', `/api/v1/games/${gameId}/stop`);
+    const res = await apiRequest('POST', `/api/v1/legacy-games/${gameId}/stop`);
     
     if (res.data.success === false) {
       console.log(colors.red(`❌ ${res.data.error?.message || 'Failed to stop game'}`));
