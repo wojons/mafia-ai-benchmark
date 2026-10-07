@@ -3,8 +3,9 @@
 ╚════════════════════════════════════════════════════════════════════╝
 
 This is a **pnpm monorepo** (apps/server, apps/cli, apps/web,
-packages/shared). Every command below exists in the repo today — nothing
-here references legacy one-off scripts.
+packages/shared). The commands below use only current workspace scripts —
+one legacy root script, `mafia-players.sh`, predates the monorepo and is
+NOT routed here (see AGENTS.md "Repo layout exceptions").
 
 ┌─ FIRST-TIME SETUP ───────────────────────────────────────────────────┐
 │                                                                        │
