@@ -10,6 +10,7 @@ overrides:
   uuid: ">=14.0.2"
   body-parser: ">=1.20.6"
   fflate: ">=0.6.11"
+  proxy-addr: ">=2.0.8 <3.0.0"
 
 allowBuilds:
   better-sqlite3: true
