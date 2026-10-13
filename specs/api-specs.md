@@ -406,8 +406,19 @@ is not available the route answers `503` with
 
 **Endpoint:** `GET /api/v1/games/:gameId/state`
 
-Returns the in-memory engine state for a game the standard (non-legacy)
-engine owns.
+Returns the live game state for any game the repository knows: the in-memory
+engine state for a standard-engine game, and the event-derived projection for
+legacy-adapter games (DF-MAFIA-AI-BENCHMARK-30).
+
+For legacy-adapter games the `players` table is only populated at game end
+(the bridge emits its roster at ROLES_ASSIGNED, its final event), so while a
+game is live the projection derives players, `activePlayers` and
+`eliminatedPlayers` from the event stream — the same source the games list
+uses to count players. `phase`/`dayNumber`/`turnNumber` come from the last
+persisted event's metadata, with every legacy sub-phase slot
+(`NIGHT_STARTED`, `MAFIA_CHAT`, `DOCTOR_ACTION`, ...) mapped to its server
+`GamePhase`. Once real players rows exist (ENDED games) they stay
+authoritative, with the event-derived dead set overlaid.
 
 **Response (200 OK):** `{ "success": true, "data": <GameFsmState> }` — for
 ended games this is the `currentState` object documented under
