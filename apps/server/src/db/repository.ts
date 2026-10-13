@@ -7,6 +7,10 @@
 import Database from 'better-sqlite3';
 import { v4 as uuidv4 } from 'uuid';
 import { Game, Player, GameEvent, GameConfig, PlayerStats } from '@mafia/shared/types';
+import {
+  extractPlayersFromEvents,
+  extractedPlayerToPlayer,
+} from './player-extraction.js';
 
 /** Row shape from player_model_assignments table. */
 export interface PlayerModelAssignmentRow {
@@ -161,7 +165,7 @@ export class GameRepository {
     if (!row) return null;
     
     const events = this.getEvents(gameId);
-    const players = this.getPlayers(gameId);
+    const playersTableRows = this.getPlayers(gameId);
 
     // MAF-GAP-044: eliminated players come from the event stream (death
     // events), never from the hardcoded empty list. The players table
@@ -171,9 +175,26 @@ export class GameRepository {
     // detail endpoint.
     const eliminatedPlayers = this.deriveEliminatedPlayerIds(events);
     const deadSet = new Set(eliminatedPlayers);
-    const playersWithDeaths = players.map(p =>
-      deadSet.has(p.id) ? { ...p, isAlive: false } : p,
-    );
+
+    // DF-MAFIA-AI-BENCHMARK-30: adapter-created games keep an EMPTY players
+    // table for their whole lifetime — the legacy bridge persists rows only
+    // at ROLES_ASSIGNED, which the bridge emits as its FINAL event at game
+    // end. A live game therefore served activePlayers: [] from the
+    // table-only projection while GET /api/v1/games counted event-stream
+    // actorIds and showed players:N — the two endpoints contradicted each
+    // other for every in-flight adapter game. When the table says nothing
+    // but the event stream does, derive the players from the events (the
+    // same extractor the routes already fall back to); once real rows exist
+    // they remain authoritative.
+    let players: Player[];
+    if (playersTableRows.length > 0) {
+      players = playersTableRows.map(p =>
+        deadSet.has(p.id) ? { ...p, isAlive: false } : p,
+      );
+    } else {
+      players = extractPlayersFromEvents(events).map(extractedPlayerToPlayer);
+    }
+    const playersWithDeaths = players;
 
     // MAF-GAP-056: expose the game result. Prefer the games.winner column
     // (written by updateGameResults / the legacy done handler); fall back to

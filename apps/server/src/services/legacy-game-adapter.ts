@@ -10,6 +10,10 @@ import { ChildProcess, spawn } from 'child_process';
 import { EventEmitter } from 'events';
 import { EventBus } from './event-bus.js';
 import { GameRepository } from '../db/repository.js';
+import {
+  extractPlayersFromEvents as extractPlayersFromEventStream,
+  ExtractedPlayer,
+} from '../db/player-extraction.js';
 import { GameEvent, EventVisibility, GamePhase, EventType } from '@mafia/shared/events';
 import { v4 as uuidv4 } from 'uuid';
 import path from 'path';
@@ -1033,14 +1037,36 @@ export class LegacyGameAdapter extends EventEmitter {
     const visibility = visibilityMapping[(legacyEvent.visibility as string) || 'PUBLIC'] || 'PUBLIC';
     
     // Map legacy phase to server phase
+    //
+    // DF-MAFIA-AI-BENCHMARK-30: the legacy engine labels events with its OWN
+    // phase slots — sub-phases of the night (NIGHT_STARTED, MAFIA_CHAT,
+    // MAFIA_KILL_TARGET, MAFIA_KILL_VOTE, MAFIA_PERSUADE, DOCTOR_ACTION,
+    // SHERIFF_INVESTIGATION, VIGILANTE_ACTION), day slots (DAY_STARTED,
+    // DAY_VOTE) and GAME_CREATED. Previously only the explicit transition
+    // names mapped, and every other slot fell through `|| 'SETUP'`. A game
+    // deep into night/day persisted most of its events with phase SETUP, so
+    // the state/detail projection (which reads the last event's phase)
+    // reported frozen SETUP mid-game. Every engine sub-phase maps to the
+    // server GamePhase it belongs to; unknown slots still fall back to SETUP.
     const phaseMapping: Record<string, GamePhase> = {
       'SETUP': 'SETUP',
+      'GAME_CREATED': 'SETUP',
       'NIGHT': 'NIGHT_ACTIONS',
       'NIGHT_ACTIONS': 'NIGHT_ACTIONS',
+      'NIGHT_STARTED': 'NIGHT_ACTIONS',
+      'MAFIA_CHAT': 'NIGHT_ACTIONS',
+      'MAFIA_KILL_TARGET': 'NIGHT_ACTIONS',
+      'MAFIA_KILL_VOTE': 'NIGHT_ACTIONS',
+      'MAFIA_PERSUADE': 'NIGHT_ACTIONS',
+      'DOCTOR_ACTION': 'NIGHT_ACTIONS',
+      'SHERIFF_INVESTIGATION': 'NIGHT_ACTIONS',
+      'VIGILANTE_ACTION': 'NIGHT_ACTIONS',
       'MORNING': 'MORNING_REVEAL',
       'MORNING_REVEAL': 'MORNING_REVEAL',
       'DAY': 'DAY_DISCUSSION',
       'DAY_DISCUSSION': 'DAY_DISCUSSION',
+      'DAY_STARTED': 'DAY_DISCUSSION',
+      'DAY_VOTE': 'DAY_VOTING',
       'VOTING': 'DAY_VOTING',
       'DAY_VOTING': 'DAY_VOTING',
       'RESOLUTION': 'RESOLUTION',
@@ -1048,7 +1074,6 @@ export class LegacyGameAdapter extends EventEmitter {
     };
     
     const serverPhase = phaseMapping[(legacyEvent.phase as string) || 'SETUP'] || 'SETUP';
-    
     const gameEvent: GameEvent = {
       id: uuidv4(),
       gameId,
@@ -1205,141 +1230,10 @@ export class LegacyGameAdapter extends EventEmitter {
     isAlive: boolean;
     joinOrder: number;
   }> {
-    const actorIds = new Set<string>();
-    const nameByActor = new Map<string, string>();
-    const roleByActor = new Map<string, string>();
-    const mafiaByActor = new Map<string, boolean>();
-    const deadActors = new Set<string>();
-
-    const setRole = (id: string, role: string): void => {
-      if (!roleByActor.has(id)) roleByActor.set(id, role);
-    };
-    const setMafia = (id: string, isMafia: boolean): void => {
-      if (!mafiaByActor.has(id)) mafiaByActor.set(id, isMafia);
-    };
-
-    for (const event of events) {
-      const data =
-        event.data && typeof event.data === 'object'
-          ? (event.data as Record<string, unknown>)
-          : {};
-      const actorId = event.actorId;
-
-      // Track actor ids and names (existing behavior)
-      if (actorId) {
-        actorIds.add(actorId);
-        if (!nameByActor.has(actorId) &&
-            event.type === 'AGENT_SAYS_BROADCASTED' &&
-            typeof data.playerName === 'string') {
-          nameByActor.set(actorId, data.playerName);
-        }
-      }
-
-      // 1. ROLES_ASSIGNED — authoritative full assignment
-      if (event.type === 'ROLES_ASSIGNED') {
-        if (Array.isArray(data.assignments)) {
-          for (const assignment of data.assignments as Array<Record<string, unknown>>) {
-            if (typeof assignment.playerId !== 'string' || typeof assignment.role !== 'string') continue;
-            actorIds.add(assignment.playerId);
-            setRole(assignment.playerId, assignment.role);
-            setMafia(assignment.playerId, assignment.role === 'MAFIA');
-          }
-        }
-        if (Array.isArray(data.mafiaTeam)) {
-          for (const pid of data.mafiaTeam as unknown[]) {
-            if (typeof pid !== 'string') continue;
-            actorIds.add(pid);
-            setMafia(pid, true);
-          }
-        }
-      }
-
-      // 2. Death reveals — night deaths (MORNING_REVEAL) plus per-death
-      //    elimination events (PLAYER_LYNCHED / PLAYER_ELIMINATED /
-      //    PLAYER_KILLED, MAF-GAP-044). All carry full player objects
-      //    with role/isMafia/isAlive in data.deaths; every death marks
-      //    the actor dead so detail isAlive becomes false.
-      const isDeathEvent = event.type === 'MORNING_REVEAL'
-        || event.type === 'PLAYER_LYNCHED'
-        || event.type === 'PLAYER_ELIMINATED'
-        || event.type === 'PLAYER_KILLED';
-      if (isDeathEvent && Array.isArray(data.deaths)) {
-        for (const death of data.deaths as Array<Record<string, unknown>>) {
-          if (typeof death.id !== 'string') continue;
-          actorIds.add(death.id);
-          if (typeof death.role === 'string') setRole(death.id, death.role);
-          if (typeof death.isMafia === 'boolean') setMafia(death.id, death.isMafia);
-          deadActors.add(death.id);
-          if (typeof death.name === 'string' && !nameByActor.has(death.id)) {
-            nameByActor.set(death.id, death.name);
-          }
-        }
-      }
-
-      // 3. Sheriff investigation — target roles revealed; actor is the sheriff
-      if (Array.isArray(data.targetRoles) && typeof data.targetId === 'string') {
-        const roles = data.targetRoles as string[];
-        const primaryRole = roles.length === 1 ? roles[0] : (roles.includes('MAFIA') ? 'MAFIA' : roles[0]);
-        actorIds.add(data.targetId);
-        setRole(data.targetId, primaryRole);
-        setMafia(data.targetId, roles.includes('MAFIA'));
-        if (actorId) {
-          setRole(actorId, 'SHERIFF');
-          setMafia(actorId, false);
-        }
-      }
-
-      // 4. Doctor protection — actor is the doctor
-      if (actorId &&
-          typeof data.reason === 'string' &&
-          typeof data.targetId === 'string' &&
-          !Array.isArray(data.targetRoles)) {
-        setRole(actorId, 'DOCTOR');
-        setMafia(actorId, false);
-      }
-
-      // 5. Vigilante action — actor is the vigilante
-      if (actorId && (data.action === 'SHOOT' || data.action === 'PASS')) {
-        setRole(actorId, 'VIGILANTE');
-        setMafia(actorId, false);
-      }
-
-      // 6. Mafia chat — PRIVATE legacy MESSAGE events only come from the
-      //    MAFIA_CHAT phase, so the actor is mafia
-      if (actorId &&
-          event.type === 'AGENT_SAYS_BROADCASTED' &&
-          event.visibility === 'PRIVATE' &&
-          (data.legacyType === 'MESSAGE' || data.legacyType === 'MAFIA_CHAT')) {
-        setRole(actorId, 'MAFIA');
-        setMafia(actorId, true);
-      }
-
-      // 7. Generic role-carrying payloads (PLAYER_LYNCHED, MAFIA_KILL_SUCCEEDED, ...)
-      if (typeof data.role === 'string') {
-        if (typeof data.playerId === 'string') {
-          actorIds.add(data.playerId);
-          setRole(data.playerId, data.role);
-        } else if (typeof data.targetId === 'string') {
-          actorIds.add(data.targetId);
-          setRole(data.targetId, data.role);
-        } else if (actorId) {
-          setRole(actorId, data.role);
-        }
-      }
-      if (typeof data.targetRole === 'string' && typeof data.targetId === 'string') {
-        actorIds.add(data.targetId);
-        setRole(data.targetId, data.targetRole);
-      }
-    }
-
-    return Array.from(actorIds).map((id, index) => ({
-      id,
-      name: nameByActor.get(id) || `Player ${id.substring(0, 8)}`,
-      role: roleByActor.get(id) || 'UNASSIGNED',
-      isMafia: mafiaByActor.get(id) ?? false,
-      isAlive: !deadActors.has(id),
-      joinOrder: index,
-    }));
+    // DF-MAFIA-AI-BENCHMARK-30: delegate to the shared db-layer extractor so
+    // the repository overlay (GameRepository.getGame) and this static entry
+    // point share ONE implementation instead of drifting.
+    return extractPlayersFromEventStream(events);
   }
 }
 
