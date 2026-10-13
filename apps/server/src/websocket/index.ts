@@ -5,7 +5,9 @@
  */
 
 import { WebSocketServer, WebSocket } from 'ws';
+import type { IncomingMessage } from 'node:http';
 import { ServerContext } from '../index.js';
+import { hasAdminCredentialsForSocket } from '../middleware/auth.js';
 import { v4 as uuidv4 } from 'uuid';
 
 interface WSClient {
@@ -15,6 +17,16 @@ interface WSClient {
   userId?: string;
   gameId?: string;
   eventBusUnsubscribe?: () => void;
+  /**
+   * DF-MAFIA-AI-BENCHMARK-34: captured once at the /ws upgrade from the HTTP
+   * request's token transports (Bearer / X-Admin-Token / ?token=). Mirrors the
+   * HTTP clamp (publicOnlyFallbackVisibility in middleware/auth.ts): when the
+   * admin auth layer is enforcing and the client carried NO valid token, this
+   * joiner is public-only — ADMIN/PRIVATE-visibility EventBus frames are
+   * withheld. When auth is DISABLED this is true for everyone (unchanged
+   * behavior for localhost dev and the dashboard).
+   */
+  adminAuthorized: boolean;
 }
 
 interface WSMessage {
@@ -45,19 +57,29 @@ export class WebSocketHandler {
   }
   
   private setupServer(): void {
-    this.wss.on('connection', (ws: WebSocket) => {
-      this.handleConnection(ws);
+    this.wss.on('connection', (ws: WebSocket, request: IncomingMessage) => {
+      this.handleConnection(ws, request);
     });
     
     console.log('✅ WebSocket server initialized');
   }
   
-  private handleConnection(ws: WebSocket): void {
+  private handleConnection(ws: WebSocket, request?: IncomingMessage): void {
     const clientId = uuidv4();
+    // DF-MAFIA-AI-BENCHMARK-34: resolve the joiner's admin authorization ONCE
+    // from the upgrade request. The clamp below delivers frames per-joiner —
+    // the WS equivalent of the HTTP publicOnlyFallbackVisibility clamp — so
+    // an anonymous joiner sees PUBLIC frames only and never the ADMIN
+    // frames (mafia role attribution, private think text). The token itself
+    // never enters this object.
+    const adminAuthorized = request
+      ? hasAdminCredentialsForSocket(request)
+      : true; // no upgrade request surfaced (test double): stay permissive, unchanged legacy behavior
     const client: WSClient = {
       id: clientId,
       ws,
       subscriptions: new Set(),
+      adminAuthorized,
     };
     
     this.clients.set(clientId, client);
@@ -370,12 +392,23 @@ export class WebSocketHandler {
   }
   
   broadcastToGame(gameId: string, event: Record<string, unknown>, options?: WSBroadcastOptions): void {
+    // DF-MAFIA-AI-BENCHMARK-34: the event's visibility decides nothing on its
+    // own — each CLIENT's authorization does. An unauthenticated joiner
+    // (adminAuthorized=false while auth is enforced) never receives
+    // ADMIN/PRIVATE-visibility frames, even though the underlying EventBus
+    // subscription saw them.
+    const visibility = typeof event.visibility === 'string'
+      ? event.visibility.toUpperCase()
+      : 'PUBLIC';
     this.clients.forEach((client) => {
       if (options?.excludeClientId && client.id === options.excludeClientId) {
         return;
       }
       
       if (client.gameId === gameId && client.ws.readyState === WebSocket.OPEN) {
+        if (!client.adminAuthorized && visibility !== 'PUBLIC') {
+          return;
+        }
         client.ws.send(JSON.stringify({
           type: 'GAME_EVENT',
           payload: event,
@@ -386,8 +419,15 @@ export class WebSocketHandler {
   }
   
   broadcastToAll(event: Record<string, unknown>): void {
+    // Same per-client visibility clamp as broadcastToGame (DF-34).
+    const visibility = typeof event.visibility === 'string'
+      ? event.visibility.toUpperCase()
+      : 'PUBLIC';
     this.clients.forEach((client) => {
       if (client.ws.readyState === WebSocket.OPEN) {
+        if (!client.adminAuthorized && visibility !== 'PUBLIC') {
+          return;
+        }
         client.ws.send(JSON.stringify({
           type: 'BROADCAST',
           payload: event,

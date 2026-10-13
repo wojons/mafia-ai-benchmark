@@ -50,13 +50,24 @@ export function useGameEvents(gameId: string | null) {
     if (!gameId) return;
 
     const wsUrl = import.meta.env.VITE_WS_URL || 'ws://localhost:3004/ws';
+    // DF-MAFIA-AI-BENCHMARK-34: when the server enforces ADMIN_AUTH_TOKEN,
+    // the dashboard can be granted the full (ADMIN/PRIVATE-inclusive) feed by
+    // setting VITE_ADMIN_TOKEN. Browsers cannot send headers on the WebSocket
+    // handshake, so the token rides the upgrade URL as ?token=<value>; absent
+    // or empty means the anonymous public-only path (server clamps ADMIN
+    // frames for us — this additive knob only WIDENS what the dashboard sees).
+    const adminToken = import.meta.env.VITE_ADMIN_TOKEN as string | undefined;
+    const wsConnectUrl =
+      typeof adminToken === 'string' && adminToken.length > 0
+        ? `${wsUrl}${wsUrl.includes('?') ? '&' : '?'}token=${encodeURIComponent(adminToken)}`
+        : wsUrl;
     let reconnectTimer: ReturnType<typeof setTimeout>;
     let reconnectAttempts = 0;
     const maxReconnectAttempts = 10;
 
     function connect() {
       try {
-        const ws = new WebSocket(wsUrl);
+        const ws = new WebSocket(wsConnectUrl);
         wsRef.current = ws;
 
         ws.onopen = () => {

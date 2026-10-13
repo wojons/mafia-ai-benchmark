@@ -150,3 +150,50 @@ export function publicOnlyFallbackVisibility(req: Request): 'public' | null {
   if (visibility === 'public') return null; // already the safe filter
   return 'public';
 }
+
+/**
+ * WebSocket-side credential check (DF-MAFIA-AI-BENCHMARK-34). The /ws upgrade
+ * is a plain GET with browser-native headers, so the SAME token transports the
+ * HTTP path uses compare cleanly: `Authorization: Bearer <token>` and
+ * `X-Admin-Token: <token>`. Browsers cannot set custom headers on a WebSocket
+ * handshake, so `?token=<token>` on the upgrade URL is accepted too — the
+ * token stays in the URL only if the caller puts it there, which is the same
+ * trade-off every query-param-token WS design makes.
+ *
+ * Auth disabled (no ADMIN_AUTH_TOKEN) => true, mirroring hasAdminCredentials.
+ * Deliberately shares getAdminAuthToken + tokensEqual so the WS path can never
+ * drift from the HTTP token rules.
+ */
+export function hasAdminCredentialsForSocket(req: {
+  headers: { authorization?: unknown; 'x-admin-token'?: unknown };
+  url?: string;
+}): boolean {
+  const token = getAdminAuthToken();
+  if (token === null) return true;
+
+  const authz = req.headers.authorization;
+  if (typeof authz === 'string') {
+    const m = authz.match(/^Bearer\s+(.+)$/i);
+    if (m && tokensEqual(m[1].trim(), token)) return true;
+  }
+
+  const headerToken = req.headers['x-admin-token'];
+  if (typeof headerToken === 'string' && headerToken.trim() !== '') {
+    if (tokensEqual(headerToken.trim(), token)) return true;
+  }
+
+  // WebSocket handshake fallback: ?token= / &token= on the upgrade URL.
+  if (typeof req.url === 'string' && req.url.includes('token=')) {
+    try {
+      const query = new URL(req.url, 'ws://upgrade.invalid').searchParams;
+      const provided = query.get('token');
+      if (provided && provided.trim() !== '') {
+        return tokensEqual(provided.trim(), token);
+      }
+    } catch {
+      // unparseable URL = no token transport found; fall through to deny.
+    }
+  }
+
+  return false;
+}
