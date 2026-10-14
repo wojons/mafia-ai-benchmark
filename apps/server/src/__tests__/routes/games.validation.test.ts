@@ -152,6 +152,69 @@ describe('POST /api/v1/games validation (MAF-REV-001) — legacy engine path', (
   });
 
   // --------------------------------------------------------------------------
+  // DF-MAFIA-AI-BENCHMARK-35: nested config.numPlayers shape
+  // --------------------------------------------------------------------------
+
+  it('creates the documented nested shape { config: { numPlayers: 10 } } with 10 players (201)', async () => {
+    const { status, body } = await postGame(baseUrl, {
+      config: { numPlayers: 10 },
+    });
+
+    expect(status).toBe(201);
+    expect(body.success).toBe(true);
+    expect(body.data?.config?.numPlayers).toBe(10);
+    expect(startedConfigs).toHaveLength(1);
+    expect(startedConfigs[0].numPlayers).toBe(10);
+  });
+
+  it('validates the resolved nested numPlayers (config: { numPlayers: 2 } -> 400)', async () => {
+    const { status, body } = await postGame(baseUrl, {
+      config: { numPlayers: 2 },
+    });
+
+    expect(status).toBe(400);
+    expect(body.success).toBe(false);
+    expect(body.error).toContain('numPlayers');
+    expect(startedConfigs).toHaveLength(0);
+  });
+
+  it('rejects conflicting shapes { numPlayers: 10, config: { numPlayers: 5 } } with 400', async () => {
+    const { status, body } = await postGame(baseUrl, {
+      numPlayers: 10,
+      config: { numPlayers: 5 },
+    });
+
+    expect(status).toBe(400);
+    expect(body.success).toBe(false);
+    expect(body.error).toContain('Conflicting numPlayers');
+    expect(startedConfigs).toHaveLength(0);
+  });
+
+  it('accepts agreeing shapes { numPlayers: 8, config: { numPlayers: 8 } } (201)', async () => {
+    const { status, body } = await postGame(baseUrl, {
+      numPlayers: 8,
+      config: { numPlayers: 8 },
+    });
+
+    expect(status).toBe(201);
+    expect(body.success).toBe(true);
+    expect(body.data?.config?.numPlayers).toBe(8);
+    expect(startedConfigs).toHaveLength(1);
+    expect(startedConfigs[0].numPlayers).toBe(8);
+  });
+
+  it('ignores a nested numPlayers that is not usable (config: {}) falls back to defaults (201)', async () => {
+    const { status, body } = await postGame(baseUrl, {
+      config: { llmProvider: 'openai' },
+    });
+
+    expect(status).toBe(201);
+    expect(body.success).toBe(true);
+    expect(body.data?.config?.numPlayers).toBe(5);
+    expect(startedConfigs).toHaveLength(1);
+  });
+
+  // --------------------------------------------------------------------------
   // engineType
   // --------------------------------------------------------------------------
 

@@ -359,6 +359,34 @@ export function createGamesRouter(
           ? (req.body as Record<string, unknown>)
           : {};
 
+      // DF-MAFIA-AI-BENCHMARK-35: the spec (specs/api-specs.md "Create New
+      // Game") documents the nested shape { config: { numPlayers: 10 } },
+      // while this route only ever read the top-level body.numPlayers — so a
+      // documented 10-player request silently created a 5-player game.
+      // Resolve the nested value into the top-level field so the existing
+      // MAF-REV-001 validation covers the documented shape, and reject the
+      // ambiguous case where both are present and disagree.
+      const bodyConfig: Record<string, unknown> =
+        typeof body.config === 'object' && body.config !== null && !Array.isArray(body.config)
+          ? (body.config as Record<string, unknown>)
+          : {};
+      const nestedNumPlayers = bodyConfig.numPlayers;
+
+      if (
+        nestedNumPlayers !== undefined &&
+        body.numPlayers !== undefined &&
+        body.numPlayers !== nestedNumPlayers
+      ) {
+        res.status(400).json({
+          success: false,
+          error: `Conflicting numPlayers: top-level ${JSON.stringify(body.numPlayers)} vs config.numPlayers ${JSON.stringify(nestedNumPlayers)}. Provide only one`,
+        });
+        return;
+      }
+      if (nestedNumPlayers !== undefined && body.numPlayers === undefined) {
+        body.numPlayers = nestedNumPlayers;
+      }
+
       if (body.numPlayers !== undefined) {
         const { numPlayers } = body;
         if (
