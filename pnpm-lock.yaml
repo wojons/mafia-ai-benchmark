@@ -9,7 +9,7 @@ overrides:
   socket.io-parser: '>=4.2.6'
   ws: '>=8.22.0'
   qs: '>=6.16.0'
-  uuid: '>=14.0.2'
+  uuid: '>=14.0.3'
   body-parser: '>=1.20.6'
   fflate: '>=0.6.11'
   proxy-addr: '>=2.0.8 <3.0.0'
@@ -71,7 +71,7 @@ importers:
         specifier: ^8.0.0
         version: 8.2.0
       uuid:
-        specifier: ^14.0.3
+        specifier: '>=14.0.3'
         version: 14.0.3
       ws:
         specifier: '>=8.22.0'
@@ -129,7 +129,7 @@ importers:
         specifier: ^7.1.0
         version: 7.2.0
       uuid:
-        specifier: ^14.0.3
+        specifier: '>=14.0.3'
         version: 14.0.3
       ws:
         specifier: '>=8.22.0'
@@ -245,7 +245,7 @@ importers:
         specifier: ^9.0.0
         version: 9.14.0
       uuid:
-        specifier: ^14.0.3
+        specifier: '>=14.0.3'
         version: 14.0.3
     devDependencies:
       '@types/uuid':
@@ -1061,9 +1061,6 @@ packages:
 
   '@types/node@20.19.43':
     resolution: {integrity: sha512-6oYBAi5ikg4Pl+kGsoYtawUMBT2zZMCvPNF7pVLnHZfd1zf38DRiWn/gT01RYCdUqkv7Fhr+C9ot4/tb+2sVvA==}
-
-  '@types/node@26.6.4':
-    resolution: {integrity: sha512-ldVPDCzj7fsaGZrLB0NuHuTvJcsNasysBAqMolr/cgxrLd1xbqxIr3XJiPnHHJUCxj5sNF1vnRj9aWnrVh5Jcg==}
 
   '@types/node@26.6.5':
     resolution: {integrity: sha512-uMzsv9stDdofIZBx4UGh4Z9ZgXnGC9seRDscilBcTHAeOFk67MZg/k9bWVfO+bk4qZmG+l52hRnLwUiH2LnJTg==}
@@ -3723,10 +3720,6 @@ snapshots:
     dependencies:
       undici-types: 6.21.0
 
-  '@types/node@26.6.4':
-    dependencies:
-      undici-types: 8.9.0
-
   '@types/node@26.6.5':
     dependencies:
       undici-types: 8.9.0
@@ -4065,7 +4058,7 @@ snapshots:
 
   buffer-image-size@0.6.4:
     dependencies:
-      '@types/node': 26.6.4
+      '@types/node': 26.6.5
 
   buffer@5.7.1:
     dependencies:
@@ -4625,7 +4618,7 @@ snapshots:
 
   happy-dom@20.14.5:
     dependencies:
-      '@types/node': 26.6.4
+      '@types/node': 26.6.5
       '@types/whatwg-mimetype': 3.0.2
       '@types/ws': 8.18.2
       buffer-image-size: 0.6.4
