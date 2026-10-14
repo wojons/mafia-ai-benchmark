@@ -876,3 +876,109 @@ describe("benchmark report presentation (MAF-GAP-059)", () => {
     expect(printed).not.toMatch(/CUSTOM\/CUSTOM\//);
   });
 });
+
+// --- DF-MAFIA-AI-BENCHMARK-33: the server's unattributed bucket rendering ---
+
+describe("unattributed-models bucket rendering (DF-MAFIA-AI-BENCHMARK-33)", () => {
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  /** A report whose server bucketed the legacy CUSTOM/* ghosts out of modelPerformance. */
+  const DF33_REPORT = {
+    summary: { totalGames: 212 },
+    modelPerformance: [
+      {
+        provider: "openai",
+        model: "gpt-4o-mini",
+        gamesPlayed: 3,
+        wins: 1,
+        winRate: 0.3333,
+        avgTokens: 600,
+        avgCost: 0.06,
+      },
+    ],
+    unattributedModels: [
+      {
+        key: "CUSTOM/openai",
+        provider: "CUSTOM",
+        model: "openai",
+        gamesPlayed: 208,
+        wins: 0,
+        winRate: 0,
+        avgTokens: 810196.8,
+        avgCost: 0.158,
+        avgLatency: 129.4,
+      },
+      {
+        key: "CUSTOM/qwen3.6-35b-fast",
+        provider: "CUSTOM",
+        model: "qwen3.6-35b-fast",
+        gamesPlayed: 1,
+        wins: 0,
+        winRate: 0,
+        avgTokens: 5000,
+        avgCost: 0.01,
+      },
+    ],
+    recommendations: [],
+  };
+
+  it("renders the bucket as an audit footnote with the server's key, out of the main table", () => {
+    const logSpy = vi.spyOn(console, "log").mockImplementation(() => {});
+    displayResultsOf(new BenchmarkCommand())(DF33_REPORT);
+
+    const printed = logSpy.mock.calls.map((args) => args.join(" ")).join("\n");
+
+    // The bucket section exists and states its non-competitor status.
+    expect(printed).toContain("Unattributed legacy usage");
+    // The served keys render verbatim — no CLI-side re-keying drift.
+    expect(printed).toContain("CUSTOM/openai");
+    expect(printed).toContain("CUSTOM/qwen3.6-35b-fast");
+    // The historical ghost counts survive for audit (208 games / 810K tok).
+    expect(printed).toContain("208 games");
+    expect(printed).toContain("810.2K");
+  });
+
+  it("the bucket never affects the main table, winner banner, or recommendations", () => {
+    const logSpy = vi.spyOn(console, "log").mockImplementation(() => {});
+    displayResultsOf(new BenchmarkCommand())(DF33_REPORT);
+
+    const printed = logSpy.mock.calls.map((args) => args.join(" ")).join("\n");
+
+    // The main table header appears exactly once (bucket rows are outside it).
+    expect(printed.split("Results by Model:").length - 1).toBe(1);
+    // gpt-4o-mini is the only main-table row (2 rows total in the print).
+    expect(printed).toMatch(/openai\/gpt-4o-mini\s+3\s+1\b/);
+    // No ghost row in the Winner banner area — the only 🏆 line names the real model.
+    const winnerLines = printed.split("\n").filter((l) => l.includes("🏆"));
+    expect(winnerLines).toHaveLength(1);
+    expect(winnerLines[0]).toContain("openai/gpt-4o-mini");
+    expect(winnerLines[0]).not.toContain("CUSTOM/");
+  });
+
+  it("tolerates a report WITHOUT the bucket field (older servers) — nothing rendered", () => {
+    const logSpy = vi.spyOn(console, "log").mockImplementation(() => {});
+    displayResultsOf(new BenchmarkCommand())({
+      summary: { totalGames: 4213 },
+      modelPerformance: [
+        {
+          provider: "openai",
+          model: "gpt-4o",
+          gamesPlayed: 1013,
+          wins: 620,
+          winRate: 0.612,
+          avgTokens: 110572,
+          avgCost: 0.0059,
+        },
+      ],
+      recommendations: [],
+    });
+
+    const printed = logSpy.mock.calls.map((args) => args.join(" ")).join("\n");
+    expect(printed).not.toContain("Unattributed legacy usage");
+    // Normal rendering is fully intact.
+    expect(printed).toContain("Results by Model:");
+    expect(printed).toContain("openai/gpt-4o");
+  });
+});

@@ -1939,6 +1939,24 @@ components:
           type: array
           items:
             $ref: '#/components/schemas/ModelPerformance'
+          description: Only real (comparable) models — DF-33 mis-key rows are bucketed under unattributedModels
+        unattributedModels:
+          type: array
+          description: |
+            DF-MAFIA-AI-BENCHMARK-33: legacy CUSTOM/* mis-key aggregates that
+            name no comparable real model (e.g. the cost-tracker rows stored
+            as provider='CUSTOM', model='openai'), bucketed here instead of
+            rendering beside real models or being silently dropped. Always
+            present (empty array when nothing is mis-keyed). Not ranked, not
+            a competitor row.
+          items:
+            allOf:
+              - $ref: '#/components/schemas/ModelPerformance'
+              - type: object
+                properties:
+                  key:
+                    type: string
+                    description: The normalized provider/model key the row arrived under (e.g. 'CUSTOM/openai')
         agentStats:
           type: array
           items:

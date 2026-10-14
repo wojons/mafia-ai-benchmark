@@ -78,6 +78,22 @@ interface BenchmarkReport {
     avgCost: number;
     avgLatency?: number;
   }>;
+  /**
+   * DF-MAFIA-AI-BENCHMARK-33: legacy CUSTOM/* mis-key aggregates the server
+   * buckets out of modelPerformance (optional — older servers omit it).
+   * Rendered as an audit footnote; never treated as competitor rows.
+   */
+  unattributedModels?: Array<{
+    key?: string;
+    provider: string;
+    model: string;
+    gamesPlayed: number;
+    wins: number;
+    winRate: number;
+    avgTokens: number;
+    avgCost: number;
+    avgLatency?: number;
+  }>;
   agentStats?: unknown[];
   recommendations?: string[];
 }
@@ -483,6 +499,12 @@ export class BenchmarkCommand extends Command {
   private displayResults(report: BenchmarkReport): void {
     const summary = report.summary || { totalGames: 0 };
     const results = report.modelPerformance || [];
+    // DF-MAFIA-AI-BENCHMARK-33: the server's unattributed bucket (legacy
+    // CUSTOM/* mis-key aggregates). Optional field on older servers —
+    // tolerate both shapes, never fabricate a row the server didn't send.
+    const unattributed =
+      (report as { unattributedModels?: BenchmarkReport['unattributedModels'] })
+        .unattributedModels || [];
     const recommendations = (report as unknown as { recommendations?: string[] }).recommendations || [];
     // DF-MAFIA-AI-BENCHMARK-28: a run-scoped report announces itself and
     // prints the per-pairing results — the verdict is about THIS run.
@@ -538,6 +560,26 @@ export class BenchmarkCommand extends Command {
 
       console.log(`  ${model} ${games}  ${winsStr}  ${losses}  ${winRate}  ${tokens}  ${cost}`);
     });
+
+    // DF-MAFIA-AI-BENCHMARK-33: audit footnote for the server's
+    // unattributed bucket (legacy CUSTOM/* mis-key aggregates — e.g. the
+    // cost-tracker's 'CUSTOM/openai' 810K-token rows). These are NOT
+    // competitor rows: they are excluded from the main table, the winner
+    // banner, and the recommendations by the server, and rendered here
+    // with an explicit out-of-table label so the excluded usage stays
+    // visible instead of silently vanishing.
+    if (unattributed.length > 0) {
+      console.log(chalk.gray('\n🔒 Unattributed legacy usage (not comparable — excluded from rankings):'));
+      for (const r of unattributed) {
+        const label = (r.key || displayName(r.provider, r.model)).padEnd(24);
+        const gamesPlayed = (r.gamesPlayed ?? 0).toString().padStart(5);
+        const winRate = ((r.winRate ?? 0) * 100).toFixed(1).padStart(6) + '%';
+        const tokens = ((r.avgTokens ?? 0) / 1000).toFixed(1).padStart(9) + 'K';
+        const cost = '$' + (r.avgCost ?? 0).toFixed(2).padStart(6);
+        console.log(chalk.gray(`  ${label} ${gamesPlayed} games  ${winRate}  ${tokens} tok/game  ${cost}/game`));
+      }
+      console.log('');
+    }
 
     // DF-MAFIA-AI-BENCHMARK-28: run-scoped reports print the per-pairing
     // head-to-head results (which model of the pair won each game).
