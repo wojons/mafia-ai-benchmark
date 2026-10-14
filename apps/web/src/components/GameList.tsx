@@ -22,7 +22,7 @@ const MAFIA_ROLES: Array<{ role: string; label: string; icon: string }> = [
 const GameList: React.FC = () => {
   const navigate = useNavigate();
   const [searchParams, setSearchParams] = useSearchParams();
-  const { games, fetchGames, createGame, connecting } = useGameStore();
+  const { games, fetchGames, createGame, connecting, headlineStats, fetchHeadlineStats } = useGameStore();
   const { searchQuery, setSearchQuery, layout } = useUIStore();
   // '/?action=new' (sidebar Quick Action) opens the same create-game modal the
   // header button opens — no second modal. The initializer covers a fresh
@@ -45,7 +45,12 @@ const GameList: React.FC = () => {
   
   useEffect(() => {
     fetchGames({ limit: 50 });
-  }, [fetchGames]);
+    // DF-MAFIA-AI-BENCHMARK-32: the headline bar's Total/Active/Completed
+    // values come from GET /api/v1/stats — the same source the Stats tab
+    // uses. The games list above is a page window (limit=50) and must never
+    // be presented as totals.
+    fetchHeadlineStats();
+  }, [fetchGames, fetchHeadlineStats]);
 
   // Open the create-game modal when navigated to '/?action=new' while the
   // GameList is already mounted (a fresh mount is handled by the initializer).
@@ -122,14 +127,21 @@ const GameList: React.FC = () => {
         </div>
       </div>
       
-      {/* Stats Bar */}
+      {/* Stats Bar (DF-MAFIA-AI-BENCHMARK-32: totals from /stats, same
+          source as the Stats tab; the games page is only a page window).
+          Setup stays page-derived — /stats exposes no setupGames field —
+          and is not a headline. */}
       <div className="stats-bar">
         <div className="stat-item">
-          <span className="stat-value">{games.length}</span>
+          <span className="stat-value">
+            {headlineStats ? headlineStats.totalGames : '—'}
+          </span>
           <span className="stat-label">Total Games</span>
         </div>
         <div className="stat-item">
-          <span className="stat-value green">{games.filter((g) => g.status === 'IN_PROGRESS').length}</span>
+          <span className="stat-value green">
+            {headlineStats ? headlineStats.activeGames : '—'}
+          </span>
           <span className="stat-label">Active</span>
         </div>
         <div className="stat-item">
@@ -137,7 +149,9 @@ const GameList: React.FC = () => {
           <span className="stat-label">Setup</span>
         </div>
         <div className="stat-item">
-          <span className="stat-value">{games.filter((g) => g.status === 'ENDED').length}</span>
+          <span className="stat-value">
+            {headlineStats ? headlineStats.completedGames : '—'}
+          </span>
           <span className="stat-label">Completed</span>
         </div>
       </div>

@@ -86,6 +86,18 @@ interface GameStoreState {
     mafiaWins: number;
     townWins: number;
   };
+
+  /**
+   * DF-MAFIA-AI-BENCHMARK-32: authoritative headline totals for the Games
+   * tab, fetched from GET /api/v1/stats (the same source the Stats tab
+   * uses). The games page only holds a page window, so its length / tallies
+   * must never be rendered as totals. null = no /stats data yet.
+   */
+  headlineStats: {
+    totalGames: number;
+    activeGames: number;
+    completedGames: number;
+  } | null;
   
   // Actions
   initialize: () => Promise<void>;
@@ -94,6 +106,7 @@ interface GameStoreState {
   
   // Game actions
   fetchGames: (filters?: { status?: string; limit?: number }) => Promise<void>;
+  fetchHeadlineStats: () => Promise<void>;
   selectGame: (gameId: string) => Promise<void>;
   createGame: (config?: Record<string, unknown>) => Promise<Game>;
   joinGame: (gameId: string, playerName: string) => Promise<void>;
@@ -139,6 +152,7 @@ export const useGameStore = create<GameStoreState>()(
       mafiaWins: 0,
       townWins: 0,
     },
+    headlineStats: null,
     
     // Initialize
     initialize: async () => {
@@ -202,6 +216,41 @@ export const useGameStore = create<GameStoreState>()(
         set({ games });
       } catch (error) {
         console.error('Failed to fetch games:', error);
+      }
+    },
+
+    // DF-MAFIA-AI-BENCHMARK-32: authoritative Games-tab headline totals.
+    // GET /api/v1/stats — the SAME source the Stats tab renders — because
+    // the games page holds only a page window (limit=50) whose length and
+    // per-status tallies must never be presented as totals. Fails soft: on
+    // error the store keeps its previous value (initially null), and the
+    // Games tab renders placeholders instead of page-window numbers.
+    fetchHeadlineStats: async () => {
+      try {
+        const s = await api.stats.getGameStats() as unknown as {
+          totalGames?: number;
+          activeGames?: number;
+          completedGames?: number;
+        } | null;
+        if (
+          s &&
+          typeof s.totalGames === 'number' &&
+          Number.isFinite(s.totalGames) &&
+          typeof s.activeGames === 'number' &&
+          Number.isFinite(s.activeGames) &&
+          typeof s.completedGames === 'number' &&
+          Number.isFinite(s.completedGames)
+        ) {
+          set({
+            headlineStats: {
+              totalGames: s.totalGames,
+              activeGames: s.activeGames,
+              completedGames: s.completedGames,
+            },
+          });
+        }
+      } catch (error) {
+        console.error('Failed to fetch game stats:', error);
       }
     },
     
