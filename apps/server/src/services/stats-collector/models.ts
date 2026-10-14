@@ -94,6 +94,80 @@ export function normalizeModelKey(
 }
 
 /**
+ * DF-MAFIA-AI-BENCHMARK-33: the CUSTOM passthrough is not a comparable
+ * competitor. The legacy adapter's cost-tracking shim (MAF-GAP-018)
+ * recorded usage under the CUSTOM provider with the PROVIDER NAME in the
+ * model column (provider='CUSTOM', model='openai' — 1101 live rows / 208
+ * games / 810K avg tokens per game, cost-tracking shape, not a real
+ * model), and legacy player rows carry the same family
+ * ('CUSTOM/qwen3.6-35b-fast'). Any row that still carries provider CUSTOM
+ * after key normalization names no canonical real backend: rows that DO
+ * resolve ('CUSTOM/openai/gpt-4o-mini') were already re-keyed to their
+ * real provider/model by normalizeModelKey (MAF-GAP-045) and left the
+ * CUSTOM provider, so a surviving CUSTOM row is exactly the mis-key
+ * family. The report layer (generateReport, DF-33) buckets these rows
+ * into an explicit `unattributedModels` array instead of rendering them
+ * beside real models or silently dropping them — the data stays
+ * auditable, the main table shows only real models.
+ *
+ * This is a REPORT-layer bucket, not a getModelComparison filter: the
+ * comparison merge keeps every honest source row (its own tests pin that
+ * contract), and the report decides what is presentable.
+ */
+export const MODEL_MISKEY_PROVIDER = 'CUSTOM';
+
+/**
+ * True when a NORMALIZED model row is the DF-33 mis-key family: the row's
+ * provider is still the CUSTOM passthrough. Provider compared
+ * case-insensitively ('custom', 'Custom' spellings included).
+ */
+export function isUnattributedModelRow(row: {
+  provider: unknown;
+  model: unknown;
+}): boolean {
+  return (
+    typeof row?.provider === 'string' &&
+    row.provider.toUpperCase() === MODEL_MISKEY_PROVIDER
+  );
+}
+
+/**
+ * Split the merged comparison rows into the real-model table and the
+ * DF-33 unattributed bucket. The report contract (DF-33) buckets the
+ * mis-key family explicitly instead of silently dropping it, so the data
+ * stays auditable (Bane: a gap must be visible, not invisible) while
+ * modelPerformance only ever shows real models.
+ *
+ * The bucket preserves the ORIGINAL row shape (provider/model/gamesPlayed/
+ * wins/winRate/avgTokens/avgCost/avgLatency) and adds the normalized key
+ * the row arrived under, so a mis-keyed aggregate can be traced back to
+ * its exact source data.
+ */
+export function partitionModelRows<
+  T extends {
+    provider: string;
+    model: string;
+    gamesPlayed: number;
+    wins: number;
+    winRate: number;
+    avgTokens: number;
+    avgCost: number;
+    avgLatency: number;
+  },
+>(rows: T[]): { real: T[]; unattributed: Array<T & { key: string }> } {
+  const real: T[] = [];
+  const unattributed: Array<T & { key: string }> = [];
+  for (const row of rows) {
+    if (isUnattributedModelRow(row)) {
+      unattributed.push({ ...row, key: `${row.provider}/${row.model}` });
+    } else {
+      real.push(row);
+    }
+  }
+  return { real, unattributed };
+}
+
+/**
  * Derive honest per-model rows from real per-game model assignments
  * (player_model_assignments joined to ended games). Wins come ONLY from
  * real per-player rows (players.won = 1) — game-level winners are never

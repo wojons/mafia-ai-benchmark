@@ -476,6 +476,13 @@ class documented in the previous sections.
 | `avgLatency`  | mean `api_calls.latency` per model |
 | `gamesPlayed` | count of games with recorded usage for that model |
 
+Legacy mis-key rows (DF-MAFIA-AI-BENCHMARK-33): usage recorded under the
+CUSTOM passthrough whose normalized key names no real model — e.g. the
+cost-tracking rows stored as `provider='CUSTOM', model='openai'` (the
+provider name in the model column) — is bucketed under the report's
+`unattributedModels` array instead of `modelPerformance`, so those
+aggregates stay auditable but never render as competitor rows.
+
 Recording happens on the legacy engine path at game completion: the bridge's
 `done` message carries the engine's real per-model and per-player usage
 (`apps/server/src/services/legacy-usage-collector.js` — `collectUsage` /

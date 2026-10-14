@@ -21,6 +21,7 @@ import {
   getModelComparison,
   getCompareReport,
   generateRecommendations,
+  partitionModelRows,
 } from './models.js';
 import { getMatchups } from './matchups.js';
 import { getPlayersFromEvents, calculateRolePerformance } from './players.js';
@@ -175,7 +176,14 @@ export { getAggregatedWins } from './wins.js';
 export { getGameWinnerFromEvents, computeDurationFromEvents } from './wins.js';
 export { getDegenerateGameCounts, getDegenerateGameIds } from './degenerate.js';
 export { getMockGameCounts, getMockGameIds } from './mock.js';
-export { getModelComparison, getCompareReport, generateRecommendations } from './models.js';
+export {
+  getModelComparison,
+  getCompareReport,
+  generateRecommendations,
+  partitionModelRows,
+  isUnattributedModelRow,
+  MODEL_MISKEY_PROVIDER,
+} from './models.js';
 export { getMatchups } from './matchups.js';
 export { getPlayersFromEvents, calculateRolePerformance } from './players.js';
 
@@ -301,6 +309,9 @@ function createEmptyReport(): Record<string, unknown> {
       avgDuration: 0,
     },
     modelPerformance: [],
+    // DF-MAFIA-AI-BENCHMARK-33: same always-present contract as
+    // modelPerformance — the bucket shape is stable even on the error path.
+    unattributedModels: [],
     agentStats: noAgentStats,
     recommendations: [],
   };
@@ -802,7 +813,22 @@ export class StatsCollector {
       const gameStats = this.getGameStats();
       const modelComparison = getModelComparison(this.gameRepository);
       const agentStats = this.getAgentStats();
-      
+
+      // DF-MAFIA-AI-BENCHMARK-33: the legacy cost-tracker recorded usage
+      // under the CUSTOM passthrough with the provider name in the model
+      // column ('CUSTOM/openai' — avg 810K tokens/game) and legacy player
+      // rows carry the same family ('CUSTOM/qwen3.6-35b-fast'). Those rows
+      // name no comparable real model, so they must not render beside the
+      // competitors — but silently dropping them would hide 208+ games of
+      // usage from the audit. Bucket them explicitly instead: the report
+      // keeps an `unattributedModels` array with the same row shape plus a
+      // `key` field, and modelPerformance carries only real models. Rows
+      // that DO resolve behind the passthrough ('CUSTOM/openai/gpt-4o-mini')
+      // were re-keyed to their real provider/model at normalization
+      // (MAF-GAP-045) and stay in the main table.
+      const { real: realModelRows, unattributed: unattributedModels } =
+        partitionModelRows(modelComparison);
+
       const report: Record<string, unknown> = {
         generatedAt: new Date().toISOString(),
         summary: {
@@ -826,9 +852,13 @@ export class StatsCollector {
             : 0,
           avgDuration: gameStats.avgDuration,
         },
-        modelPerformance: modelComparison.slice(0, 10),
+        modelPerformance: realModelRows.slice(0, 10),
+        // DF-MAFIA-AI-BENCHMARK-33: legacy CUSTOM/* mis-key aggregates,
+        // bucketed for auditability instead of rendering as competitor rows
+        // (or being silently dropped). Same row shape + `key`.
+        unattributedModels,
         agentStats: agentStats.slice(0, 10),
-        recommendations: generateRecommendations(modelComparison),
+        recommendations: generateRecommendations(realModelRows),
       };
       
       if (gameId) {
