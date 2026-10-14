@@ -25,6 +25,151 @@ import {
 import { getMatchups } from './matchups.js';
 import { getPlayersFromEvents, calculateRolePerformance } from './players.js';
 
+// ==================== REPORT MEMOIZATION (PERF-MAFIA-2) ====================
+
+/**
+ * Cache entry for generateReport(): the watermark fingerprint the report
+ * was computed from, and the report itself.
+ */
+interface ReportCacheEntry {
+  watermark: string;
+  report: Record<string, unknown>;
+  /**
+   * PRAGMA data_version snapshot taken when the report was cached. It moves
+   * on any cross-connection commit (other processes / connections), while
+   * same-connection writes are caught by the per-table watermark itself.
+   * Checking both is cheap and closes the foreign-writer hole.
+   */
+  dataVersion: number;
+}
+
+/**
+ * PERF-MAFIA-2: generateReport() over the full fleet costs 1.2-1.4s at
+ * 4K games / 19.7K token_usage rows (sequential SQL + per-row JS merge in
+ * getGameStats / getModelComparison / getAgentStats), identical warm and
+ * cold — every dashboard/CLI report render paid full price for identical
+ * data. Memoize the no-gameId report keyed by a DATA watermark: identical
+ * data re-serves instantly, any write to the report's source tables
+ * busts the cache and recomputes. The response shape is unchanged.
+ */
+
+/**
+ * The generated report is shared per GameRepository instance: production
+ * constructs exactly one repository (one cache), while every test builds
+ * a fresh in-memory SQLite repository and therefore gets its own clean
+ * cache for free — no cross-test contamination and no manual reset API.
+ */
+const reportCacheByRepo = new WeakMap<GameRepository, ReportCacheEntry>();
+
+/**
+ * The data fingerprint ALL report inputs (getGameStats / getModelComparison /
+ * getAgentStats / getFailedGames / recommendations) are derived from:
+ *   - games: count, per-status count, winner/ended_at/duration/day_count/
+ *     total_turns/total_events/total_tokens/total_cost sums, and the sum of
+ *     config+status lengths — the length sums catch IN-PLACE mutations the
+ *     per-table rowid/timestamp watermark cannot see (e.g. the write-time
+ *     mock/degenerate markers flipped later via UPDATE games SET config =
+ *     json_set(config, '$.mock', 1): same rows, same statuses, different
+ *     bytes),
+ *   - players: count + provider/model/alive/mafia/won/tokens_used sums
+ *     (models.ts win attribution reads these columns),
+ *   - events: count + phase length/type length/turn/day sums (winner-from-
+ *     events and degenerate classification read events),
+ *   - token_usage / api_calls / agent_sessions: count + max(rowid, timestamp)
+ *     + token/cost/latency sums,
+ *   - player_model_assignments (legacy model path).
+ * Stringified so equality is one === compare. A single query keeps the
+ * cache-key cost (~1ms even at 4K games) far below the ~1.3s it guards.
+ * Any read failure returns null: the caller then skips the cache entirely
+ * (never serving stale data on a broken fingerprint).
+ */
+function computeReportWatermark(repo: GameRepository): string | null {
+  try {
+    const db = repo.getDatabase();
+    const row = db.prepare(`
+      SELECT
+        (SELECT COUNT(*) FROM games) AS gamesCount,
+        (SELECT COUNT(*) FROM games WHERE status = 'IN_PROGRESS') AS gamesActive,
+        (SELECT COUNT(*) FROM games WHERE status = 'ENDED') AS gamesEnded,
+        (SELECT COUNT(*) FROM games WHERE status NOT IN ('IN_PROGRESS','ENDED')) AS gamesFailed,
+        (SELECT COUNT(*) FROM games WHERE winner IS NOT NULL) AS gamesWcol,
+        (SELECT COALESCE(SUM(ended_at IS NULL), 0) FROM games) AS gamesEndedNull,
+        (SELECT COALESCE(SUM(duration), 0) FROM games) AS gamesDurationSum,
+        (SELECT COALESCE(SUM(day_count), 0) FROM games) AS gamesDaySum,
+        (SELECT COALESCE(SUM(total_turns), 0) FROM games) AS gamesTurnsSum,
+        (SELECT COALESCE(SUM(total_events), 0) FROM games) AS gamesEventsSum,
+        (SELECT COALESCE(SUM(total_tokens), 0) FROM games) AS gamesTokensSum,
+        (SELECT COALESCE(SUM(total_cost), 0) FROM games) AS gamesCostSum,
+        (SELECT COALESCE(SUM(LENGTH(config) + LENGTH(status)), 0) FROM games) AS gamesCfgLen,
+        (SELECT COUNT(*) FROM players) AS playersCount,
+        (SELECT COALESCE(SUM(LENGTH(COALESCE(provider, '')) + LENGTH(COALESCE(model, ''))), 0) FROM players) AS playersTextLen,
+        (SELECT COALESCE(SUM(is_alive), 0) FROM players) AS playersAliveSum,
+        (SELECT COALESCE(SUM(is_mafia), 0) FROM players) AS playersMafiaSum,
+        (SELECT COALESCE(SUM(COALESCE(won, -1)), 0) FROM players) AS playersWonSum,
+        (SELECT COALESCE(SUM(tokens_used), 0) FROM players) AS playersTokensSum,
+        (SELECT COUNT(*) FROM events) AS eventsCount,
+        (SELECT COALESCE(SUM(LENGTH(COALESCE(type, ''))), 0) FROM events) AS eventsTypeLen,
+        (SELECT COALESCE(SUM(LENGTH(COALESCE(phase, ''))), 0) FROM events) AS eventsPhaseLen,
+        (SELECT COALESCE(SUM(COALESCE(turn_number, -1)), 0) FROM events) AS eventsTurnSum,
+        (SELECT COALESCE(SUM(COALESCE(day_number, -1)), 0) FROM events) AS eventsDaySum,
+        (SELECT COUNT(*) FROM token_usage) AS tuCount,
+        (SELECT COALESCE(MAX(rowid), 0) FROM token_usage) AS tuMaxRowid,
+        (SELECT COALESCE(MAX(timestamp), 0) FROM token_usage) AS tuMaxTs,
+        (SELECT COALESCE(SUM(total_tokens), 0) FROM token_usage) AS tuTokensSum,
+        (SELECT COALESCE(SUM(cost), 0) FROM token_usage) AS tuCostSum,
+        (SELECT COUNT(*) FROM api_calls) AS acCount,
+        (SELECT COALESCE(MAX(rowid), 0) FROM api_calls) AS acMaxRowid,
+        (SELECT COALESCE(MAX(timestamp), 0) FROM api_calls) AS acMaxTs,
+        (SELECT COALESCE(SUM(latency), 0) FROM api_calls) AS acLatencySum,
+        (SELECT COUNT(*) FROM agent_sessions) AS sessCount,
+        (SELECT COALESCE(MAX(rowid), 0) FROM agent_sessions) AS sessMaxRowid,
+        (SELECT COALESCE(MAX(timestamp), 0) FROM agent_sessions) AS sessMaxTs,
+        (SELECT COALESCE(SUM(tokens_used), 0) FROM agent_sessions) AS sessTokensSum,
+        (SELECT COALESCE(SUM(cost), 0) FROM agent_sessions) AS sessCostSum,
+        (SELECT COUNT(*) FROM player_model_assignments) AS pmaCount
+    `).get() as Record<string, unknown> | undefined;
+    if (!row) return null;
+    return JSON.stringify(row);
+  } catch {
+    // Fingerprint unavailable (schema variant / test double) — skip the
+    // cache and compute fresh. Never serve stale data on a broken key.
+    return null;
+  }
+}
+
+/** Cached-report lookup; null = compute fresh. */
+function getCachedReport(
+  repo: GameRepository,
+): ReportCacheEntry | null {
+  // data_version bumps on every transaction COMMITTED BY ANOTHER CONNECTION;
+  // it does not move for same-connection writes. Skip the cache on any
+  // cross-connection commit since the last report — covers foreign writers
+  // without paying a checksum on every hit.
+  try {
+    const version = repo.getDatabase().pragma('data_version', { simple: true }) as number;
+    const entry = reportCacheByRepo.get(repo);
+    if (!entry) return null;
+    if (entry.dataVersion !== version) return null;
+    return entry;
+  } catch {
+    return null;
+  }
+}
+
+/** Store a freshly computed full report under its watermark + data_version. */
+function storeCachedReport(
+  repo: GameRepository,
+  watermark: string,
+  report: Record<string, unknown>,
+): void {
+  try {
+    const version = repo.getDatabase().pragma('data_version', { simple: true }) as number;
+    reportCacheByRepo.set(repo, { watermark, report, dataVersion: version });
+  } catch {
+    // best-effort: cache miss next time
+  }
+}
+
 // ==================== RE-EXPORTS ====================
 export { getAggregatedWins } from './wins.js';
 export { getGameWinnerFromEvents, computeDurationFromEvents } from './wins.js';
@@ -615,11 +760,44 @@ export class StatsCollector {
   }
   
   // ==================== EXPORT & REPORTING ====================
-  
+
   /**
-   * Generate benchmark report
+   * Generate benchmark report.
+   *
+   * PERF-MAFIA-2: the full-fleet report (no gameId) is memoized on a data
+   * watermark inside computeReportWatermark() — identical data re-serves
+   * from the cache in microseconds instead of paying ~1.3s of sequential
+   * SQL + per-row JS merge. Any write to the report's source tables
+   * (games/players/events/token_usage/api_calls/agent_sessions/
+   * player_model_assignments, including in-place config and status
+   * updates) changes the watermark and busts the cache. Reports scoped to
+   * a single gameId always compute fresh (cheap, event-walk path).
+   * generatedAt stays the time the report was GENERATED — a cache hit
+   * re-serves the original timestamp, which is honest: the data is the
+   * same, the report is the same report.
    */
   generateReport(gameId?: string): Record<string, unknown> {
+    // ---------------- PERF-MAFIA-2 report memoization ----------------
+    // The full-fleet report (no gameId) is cached on a data watermark.
+    // pendingWatermark holds the fingerprint of the moment the cache
+    // missed, so the freshly built report can be stored under the exact
+    // data it was computed from.
+    let pendingWatermark: string | null = null;
+    if (!gameId) {
+      const cached = getCachedReport(this.gameRepository);
+      if (cached) {
+        const currentWatermark = computeReportWatermark(this.gameRepository);
+        if (currentWatermark !== null && currentWatermark === cached.watermark) {
+          // Identical data fingerprint and no foreign commit since cache
+          // time: identical input — identical report. Serve instantly.
+          return cached.report;
+        }
+      }
+      // No usable cache entry (foreign write, watermark change, or the
+      // fingerprint itself failed).
+      pendingWatermark = computeReportWatermark(this.gameRepository);
+    }
+
     try {
       const gameStats = this.getGameStats();
       const modelComparison = getModelComparison(this.gameRepository);
@@ -680,12 +858,21 @@ export class StatsCollector {
         }
       }
       
+      // PERF-MAFIA-2: store the built report under the watermark captured
+      // BEFORE building. If the data changed mid-build the stored
+      // fingerprint no longer matches, so the next call recomputes —
+      // fail-safe by construction, never serves stale data.
+      if (!gameId && pendingWatermark !== null) {
+        storeCachedReport(this.gameRepository, pendingWatermark, report);
+      }
       return report;
     } catch (error) {
       const msg = error instanceof Error ? error.message : String(error);
       // Same response contract as the success path (MAF-GAP-028): built
       // from the shared empty-report factory so the fallback can never
       // drift from the real shape.
+      // PERF-MAFIA-2: the error fallback is NEVER memoized — the next
+      // call retries generation (and may succeed once the failure clears).
       return {
         ...createEmptyReport(),
         error: 'Failed to generate report',
