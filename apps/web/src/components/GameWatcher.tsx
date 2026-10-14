@@ -12,6 +12,7 @@ import {
   asGameEvents,
   type WatcherEvent,
 } from '../utils/watcherEvents';
+import { useConnectionWatchdog } from '../hooks/useConnectionWatchdog';
 
 const GameWatcher: React.FC = () => {
   const { gameId } = useParams<{ gameId: string }>();
@@ -22,6 +23,15 @@ const GameWatcher: React.FC = () => {
   // live WS rows merged in by id, one shared derivation on top.
   const [mergedEvents, setMergedEvents] = useState<WatcherEvent[]>([]);
   const [historyLoaded, setHistoryLoaded] = useState(false);
+  // DF-MAFIA-AI-BENCHMARK-31: bumped when the connection watchdog judges the
+  // socket stale, so the hydration + subscription effects below re-run and
+  // re-mount the live feed over a fresh socket instead of leaving a frozen
+  // tree. onStaleRef pattern keeps the callback identity-stable for the hook.
+  const [refreshEpoch, setRefreshEpoch] = useState(0);
+  const handleStale = React.useCallback(() => {
+    setRefreshEpoch((n) => n + 1);
+  }, []);
+  const { stale, reconnecting } = useConnectionWatchdog(gameId ?? null, handleStale);
 
   useEffect(() => {
     if (gameId) {
@@ -45,7 +55,7 @@ const GameWatcher: React.FC = () => {
         unsubscribe();
       };
     }
-  }, [gameId, selectGame]);
+  }, [gameId, selectGame, refreshEpoch]);
 
   // Hydrate from recorded history on mount (DF-MAFIA-AI-BENCHMARK-11):
   // GET /api/v1/games/<id>/events via the existing api.games.getEvents
@@ -85,7 +95,7 @@ const GameWatcher: React.FC = () => {
     return () => {
       cancelled = true;
     };
-  }, [gameId]);
+  }, [gameId, refreshEpoch]);
 
   const { votes, statements, timeline } = deriveWatcherState(mergedEvents);
 
@@ -114,6 +124,19 @@ const GameWatcher: React.FC = () => {
           ← Leave
         </button>
       </div>
+
+      {/* DF-MAFIA-AI-BENCHMARK-31: never let a dead/frozen socket look like a
+          blank or hung page — show the reconnect state while it recovers. */}
+      {(stale || reconnecting) && (
+        <div className="ws-reconnecting-banner" data-testid="ws-reconnecting-banner" role="status">
+          <span className="pulse" />
+          <span>
+            {stale
+              ? 'Connection lost — reconnecting and re-syncing the live feed…'
+              : 'Reconnecting to the live feed…'}
+          </span>
+        </div>
+      )}
 
       <div className="watcher-content">
         {/* Game State */}
