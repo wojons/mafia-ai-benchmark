@@ -10,6 +10,7 @@ import GameWatcher from './components/GameWatcher';
 import BenchmarkDashboard from './components/BenchmarkDashboard';
 import Settings from './components/Settings';
 import Loading from './components/Loading';
+import ErrorBoundary from './components/ErrorBoundary';
 import SplitPaneView from './components/SplitPaneView';
 import TimelineView from './components/TimelineView';
 // ThreeDViz pulls in three.js (~720 kB minified) — lazy-load so the /3d
@@ -39,7 +40,10 @@ function App() {
       <div className="app-body">
         <Sidebar />
         <main className={`main-content ${sidebarOpen ? '' : 'sidebar-collapsed'}`}>
-          <Suspense fallback={<Loading message="Loading view..." />}>
+          {/* DF-MAFIA-AI-BENCHMARK-31: a render throw inside any route must
+              surface the boundary fallback, never an unmounted blank <main>. */}
+          <ErrorBoundary context="while rendering this view">
+            <Suspense fallback={<Loading message="Loading view..." />}>
           <Routes>
             <Route path="/" element={<GameList />} />
             <Route path="/game/:gameId" element={<GameBoard />} />
@@ -53,6 +57,7 @@ function App() {
             <Route path="*" element={<Navigate to="/" replace />} />
           </Routes>
           </Suspense>
+          </ErrorBoundary>
         </main>
       </div>
     </div>
