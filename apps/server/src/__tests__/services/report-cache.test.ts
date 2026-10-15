@@ -95,8 +95,10 @@ describe('StatsCollector report memoization (PERF-MAFIA-2)', () => {
       const second = stats.generateReport();
       expect((second as any).summary.totalGames).toBe(2);
       expect((second as any).summary.mafiaWinRate).toBeCloseTo(0.5, 5);
-      // Fresh report → fresh generatedAt (the data changed).
-      expect((second as any).generatedAt).not.toBe((first as any).generatedAt);
+      // NOTE: no generatedAt inequality here — two generations in the same
+      // millisecond produce identical ISO timestamps (same-ms collision,
+      // CI run 38696052740). The data-field assertions above already prove
+      // a FRESH object was generated (cache actually busted).
     });
 
     it('INSERTing a new token_usage row changes agentStats on the next call', () => {
@@ -139,8 +141,8 @@ describe('StatsCollector report memoization (PERF-MAFIA-2)', () => {
       // Mock exclusion lived in getGameStats: the mock MAFIA "win" no
       // longer counts once the flag is set.
       expect((second as any).summary.mafiaWinRate).toBe(0);
-      // Cache actually busted: the data-derived rate changed.
-      expect((second as any).generatedAt).not.toBe((first as any).generatedAt);
+      // Same-ms note: no generatedAt inequality — the mock-exclusion rate
+      // flip above is the fresh-object proof (CI run 38696052740 flake).
     });
 
     it('an in-place status flip (IN_PROGRESS → ENDED) busts the cache', () => {
@@ -158,7 +160,8 @@ describe('StatsCollector report memoization (PERF-MAFIA-2)', () => {
       const second = stats.generateReport();
       expect((second as any).summary.activeGames).toBe(0);
       expect((second as any).summary.completedGames).toBe(1);
-      expect((second as any).generatedAt).not.toBe((first as any).generatedAt);
+      // Same-ms note: the activeGames/completedGames flips above prove the
+      // cache busted — generatedAt can be byte-identical in the same ms.
     });
   });
 
@@ -179,7 +182,7 @@ describe('StatsCollector report memoization (PERF-MAFIA-2)', () => {
 
       const second = stats.generateReport('g1');
       expect((second as any).game.winner).toBe('TOWN');
-      expect((second as any).generatedAt).not.toBe((first as any).generatedAt);
+      // Same-ms note: winner flip above is the fresh-object proof.
     });
   });
 
