@@ -695,3 +695,4 @@
 {"id":669,"timestamp":"2026-10-15 05:11:23.679248","event_type":"task_created","task_id":"SUP-DEPS-20261015-MAFIA","actor":"foreman","detail":"{\"id\":\"SUP-DEPS-20261015-MAFIA\",\"status\":\"pending\"}","tick_number":null}
 {"event_type":"task_started","task_id":"SUP-DEPS-20261015-MAFIA","actor":"foreman","detail":"{\"status\":\"in_progress\"}","timestamp":"2026-10-15 06:55:00"}
 {"event_type":"task_completed","task_id":"SUP-DEPS-20261015-MAFIA","actor":"foreman","detail":"{\"status\":\"complete\",\"commit\":\"f463ee4\",\"judge\":\"PASS c740cde2\",\"summary\":\"turbo 2.11.7->2.11.8 tested batch; majors deferred; gates green 410/84/534+build+lint\"}","timestamp":"2026-10-15 07:01:38"}
+{"event_type":"task_created","task_id":"INT-CI-002","actor":"foreman","detail":"{\"reason\":\"CI run 38696052740 flake on tick-255 closeout commit; timestamp-resolution collision in report-cache test\"}","timestamp":"2026-10-15 07:05:44"}
