@@ -455,6 +455,11 @@ ended games this is the `currentState` object documented under
 **Query Parameters:**
 
 - `visibility`: Event filter (default: `"all"`, options: `"all"`, `"public"`, `"private"`, `"admin"`)
+- `limit`: Optional positive integer. Returns the LAST (newest) N events
+  after the visibility filter is applied — `min(limit, available)` events
+  (DF-MAFIA-AI-BENCHMARK-37). When omitted, ALL events are returned
+  (unchanged default behavior). Any non-positive-integer value is rejected
+  with `400` ("Invalid limit … Must be a positive integer").
 
 **Response (200 OK):** Realigned to the live payload (MAF-GAP-073) — full
 event objects under `data`, no `nextSequence` polling contract:

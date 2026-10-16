@@ -167,10 +167,30 @@ export function createGamesRouter(
       }
       // 'all' — no filter
 
+      // DF-MAFIA-AI-BENCHMARK-37: ?limit was ignored here — the endpoint
+      // returned the FULL event list (65 events for ?limit=2 live). Apply the
+      // same pagination contract as GET /api/v1/games: a positive-integer
+      // limit takes the LAST N events (the newest page); when limit is absent
+      // the behavior is unchanged (all events). Any other value is a 400,
+      // never a silent pass-through (MAF-GAP-049 style).
+      let limitedEvents = events;
+      const rawLimit = req.query.limit;
+      if (rawLimit !== undefined) {
+        const limitNumber =
+          typeof rawLimit === 'string' ? Number(rawLimit) : NaN;
+        if (!Number.isInteger(limitNumber) || limitNumber < 1) {
+          return res.status(400).json({
+            success: false,
+            error: `Invalid limit ${JSON.stringify(String(rawLimit))}. Must be a positive integer`,
+          });
+        }
+        limitedEvents = events.slice(-limitNumber);
+      }
+
       res.json({
         success: true,
-        data: events,
-        count: events.length,
+        data: limitedEvents,
+        count: limitedEvents.length,
       });
     } catch {
       res

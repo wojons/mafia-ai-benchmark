@@ -501,3 +501,90 @@ describe('GET /api/v1/games/:gameId elimination state (MAF-GAP-044)', () => {
     expect(game.currentState.turnNumber).toBe(4);
   });
 });
+
+/**
+ * DF-MAFIA-AI-BENCHMARK-37: GET /api/v1/games/:gameId/events ignored ?limit —
+ * the endpoint returned the FULL event list regardless (live: 65 events for
+ * ?limit=2). Now a positive-integer limit takes the LAST (newest) N events
+ * after the visibility filter, limit > available returns all, and the default
+ * (no limit) is unchanged. Invalid values are rejected with 400
+ * (MAF-GAP-049-style validation) instead of a silent pass-through.
+ */
+describe('GET /api/v1/games/:gameId/events honors ?limit', () => {
+  let repo: FakeRepo;
+  let server: Server;
+  let baseUrl: string;
+
+  beforeEach(async () => {
+    repo = createSqliteBackedRepository() as unknown as FakeRepo;
+    repo.seedGame({ id: 'g-evts', status: 'ENDED' });
+    for (let i = 1; i <= 5; i++) {
+      repo.addEvent('g-evts', {
+        type: 'GAME_STARTED',
+        visibility: 'PUBLIC',
+        data: { marker: i },
+        metadata: { turnNumber: 1, dayNumber: 1, phase: 'SETUP', sequence: i },
+      } as any);
+    }
+
+    const app = express();
+    app.use(express.json());
+    app.use(
+      '/',
+      createGamesRouter(
+        { gameEngine: {}, gameRepository: repo, eventBus: createFakeEventBus() } as any,
+        null,
+      ),
+    );
+
+    await new Promise<void>((resolve) => {
+      server = app.listen(0, '127.0.0.1', () => resolve());
+    });
+    const address = server.address() as { port: number };
+    baseUrl = `http://127.0.0.1:${address.port}`;
+  });
+
+  afterEach(async () => {
+    await new Promise<void>((resolve, reject) => {
+      server.close((err) => (err ? reject(err) : resolve()));
+    });
+  });
+
+  it('returns exactly the LAST N events when ?limit=N', async () => {
+    const response = await fetch(`${baseUrl}/api/v1/games/g-evts/events?limit=2`);
+    expect(response.status).toBe(200);
+    const body = await response.json();
+    expect(body.success).toBe(true);
+    expect(body.count).toBe(2);
+    // Newest page: the last two seeded events (markers 4 and 5).
+    expect(body.data.map((e: { data: { marker: number } }) => e.data.marker)).toEqual([4, 5]);
+  });
+
+  it('returns all events when limit exceeds the available count', async () => {
+    const response = await fetch(`${baseUrl}/api/v1/games/g-evts/events?limit=100`);
+    expect(response.status).toBe(200);
+    const body = await response.json();
+    expect(body.count).toBe(5);
+    expect(body.data).toHaveLength(5);
+  });
+
+  it('returns ALL events when no limit is given (default unchanged)', async () => {
+    const response = await fetch(`${baseUrl}/api/v1/games/g-evts/events`);
+    expect(response.status).toBe(200);
+    const body = await response.json();
+    expect(body.count).toBe(5);
+    expect(body.data).toHaveLength(5);
+  });
+
+  it('rejects a non-positive-integer limit with 400', async () => {
+    for (const bad of ['abc', '0', '-1', '2.5']) {
+      const response = await fetch(
+        `${baseUrl}/api/v1/games/g-evts/events?limit=${encodeURIComponent(bad)}`,
+      );
+      expect(response.status).toBe(400);
+      const body = await response.json();
+      expect(body.success).toBe(false);
+      expect(body.error).toContain('Invalid limit');
+    }
+  });
+});
