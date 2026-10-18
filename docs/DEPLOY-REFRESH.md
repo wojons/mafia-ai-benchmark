@@ -54,8 +54,31 @@ trigger therefore does NOT rely on git hooks alone:
    release automation, on merges to the primary branch. Failures are reported
    but never abort the merge.
 
-The timer alone satisfies "live within one cadence" (hourly); the hook makes
-merges converge faster when its path fires.
+3. **Cron belt (every 15 min, runs even if the user manager is down):**
+   installed in kara's crontab — the fastest-cadence trigger, and the one a
+   `crontab -l | grep deploy-refresh` check verifies:
+
+   ```
+   */15 * * * * cd /home/kara/wojons/mafia-ai-benchmark && ./scripts/deploy-refresh-cron.sh 2>&1 | logger -t mafia-deploy-refresh # mafia deploy-refresh (DF-MAFIA-AI-BENCHMARK-38)
+   ```
+
+   Logs land in journald (`journalctl -t mafia-deploy-refresh`), not /tmp, so
+   they survive reboots and rotate with the journal. Re-install verbatim with
+   the standard idempotent pattern if the entry is ever lost:
+
+   ```bash
+   entry='*/15 * * * * cd /home/kara/wojons/mafia-ai-benchmark && ./scripts/deploy-refresh-cron.sh 2>&1 | logger -t mafia-deploy-refresh # mafia deploy-refresh (DF-MAFIA-AI-BENCHMARK-38)'
+   crontab -l 2>/dev/null | grep -q 'deploy-refresh-cron' || \
+     { (crontab -l 2>/dev/null; echo "$entry") | crontab -; }
+   ```
+
+   Cron runs with a minimal PATH (`/usr/bin:/bin`); `/usr/bin/docker`
+   (v29.1.3 + Compose v2.32.1) drives this stack fine, verified by running
+   the wrapper under `PATH=/usr/bin:/bin` — exit 0, output in journald.
+
+The timer + cron alone satisfy "live within one cadence"; the hook makes
+merges converge faster when its path fires. All three triggers are idempotent
+co-consumers of the stamp — the freshest one wins the rebuild, the rest no-op.
 
 ## Manual use
 
