@@ -2,7 +2,7 @@ import { execSync } from 'child_process';
 import { join } from 'path';
 import { existsSync } from 'fs';
 
-const REPO_ROOT = join(__dirname, '..', '..');
+const REPO_ROOT = join(__dirname, '..', '..', '..', '..');
 const SCRIPTS = join(REPO_ROOT, 'scripts');
 
 function run(cmd: string) {
