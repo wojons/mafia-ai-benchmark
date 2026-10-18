@@ -62,6 +62,10 @@ Thumbs.db
 .axiom/
 .hermes/plans/
 
+# Deploy-refresh stamp (DF-MAFIA-AI-BENCHMARK-38): records the HEAD sha of the
+# last successful container rebuild; runtime state, never committed.
+.deploy-stamp
+
 # Turborepo cache
 .turbo/
 
