@@ -92,11 +92,28 @@ curl -s https://openrouter.ai/api/v1/models | jq 'any(.data[]; .id=="deepseek/de
 | `GET /api/v1/games/:id` details for one Stats page | 39 requests, 9-97ms each, 2020ms aggregate |
 | Dashboard DOM load | 27-46ms, 0 longtasks |
 
+## Install leg (fresh box, ephemeral agent)
+
+Probed fresh this tick: the designated host **bunker-las-03** is unreachable
+(`ssh: connect to host <las-03 address> port 22: Connection timed out`; the whole las family is offline on the
+tailnet — las-01 16d, las-02 7d, las-03 15d, las-04 18d). The leg therefore ran on the substitute host
+**bunker-mvp** (ONLINE, 1/50 agents), agent `e0725cd9`, destroyed at the end (row DF-MAFIA-AI-BENCHMARK-44).
+
+| Step | Result |
+|---|---|
+| `git clone https://github.com/wojons/mafia-ai-benchmark.git` (fresh user, no credential) | 1s, HEAD 3550f7d |
+| toolchain probe | `git` present; **node MISSING**, **pnpm MISSING** — docs name them as prerequisites with no sudo-less recipe |
+| user-space node v22.14.0 tarball (29.9 MB) | 3s |
+| `pnpm install --frozen-lockfile` | RC=0, 15s wall (pnpm reports 11.5s) |
+| `pnpm build` | RC=0, 37s (4/4 tasks successful) |
+| `pnpm --filter @mafia/server dev` with **no `.env`**, PORT=3901 | boots; schema init, legacy adapter, WebSocket server, benchmark-run reconciliation all logged |
+| smoke | `/health` 200 (11ms), `/api/v1/health` 200, `/api/v1/games?limit=1` 200, `/api/v1/stats` 200, `/api/v1/benchmark/report` 200 |
+
+**install_seconds ≈ 55s** excluding the node bootstrap; smoke ok; agent destroyed.
+
 ## Not exercised (and why)
 
-- **Install leg (bunker)**: no bunker host was proven reachable this tick, so no ephemeral
-  agent was spawned and no install claim is made. The shipped compose deployment was used
-  instead. An install-leg row belongs to the next tick that has a reachable host.
-- **Creating a game from the New Game modal**: creating a 10-player game spends real LLM
-  money (~$1+ per game at current settings), so DF-42 records the catalog/shape evidence and
-  leaves the live failure mode to be confirmed by the fix.
+- **The compose install path** (README's "no Node.js needed" route) was not exercised this tick; the pnpm path was.
+- **Creating a game from the New Game modal**: creating a 10-player game spends real LLM money (~$1+ per game at
+  current settings), so DF-42/DF-43 record the code-path and catalog evidence and leave the live failure mode to be
+  confirmed by the fix.
