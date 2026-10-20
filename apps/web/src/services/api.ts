@@ -261,6 +261,14 @@ export interface CompareModel {
 
 export interface CompareReport {
   models: CompareModel[];
+  /**
+   * DF-MAFIA-AI-BENCHMARK-36: the CUSTOM/* mis-key family (the same rows
+   * GET /benchmark/report buckets under `unattributedModels`, DF-33) —
+   * same row shape as `models[]` plus the normalized `key`. Never rendered
+   * as competitor rows; present so the excluded usage stays auditable and
+   * both endpoints expose the same model-row key set.
+   */
+  unattributedModels?: Array<CompareModel & { key: string }>;
   headToHead: Array<{
     modelA: string;
     modelB: string;

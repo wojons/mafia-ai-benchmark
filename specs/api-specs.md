@@ -885,10 +885,40 @@ Per-model wins are games the model's side won, attributed from real per-game mod
         "cumulativeWinRate": [1, 1, 0.5, 0.75]
         // running winRate after each game, same length as `games`
       }
+    ],
+    "unattributedModels": [
+      {
+        "key": "CUSTOM/openai",
+        "provider": "CUSTOM",
+        "model": "openai",
+        "gamesPlayed": 208,
+        "wins": 0,
+        "winRate": 0,
+        "avgTokensPerGame": 810197,
+        "avgCostPerGame": 0.158,
+        "avgLatency": 129,
+        "avgRolePerformance": 0,
+        "rolePerformance": {}
+      }
     ]
   }
 }
 ```
+
+**`data.unattributedModels[]` (DF-MAFIA-AI-BENCHMARK-36):** the same
+`CUSTOM/*` mis-key family the report buckets (DF-33) — rows whose
+normalized provider is still the CUSTOM passthrough, e.g. the legacy
+cost-tracker aggregates stored as `provider='CUSTOM', model='openai'` and
+bare legacy player rows like `CUSTOM/qwen3.6-35b-fast`. They are NOT
+first-class competitor rows here either: `data.models` carries only real
+models, `data.trends` carries only real-model series, `data.headToHead`
+drops pairings that involve the family, and the mis-key aggregates move to
+this bucket (same row shape as `data.models[]` plus `key`). Both
+`GET /benchmark/report` and `GET /benchmark/compare` therefore agree
+exactly on the model-row key set. The field is always present (`[]` when
+nothing is mis-keyed). Rows resolvable behind the passthrough (e.g. legacy
+`CUSTOM/openai/gpt-4o-mini` spellings) are re-keyed to their real
+provider/model (MAF-GAP-045) and stay in `data.models`.
 
 **`data.models[].rolePerformance` semantics:** keys are the roles the model
 actually played (`DOCTOR`, `MAFIA`, `SHERIFF`, `VIGILANTE`, `VILLAGER` — any

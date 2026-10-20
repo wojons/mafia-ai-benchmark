@@ -835,6 +835,46 @@ function getHonestReportFallbackModels(
 }
 
 /**
+ * DF-MAFIA-AI-BENCHMARK-36: one row of getCompareReport()'s `models` array.
+ * The `unattributedModels` bucket carries the SAME shape plus a `key`
+ * (the normalized provider/model key), exactly like the report's DF-33
+ * bucket — so a consumer can render both surfaces with one component.
+ */
+type CompareModelRow = {
+  provider: string;
+  model: string;
+  gamesPlayed: number;
+  wins: number;
+  winRate: number;
+  avgTokensPerGame: number;
+  avgCostPerGame: number;
+  avgLatency: number;
+  avgRolePerformance: number;
+  rolePerformance: Record<
+    string,
+    {
+      gamesPlayed: number;
+      wins: number;
+      winRate: number;
+    }
+  >;
+};
+
+/**
+ * True when a normalized `provider/model` KEY belongs to the DF-33/DF-36
+ * mis-key family (provider segment is the CUSTOM passthrough). Keys are
+ * built as `${provider}/${model}`, so only the FIRST segment is the
+ * provider — a model string may itself contain slashes.
+ */
+function isUnattributedModelKey(key: string): boolean {
+  const separator = key.indexOf('/');
+  if (separator <= 0) return false;
+  return (
+    key.slice(0, separator).toUpperCase() === MODEL_MISKEY_PROVIDER
+  );
+}
+
+/**
  * Get comprehensive model comparison report.
  * When the players/token_usage tables are empty (legacy games), derives
  * model and trend data from game events.
@@ -843,25 +883,15 @@ export function getCompareReport(
   gameRepository: GameRepository,
   modelFilter?: string[],
 ): {
-  models: Array<{
-    provider: string;
-    model: string;
-    gamesPlayed: number;
-    wins: number;
-    winRate: number;
-    avgTokensPerGame: number;
-    avgCostPerGame: number;
-    avgLatency: number;
-    avgRolePerformance: number;
-    rolePerformance: Record<
-      string,
-      {
-        gamesPlayed: number;
-        wins: number;
-        winRate: number;
-      }
-    >;
-  }>;
+  models: CompareModelRow[];
+  /**
+   * DF-MAFIA-AI-BENCHMARK-36: the CUSTOM/* mis-key family (see DF-33),
+   * bucketed here instead of rendering as first-class competitor rows.
+   * Same enrichment as `models[]` plus `key`; always present (`[]` when
+   * nothing is mis-keyed) so both benchmark endpoints expose the same
+   * stable shape and the same model-row key set.
+   */
+  unattributedModels: Array<CompareModelRow & { key: string }>;
   headToHead: Array<{
     modelA: string;
     modelB: string;
@@ -911,7 +941,19 @@ export function getCompareReport(
   // getCompareReport now consumes getModelComparison() directly and only
   // enriches the rows with the compare-specific fields (rolePerformance,
   // avgCostPerGame/avgLatency from the recorded usage tables below).
+  //
+  // DF-MAFIA-AI-BENCHMARK-36: the merge itself keeps every honest source
+  // row (that contract is pinned by getModelComparison's own tests), so
+  // the mis-key family is partitioned HERE — the same split the report
+  // applies (DF-33). Bucketing one endpoint only is what left
+  // /benchmark/compare rendering 'CUSTOM/openai' (208 games) and
+  // 'CUSTOM/qwen3.6-35b-fast' as first-class competitor rows beside the
+  // real openai models while /benchmark/report was already clean.
   const modelComparison = getModelComparison(gameRepository);
+  const {
+    real: realModelComparison,
+    unattributed: unattributedComparison,
+  } = partitionModelRows(modelComparison);
 
   // Normalized SQL helpers + shared exclusion join — still used by the
   // compare-only enrichment queries below (rolePerformance, avgRolePerformance,
@@ -1065,30 +1107,43 @@ export function getCompareReport(
 
   // Canonical rows: same gamesPlayed/wins/winRate the report's
   // modelPerformance shows (DF-MAFIA-AI-BENCHMARK-25), enriched with the
-  // compare-specific fields from the recorded usage tables.
-  const models = modelComparison
+  // compare-specific fields from the recorded usage tables. DF-36: the
+  // source is the REAL partition only — the mis-key family is enriched by
+  // the same mapper and routed to `unattributedModels` below, so the two
+  // benchmark endpoints agree on the leaderboard key set.
+  const toCompareRow = (m: (typeof modelComparison)[number]): CompareModelRow => {
+    const key = `${m.provider}/${m.model}`;
+    return {
+      provider: m.provider,
+      model: m.model,
+      gamesPlayed: m.gamesPlayed,
+      wins: m.wins,
+      winRate: m.winRate,
+      avgTokensPerGame: Math.round(m.avgTokens || 0),
+      avgCostPerGame: Math.round((costMap.get(key) || m.avgCost || 0) * 10000) / 10000,
+      avgLatency: Math.round(latencyMap.get(key) || m.avgLatency || 0),
+      avgRolePerformance:
+        Math.round(((roleAvgMap.get(key) || 0) as number) * 100) / 100,
+      rolePerformance: rolePerfMap.get(key) || {},
+    };
+  };
+
+  const models = realModelComparison
     .filter((m) => {
       if (modelList) {
         return modelList.includes(m.model) || modelList.includes(`${m.provider}/${m.model}`);
       }
       return true;
     })
-    .map((m) => {
-      const key = `${m.provider}/${m.model}`;
-      return {
-        provider: m.provider,
-        model: m.model,
-        gamesPlayed: m.gamesPlayed,
-        wins: m.wins,
-        winRate: m.winRate,
-        avgTokensPerGame: Math.round(m.avgTokens || 0),
-        avgCostPerGame: Math.round((costMap.get(key) || m.avgCost || 0) * 10000) / 10000,
-        avgLatency: Math.round(latencyMap.get(key) || m.avgLatency || 0),
-        avgRolePerformance:
-          Math.round(((roleAvgMap.get(key) || 0) as number) * 100) / 100,
-        rolePerformance: rolePerfMap.get(key) || {},
-      };
-    });
+    .map(toCompareRow);
+
+  // DF-36: the DF-33 bucket, in the compare row shape plus `key`. Never
+  // ranked, never silently dropped — the ghost usage stays auditable.
+  const unattributedModels: Array<CompareModelRow & { key: string }> =
+    unattributedComparison.map((m) => ({
+      ...toCompareRow(m),
+      key: m.key,
+    }));
 
   // ===== Head-to-head =====
   let h2hQuery = 'SELECT * FROM model_matchups WHERE 1=1';
@@ -1105,14 +1160,22 @@ export function getCompareReport(
     .prepare(h2hQuery)
     .all(...h2hParams) as Record<string, unknown>[];
 
-  const headToHead = h2hRows.map((row) => ({
-    modelA: `${row.model_a_provider || ''}/${row.model_a || ''}`,
-    modelB: `${row.model_b_provider || ''}/${row.model_b || ''}`,
-    gamesPlayed: row.games_played as number,
-    modelAWins: row.model_a_wins as number,
-    modelBWins: row.model_b_wins as number,
-    ties: row.ties as number,
-  }));
+  // DF-36: a matchup pairing that involves the mis-key family is not a
+  // real head-to-head — drop those pairs from the comparison surface
+  // (their aggregate stays auditable in `unattributedModels`).
+  const headToHead = h2hRows
+    .map((row) => ({
+      modelA: `${row.model_a_provider || ''}/${row.model_a || ''}`,
+      modelB: `${row.model_b_provider || ''}/${row.model_b || ''}`,
+      gamesPlayed: row.games_played as number,
+      modelAWins: row.model_a_wins as number,
+      modelBWins: row.model_b_wins as number,
+      ties: row.ties as number,
+    }))
+    .filter(
+      (row) =>
+        !isUnattributedModelKey(row.modelA) && !isUnattributedModelKey(row.modelB),
+    );
 
   // ===== Trends (game-by-game data) =====
   let trendQuery = `
@@ -1149,10 +1212,23 @@ export function getCompareReport(
   // assignment-derived, game-level-winner attribution (sideWon on ended
   // games) fabricated wins for fake 'ALL' player rows and must not be used.
   if (trendRows.length === 0) {
-    const fallbackModels: AnyRecord[] =
-      models.length > 0
-        ? (models as AnyRecord[])
-        : getHonestReportFallbackModels(gameRepository);
+    // DF-36: the honest fallback reads the SAME normalized sources as the
+    // merge, so it can surface the mis-key family too. Partition it with
+    // the same rule — a store holding ONLY ghost rows must report them in
+    // `unattributedModels`, never as competitor rows.
+    let fallbackModels: AnyRecord[] = models as AnyRecord[];
+    if (fallbackModels.length === 0) {
+      const { real, unattributed } = partitionModelRows(
+        getHonestReportFallbackModels(gameRepository),
+      );
+      fallbackModels = real as AnyRecord[];
+      const bucketedKeys = new Set(unattributedModels.map((r) => r.key));
+      for (const row of unattributed) {
+        if (bucketedKeys.has(row.key)) continue;
+        bucketedKeys.add(row.key);
+        unattributedModels.push({ ...toCompareRow(row), key: row.key });
+      }
+    }
 
     const t: AnyRecord[] = [];
     for (const m of fallbackModels) {
@@ -1279,6 +1355,7 @@ export function getCompareReport(
     });
     return {
       models: normalizedModels,
+      unattributedModels,
       headToHead,
       mockGames: mockGamesCount,
       trends: fallbackTrends,
@@ -1299,6 +1376,9 @@ export function getCompareReport(
   for (const row of trendRows) {
     const modelKey = `${row.provider}/${row.model}`;
     if (modelKey.includes(OBJECT_OBJECT_SENTINEL)) continue;
+    // DF-36: a mis-key trend series would re-introduce the ghost model on
+    // the compare surface (the same family the models table now buckets).
+    if (isUnattributedModelRow({ provider: row.provider, model: row.model })) continue;
     if (!trendMap.has(modelKey)) {
       trendMap.set(modelKey, []);
     }
@@ -1323,7 +1403,7 @@ export function getCompareReport(
     return { model, games, cumulativeWinRate };
   });
 
-  return { models, headToHead, mockGames: mockGamesCount, trends };
+  return { models, unattributedModels, headToHead, mockGames: mockGamesCount, trends };
 }
 
 /**
