@@ -714,3 +714,12 @@
 {"id": 680, "timestamp": "2026-10-19 23:35:36.735067", "event_type": "task_created", "task_id": "README-6", "actor": "foreman", "tick": null, "type": null, "created_at": null, "evidence": null, "detail": "{\"id\":\"README-6\",\"status\":\"pending\"}", "tick_number": null}
 {"id": 681, "timestamp": "2026-10-19 23:41:19.295211", "event_type": "task_created", "task_id": "README-7", "actor": "foreman", "tick": null, "type": null, "created_at": null, "evidence": null, "detail": "{\"id\":\"README-7\",\"status\":\"pending\"}", "tick_number": null}
 {"id": 682, "timestamp": "2026-10-20 08:41:05.161467", "event_type": "audit", "task_id": "PERF-MAFIA-3", "actor": "dogfood", "tick": null, "type": null, "created_at": null, "evidence": "docker cp mafia-ai-benchmark-server-1:/app/data/mafia.db{,-wal}; for i in 1 2 3; do curl -s -o /dev/null -w '%{time_total}\\n' http://localhost:3004/api/v1/benchmark/compare; done", "detail": "Recurrence evidence, dogfood 2026-10-20 tick @ HEAD 3550f7d (compose stack rebuilt 08:15Z): PERF-MAFIA-3 is still live and unchanged. compare = 2.392/2.523/2.561s idle (warm, no cold/warm difference), and 2.769/3.635/4.260s while one benchmark game was running. Extra evidence for the mechanism: the 2.4s is a blocking synchronous computation, not queued latency - GET /api/v1/stats/matchups measures 0.0014s via curl but 2678ms in the browser when the Stats page fires it in the same window as compare, and GET /api/v1/games?limit=50 measures 0.027s via curl but appeared at 4398ms in the same page load. So one compare call delays every concurrent request by ~2.4s. Same store scale (4361 games / 20K token_usage rows). No new row filed: this is the open PERF-MAFIA-3; the client-side companion finding (39-43 extra GET /games/:id per Stats page load) is filed separately as PERF-MAFIA-4.", "tick_number": null}
+{
+  "event_type": "task_completed",
+  "task_id": "DF-MAFIA-AI-BENCHMARK-43",
+  "actor": "foreman",
+  "tick": 263,
+  "commit": "a3284bd",
+  "verdict": "PASS fb4aad36 (tier2 COMPLETE; tier1 secrets FP: harness state excluded from gitleaks scope)",
+  "summary": "Worker glm-5.3-flash@ollama-cloud: normalized {provider,model} roleModels objects to provider/model strings in legacy-game-adapter.ts env injection. 3 new tests. Server 546/546, build 4/4, lint clean."
+}
