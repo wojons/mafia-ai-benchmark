@@ -49,7 +49,8 @@ DF-MAFIA-AI-BENCHMARK-22-R2, PERF-MAFIA-4.
 | 4 | DF-42 (P2) | New Game presets name models that do not exist in the configured provider's catalog; VIGILANTE is left on the deployment default |
 | 5 | DF-22-R2 (P2) | `'[object Object]'` still reaches `report.agentStats` (and 27 players rows / 32 usage calls in the store) |
 | 6 | PERF-MAFIA-4 (P3) | Stats tab spends 39-43 extra requests (2020ms) rendering one table |
-| 7 | PERF-MAFIA-3 (pending) | `/benchmark/compare` is 2.4s every request and blocks concurrent requests (re-measured; recurrence recorded as event 682) |
+| 7 | DF-43 (P1) | A modal-created game runs every role on the literal string `'[object Object]'` - the API accepts `{ provider, model }` objects while the adapter's child-env injection has no type guard (its persistence path does) |
+| 8 | PERF-MAFIA-3 (pending) | `/benchmark/compare` is 2.4s every request and blocks concurrent requests (re-measured; recurrence recorded as event 682) |
 
 ## Reproductions
 
