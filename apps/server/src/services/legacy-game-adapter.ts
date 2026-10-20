@@ -194,12 +194,39 @@ export class LegacyGameAdapter extends EventEmitter {
     if (config.roleModels) {
       for (const [role, model] of Object.entries(config.roleModels)) {
         const envKey = ROLE_ENV_MAP[role.toUpperCase()];
-        if (envKey) {
-          env[envKey] = model;
-          console.log(`[LegacyAdapter] Set ${envKey}=${model} for role ${role}`);
-        } else {
+        if (!envKey) {
           console.warn(`[LegacyAdapter] Unknown role: ${role}, no env var mapping`);
+          continue;
         }
+        // DF-MAFIA-AI-BENCHMARK-43: the New Game modal posts roleModels as
+        // { provider, model } objects (GameList.tsx). Assigning such an
+        // object to a process env var silently coerces it to the string
+        // '[object Object]' and the child runs an unattributable model.
+        // Resolve the object shape to a 'provider/model' spec (mirrors the
+        // type guard the persistence path applies before writing
+        // player_model_assignments) and skip anything unresolvable.
+        let resolvedSpec: string;
+        if (typeof model === 'string') {
+          resolvedSpec = model;
+        } else if (
+          model &&
+          typeof model === 'object' &&
+          'provider' in model &&
+          'model' in model &&
+          typeof (model as { provider?: unknown }).provider === 'string' &&
+          typeof (model as { model?: unknown }).model === 'string'
+        ) {
+          const objectSpec = model as { provider: string; model: string };
+          resolvedSpec = `${objectSpec.provider}/${objectSpec.model}`;
+        } else {
+          console.warn(
+            `[LegacyAdapter] Skipping unresolvable spec for role ${role}:`,
+            model,
+          );
+          continue;
+        }
+        env[envKey] = resolvedSpec;
+        console.log(`[LegacyAdapter] Set ${envKey}=${resolvedSpec} for role ${role}`);
       }
     }
     

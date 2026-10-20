@@ -177,6 +177,87 @@ describe('LegacyGameAdapter', () => {
   });
 
   // ==========================================================================
+  // startGame — roleModels object-shape normalization (DF-MAFIA-AI-BENCHMARK-43)
+  // ==========================================================================
+
+  describe('startGame() roleModels object normalization (DF-MAFIA-AI-BENCHMARK-43)', () => {
+    it("resolves { provider, model } objects to 'provider/model' strings in the child env", () => {
+      spawnHarness.spawnMock.mockClear();
+      // The New Game modal (GameList.tsx) posts roleModels as objects of
+      // { provider, model }; the API route forwards them to startGame
+      // verbatim, so the runtime shape is an object even though
+      // LegacyGameConfig types it as a string record.
+      adapter.startGame({
+        numPlayers: 5,
+        roleModels: {
+          MAFIA: { provider: 'openai', model: 'gpt-4o' },
+          TOWN: { provider: 'openrouter', model: 'deepseek-v4-flash' },
+        } as any,
+      });
+
+      expect(spawnHarness.spawnMock).toHaveBeenCalledTimes(1);
+      const env = spawnHarness.spawnMock.mock.calls[0][2].env as Record<string, string | undefined>;
+      expect(env.MAFIA_MODEL).toBe('openai/gpt-4o');
+      expect(env.VILLAGER_MODEL).toBe('openrouter/deepseek-v4-flash');
+      // No env var ever carries the literal coercion string.
+      for (const [key, value] of Object.entries(env)) {
+        if (key.endsWith('_MODEL')) expect(value).not.toBe('[object Object]');
+      }
+    });
+
+    it('skips unresolvable roleModel objects with a warning instead of setting [object Object]', () => {
+      spawnHarness.spawnMock.mockClear();
+      const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+      try {
+        adapter.startGame({
+          numPlayers: 5,
+          roleModels: {
+            MAFIA: { provider: 'bogus' }, // no model field — unresolvable
+            SHERIFF: null as any, // not an object — unresolvable
+            TOWN: { provider: 'openai', model: 'gpt-4o' }, // still resolved
+          } as any,
+        });
+
+        expect(spawnHarness.spawnMock).toHaveBeenCalledTimes(1);
+        const env = spawnHarness.spawnMock.mock.calls[0][2].env as Record<string, string | undefined>;
+        // Unresolvable roles are skipped entirely — no env var at all,
+        // so the child falls back to DEFAULT_MODEL (honest resolution).
+        expect(env.MAFIA_MODEL).toBeUndefined();
+        expect(env.SHERIFF_MODEL).toBeUndefined();
+        expect(env.VILLAGER_MODEL).toBe('openai/gpt-4o');
+        expect(
+          warnSpy.mock.calls.some((call) =>
+            call.some((arg) => typeof arg === 'string' && arg.includes('Skipping unresolvable spec for role MAFIA')),
+          ),
+        ).toBe(true);
+        expect(
+          warnSpy.mock.calls.some((call) =>
+            call.some((arg) => typeof arg === 'string' && arg.includes('Skipping unresolvable spec for role SHERIFF')),
+          ),
+        ).toBe(true);
+        // The literal coercion string must never appear in any env value.
+        for (const [key, value] of Object.entries(env)) {
+          if (key.endsWith('_MODEL')) expect(value).not.toBe('[object Object]');
+        }
+      } finally {
+        warnSpy.mockRestore();
+      }
+    });
+
+    it('keeps string roleModels untouched (legacy shape regression guard)', () => {
+      spawnHarness.spawnMock.mockClear();
+      adapter.startGame({
+        numPlayers: 5,
+        roleModels: { MAFIA: 'kimi/kimi-k2.6' },
+      });
+
+      expect(spawnHarness.spawnMock).toHaveBeenCalledTimes(1);
+      const env = spawnHarness.spawnMock.mock.calls[0][2].env as Record<string, string | undefined>;
+      expect(env.MAFIA_MODEL).toBe('kimi/kimi-k2.6');
+    });
+  });
+
+  // ==========================================================================
   // translateAndPublishEvent — statement normalization (MAF-GAP-004)
   // ==========================================================================
 
