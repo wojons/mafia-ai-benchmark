@@ -7,7 +7,7 @@
 import Database from 'better-sqlite3';
 import fs from 'fs';
 import path from 'path';
-import { fileURLToPath } from 'url';
+import { fileURLToPath, pathToFileURL } from 'url';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -272,6 +272,30 @@ export async function runMigrations(dbPath?: string): Promise<MigrationResult> {
       error: message,
     };
   }
+}
+
+// Run the migration only when this module is the process entry point
+// (i.e. `tsx src/db/migrate.ts`, wired as the `db:migrate` npm script).
+// Importing the module from tests or server code must NOT trigger a
+// migration — the server initializes its own schema at boot.
+// ESM-safe entry check: process.argv[1] can be relative, so resolve it
+// through pathToFileURL and compare hrefs against this module's URL.
+// NOTE: this package has no "type": "module", so tsx transpiles to CJS —
+// no top-level await here; use a promise chain instead.
+if (process.argv[1] && pathToFileURL(process.argv[1]).href === import.meta.url) {
+  const dbPath = process.env.DB_PATH || './data/mafia.db';
+  runMigrations(dbPath)
+    .then((result) => {
+      if (!result.success) {
+        console.error('❌ Database migration failed:', result.error);
+        process.exit(1);
+      }
+    })
+    .catch((error) => {
+      const message = error instanceof Error ? error.message : 'Unknown error';
+      console.error('❌ Database migration failed:', message);
+      process.exit(1);
+    });
 }
 
 export default DatabaseMigrator;
