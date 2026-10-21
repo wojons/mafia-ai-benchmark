@@ -920,6 +920,17 @@ nothing is mis-keyed). Rows resolvable behind the passthrough (e.g. legacy
 `CUSTOM/openai/gpt-4o-mini` spellings) are re-keyed to their real
 provider/model (MAF-GAP-045) and stay in `data.models`.
 
+**`data.models` leaderboard cap (DF-MAFIA-AI-BENCHMARK-36b):** `data.models`
+carries at most the same **10** best-ranked real-model rows the report's
+`modelPerformance` carries (ranked by `gamesPlayed` desc from the shared
+`getModelComparison()` source). Before this cap the compare surface was
+unbounded, so a store holding more than 10 real models returned a longer
+key set than the report on the same minute (14 seeded real models → report
+10 keys, compare 14). An explicit `?models=` filter is applied BEFORE the
+cap, so a caller asking for a specific subset keeps getting that subset
+(up to 10). `data.trends` is filtered to the retained rows too — a capped
+away model is not plotted as a competitor series.
+
 **`data.models[].rolePerformance` semantics:** keys are the roles the model
 actually played (`DOCTOR`, `MAFIA`, `SHERIFF`, `VIGILANTE`, `VILLAGER` — any
 role in the game's role vocabulary); values are per-role `gamesPlayed`,

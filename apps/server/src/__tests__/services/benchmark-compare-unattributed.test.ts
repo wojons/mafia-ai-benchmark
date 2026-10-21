@@ -33,6 +33,7 @@ import express from 'express';
 import type { Server } from 'http';
 import { createBenchmarkRouter } from '../../routes/benchmark.js';
 import { StatsCollector } from '../../services/stats-collector.js';
+import { getModelComparison } from '../../services/stats-collector/models.js';
 import { createSqliteBackedRepository } from './mocks.js';
 
 // Type alias matching the return shape of createSqliteBackedRepository().
@@ -195,6 +196,144 @@ describe('DF-MAFIA-AI-BENCHMARK-36 — compare/report CUSTOM bucket parity', () 
     expect(h2h.map((r) => `${r.modelA}|${r.modelB}`)).toContain(
       'openai/gpt-4o-mini|openai/gpt-4o',
     );
+  });
+
+  it('keeps the model-row key set identical when the store holds MORE than 10 real models (DF-36b)', async () => {
+    // DF-MAFIA-AI-BENCHMARK-36b: bucketing alone was not enough for the
+    // invariant — the report slices modelPerformance to 10 rows while
+    // compare.models was unbounded, so any store with >10 real models
+    // returned two different leaderboards (judge verdict 3f3d0402).
+    // Seed 14 real models (distinct games-played so the ranking is
+    // deterministic) plus both CUSTOM /* ghost families, then require the
+    // SAME key set from both endpoints.
+    const wideRepo = createSqliteBackedRepository() as unknown as FakeRepo;
+
+    const REAL_MODEL_COUNT = 14;
+    const realKeys: string[] = [];
+    // Model i plays in games 0..i — model 13 plays 14 games, model 0 one.
+    for (let gameIndex = 0; gameIndex < REAL_MODEL_COUNT; gameIndex++) {
+      const players = [];
+      for (let modelIndex = gameIndex; modelIndex < REAL_MODEL_COUNT; modelIndex++) {
+        const model = `bench-model-${String(modelIndex).padStart(2, '0')}`;
+        if (gameIndex === modelIndex) realKeys.push(`openai/${model}`);
+        players.push({
+          id: `p-${gameIndex}-${modelIndex}`,
+          name: `player-${gameIndex}-${modelIndex}`,
+          role: 'VILLAGER',
+          isMafia: false,
+          won: 1,
+          joinOrder: modelIndex,
+          provider: 'openai',
+          model,
+        });
+      }
+      wideRepo.seedGame({
+        id: `wide-${gameIndex}`,
+        status: 'ENDED',
+        winner: 'TOWN',
+        players,
+      });
+    }
+
+    // Both DF-33 ghost families must still be bucketed, not ranked.
+    wideRepo.seedGame({ id: 'wide-ghost-1', status: 'ENDED', winner: 'TOWN' });
+    wideRepo.insertTokenUsage({
+      gameId: 'wide-ghost-1', playerId: 'ALL', turnNumber: 0,
+      provider: 'CUSTOM', model: 'openai',
+      promptTokens: 500, completionTokens: 500, totalTokens: 1000, cost: 0.10,
+    });
+    wideRepo.seedGame({
+      id: 'wide-ghost-2',
+      status: 'ENDED',
+      winner: 'TOWN',
+      players: [
+        {
+          id: 'p-ghost', name: 'legacy-ghost', role: 'VILLAGER',
+          isMafia: false, won: 1, joinOrder: 0,
+          provider: 'CUSTOM', model: 'qwen3.6-35b-fast',
+        },
+      ],
+    });
+
+    // Non-vacuity: the fixture really does carry more than 10 real models
+    // (asserted on the source both endpoints derive from, so the parity
+    // assertion below cannot pass by both lists being short).
+    const sourceRows = getModelComparison(wideRepo as never);
+    const sourceRealKeys = sourceRows
+      .map(rowKey)
+      .filter((key) => !key.toUpperCase().startsWith('CUSTOM/'));
+    expect(sourceRealKeys.length).toBe(REAL_MODEL_COUNT);
+    expect(realKeys.length).toBe(REAL_MODEL_COUNT);
+
+    const wideCollector = new StatsCollector(wideRepo as never);
+    const app = express();
+    app.use(express.json());
+    app.use(
+      '/',
+      createBenchmarkRouter({
+        benchmarkRunner: {} as never,
+        statsCollector: wideCollector,
+      } as never),
+    );
+    await new Promise<void>((resolve) => {
+      server = app.listen(0, '127.0.0.1', () => resolve());
+    });
+    const address = server.address() as { port: number };
+    const wideBaseUrl = `http://127.0.0.1:${address.port}`;
+
+    try {
+      const fetchWide = async (path: string): Promise<any> => {
+        const response = await fetch(`${wideBaseUrl}${path}`);
+        expect(response.status).toBe(200);
+        const body = await response.json();
+        expect(body.success).toBe(true);
+        return body.data;
+      };
+
+      const [report, compare] = await Promise.all([
+        fetchWide('/api/v1/benchmark/report'),
+        fetchWide('/api/v1/benchmark/compare'),
+      ]);
+
+      const reportKeys = (report.modelPerformance as ModelRow[]).map(rowKey).sort();
+      const compareKeys = (compare.models as ModelRow[]).map(rowKey).sort();
+
+      // The invariant DF-36b was filed for.
+      expect(compareKeys).toEqual(reportKeys);
+      // Same count, capped by the same leaderboard limit — not two
+      // differently-truncated rankings.
+      expect(compareKeys.length).toBe(reportKeys.length);
+      expect(compareKeys.length).toBeLessThanOrEqual(10);
+      expect(compareKeys.length).toBeGreaterThan(0);
+
+      // Ghosts still bucketed on both surfaces.
+      expect(compareKeys).not.toContain('CUSTOM/openai');
+      expect(compareKeys).not.toContain('CUSTOM/qwen3.6-35b-fast');
+      const compareBucketKeys = (
+        compare.unattributedModels as Array<{ key: string }>
+      ).map((r) => r.key).sort();
+      const reportBucketKeys = (
+        report.unattributedModels as Array<{ key: string }>
+      ).map((r) => r.key).sort();
+      expect(compareBucketKeys).toEqual(reportBucketKeys);
+      expect(compareBucketKeys).toEqual([
+        'CUSTOM/openai',
+        'CUSTOM/qwen3.6-35b-fast',
+      ]);
+
+      // The per-model trend series describe the SAME retained rows — a
+      // capped-away model must not still be plotted next to the leaderboard.
+      const trendKeys = (compare.trends as Array<{ model: string }>)
+        .map((t) => t.model)
+        .sort();
+      expect(trendKeys).toEqual(compareKeys);
+    } finally {
+      await new Promise<void>((resolve, reject) => {
+        server.close((err) => (err ? reject(err) : resolve()));
+      });
+      wideRepo.db.close();
+      server = undefined as unknown as Server;
+    }
   });
 
   it('keeps compare.unattributedModels present (empty array) when no mis-key rows exist', async () => {

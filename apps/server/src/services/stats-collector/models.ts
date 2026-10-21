@@ -875,6 +875,25 @@ function isUnattributedModelKey(key: string): boolean {
 }
 
 /**
+ * DF-MAFIA-AI-BENCHMARK-36b: the model-leaderboard row cap.
+ *
+ * The report slices `modelPerformance` to the top 10 rows
+ * (`stats-collector/index.ts`, `realModelRows.slice(0, 10)`). compare.models
+ * used to be UNBOUNDED, so on any store with more than 10 real models the
+ * two benchmark endpoints returned two different leaderboards even after
+ * the DF-36 bucketing parity (judge verdict 3f3d0402 on DF-36:
+ * 14 seeded real models -> report 10 keys, compare 14).
+ *
+ * The report is the authority (brief: do not change the report endpoint),
+ * so compare applies the SAME cap to its real-model partition. Both
+ * endpoints also rank from the same `getModelComparison()` ordering
+ * (gamesPlayed desc), which is why the sliced key sets are identical —
+ * pinned by `benchmark-compare-unattributed.test.ts` ("MORE than 10 real
+ * models"), which fails if either surface's cap drifts.
+ */
+export const BENCHMARK_MODEL_ROW_LIMIT = 10;
+
+/**
  * Get comprehensive model comparison report.
  * When the players/token_usage tables are empty (legacy games), derives
  * model and trend data from game events.
@@ -1128,6 +1147,13 @@ export function getCompareReport(
     };
   };
 
+  // DF-MAFIA-AI-BENCHMARK-36b: cap the real-model rows to the SAME
+  // leaderboard limit the report applies to `modelPerformance`, so both
+  // endpoints return one key set on any store size. The slice runs AFTER
+  // the explicit `?models=` filter (a caller asking for a subset keeps
+  // getting that subset) but the rank order is the shared
+  // `getModelComparison()` ordering, so the unfiltered top-N is exactly
+  // the report's top-N.
   const models = realModelComparison
     .filter((m) => {
       if (modelList) {
@@ -1135,6 +1161,7 @@ export function getCompareReport(
       }
       return true;
     })
+    .slice(0, BENCHMARK_MODEL_ROW_LIMIT)
     .map(toCompareRow);
 
   // DF-36: the DF-33 bucket, in the compare row shape plus `key`. Never
@@ -1144,6 +1171,12 @@ export function getCompareReport(
       ...toCompareRow(m),
       key: m.key,
     }));
+
+  // DF-MAFIA-AI-BENCHMARK-36b: the retained leaderboard keys — the same cap
+  // the report applies, so trend series and model rows describe one set.
+  const leaderboardKeys = new Set(
+    models.map((m) => `${m.provider}/${m.model}`),
+  );
 
   // ===== Head-to-head =====
   let h2hQuery = 'SELECT * FROM model_matchups WHERE 1=1';
@@ -1237,6 +1270,19 @@ export function getCompareReport(
     }
     const fallbackModels2 = t.length > 0 ? t : fallbackModels;
 
+    // DF-MAFIA-AI-BENCHMARK-36b: the fallback path must obey the SAME
+    // leaderboard cap as the main path — otherwise a store whose rows all
+    // come from the honest fallback would emit a longer key set than the
+    // report's `modelPerformance`, re-opening the DF-36b invariant. Like
+    // the main path, an explicit `models` filter is applied BEFORE the cap.
+    const filteredFallbackModels = modelList
+      ? fallbackModels2.filter((m) => modelList.includes(m.model))
+      : fallbackModels2;
+    const leaderboardFallbackModels = filteredFallbackModels.slice(
+      0,
+      BENCHMARK_MODEL_ROW_LIMIT,
+    );
+
     const fallbackTrends: Array<{
       model: string;
       games: Array<{
@@ -1318,7 +1364,7 @@ export function getCompareReport(
       });
     }
 
-    for (const fm of fallbackModels2) {
+    for (const fm of leaderboardFallbackModels) {
       if (modelList && !modelList.includes(fm.model)) continue;
 
       const gameEntries = entriesByModel.get(`${fm.provider}/${fm.model}`) || [];
@@ -1338,7 +1384,7 @@ export function getCompareReport(
       });
     }
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const normalizedModels: any = fallbackModels2.map((m: AnyRecord) => {
+    const normalizedModels: any = leaderboardFallbackModels.map((m: AnyRecord) => {
       const key = `${m.provider}/${m.model}`;
       return {
         provider: m.provider,
@@ -1391,17 +1437,22 @@ export function getCompareReport(
     });
   }
 
-  const trends = Array.from(trendMap.entries()).map(([model, games]) => {
-    const cumulativeWinRate: number[] = [];
-    let cumulativeWins = 0;
-    for (let i = 0; i < games.length; i++) {
-      if (games[i].won) cumulativeWins++;
-      cumulativeWinRate.push(
-        Math.round((cumulativeWins / (i + 1)) * 10000) / 10000,
-      );
-    }
-    return { model, games, cumulativeWinRate };
-  });
+  const trends = Array.from(trendMap.entries())
+    // DF-MAFIA-AI-BENCHMARK-36b: keep the per-model series in lockstep with
+    // the capped leaderboard — a model that is not in `models[]` must not
+    // still be plotted as a competitor series on the same surface.
+    .filter(([model]) => leaderboardKeys.has(model))
+    .map(([model, games]) => {
+      const cumulativeWinRate: number[] = [];
+      let cumulativeWins = 0;
+      for (let i = 0; i < games.length; i++) {
+        if (games[i].won) cumulativeWins++;
+        cumulativeWinRate.push(
+          Math.round((cumulativeWins / (i + 1)) * 10000) / 10000,
+        );
+      }
+      return { model, games, cumulativeWinRate };
+    });
 
   return { models, unattributedModels, headToHead, mockGames: mockGamesCount, trends };
 }
