@@ -715,6 +715,12 @@ export function createSqliteBackedRepository(): GameRepository & {
     id: string;
     status?: string;
     winner?: string | null;
+    /**
+     * DF-MAFIA-AI-BENCHMARK-39: the persisted `config.numPlayers` — the
+     * per-configuration breakdown buckets on it. Defaults to 10 (the
+     * pre-DF-39 hardcoded value) so existing fixtures are unchanged.
+     */
+    numPlayers?: number;
     duration?: number | null;
     startedAt?: number;
     endedAt?: number;
@@ -814,6 +820,8 @@ export function createSqliteBackedRepository(): GameRepository & {
     id: string;
     status?: string;
     winner?: string | null;
+    /** DF-MAFIA-AI-BENCHMARK-39: persisted config.numPlayers (default 10). */
+    numPlayers?: number;
     duration?: number | null;
     startedAt?: number;
     endedAt?: number;
@@ -845,7 +853,10 @@ export function createSqliteBackedRepository(): GameRepository & {
     const id = opts.id;
     const now = Date.now();
     const status = opts.status ?? 'IN_PROGRESS';
-    const cfg = { numPlayers: 10, roles: [] };
+    // DF-MAFIA-AI-BENCHMARK-39: numPlayers is persisted in the game's
+    // config (json_extract target of the byNumPlayers split); default
+    // keeps the pre-DF-39 hardcoded { numPlayers: 10 } fixture shape.
+    const cfg = { numPlayers: opts.numPlayers ?? 10, roles: [] };
     db.prepare(
       `INSERT OR IGNORE INTO games (id, status, config, created_at, started_at, ended_at, winner, duration)
        VALUES (?, ?, ?, ?, ?, ?, ?, ?)`
