@@ -20,6 +20,7 @@ import {
 import {
   getModelComparison,
   getCompareReport,
+  getModelPerformanceBreakdown,
   generateRecommendations,
   partitionModelRows,
 } from './models.js';
@@ -853,13 +854,29 @@ export class StatsCollector {
           avgDuration: gameStats.avgDuration,
         },
         modelPerformance: realModelRows.slice(0, 10),
-        // DF-MAFIA-AI-BENCHMARK-33: legacy CUSTOM/* mis-key aggregates,
+        // DF-MAFIA-AI-BENCHMARK-39: legacy CUSTOM/* mis-key aggregates,
         // bucketed for auditability instead of rendering as competitor rows
         // (or being silently dropped). Same row shape + `key`.
         unattributedModels,
         agentStats: agentStats.slice(0, 10),
         recommendations: generateRecommendations(realModelRows),
       };
+
+      // DF-MAFIA-AI-BENCHMARK-39: every served model row carries the
+      // per-role + per-numPlayers breakdown from the REAL players rows
+      // (same shared builder /benchmark/compare uses), so a blended
+      // winRate can never be read as a role-lottery skill score. No
+      // breakdown data -> honest empty maps, never fabricated cells.
+      const breakdownMap = getModelPerformanceBreakdown(this.gameRepository);
+      const modelPerformance = realModelRows.slice(0, 10).map((row) => {
+        const breakdown = breakdownMap.get(`${row.provider}/${row.model}`);
+        return {
+          ...row,
+          rolePerformance: breakdown?.rolePerformance ?? {},
+          byNumPlayers: breakdown?.byNumPlayers ?? {},
+        };
+      });
+      report.modelPerformance = modelPerformance;
       
       if (gameId) {
         try {

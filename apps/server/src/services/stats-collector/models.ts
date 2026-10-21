@@ -850,7 +850,25 @@ type CompareModelRow = {
   avgCostPerGame: number;
   avgLatency: number;
   avgRolePerformance: number;
+  /**
+   * DF-MAFIA-AI-BENCHMARK-39: per-role breakdown for the roles the model
+   * actually played — never an empty map when the model has real
+   * players rows (a blended winRate cannot be read as a skill score).
+   */
   rolePerformance: Record<
+    string,
+    {
+      gamesPlayed: number;
+      wins: number;
+      winRate: number;
+    }
+  >;
+  /**
+   * DF-MAFIA-AI-BENCHMARK-39: per-configuration split keyed by the game's
+   * `config.numPlayers` ("5", "10", ...; "unknown" when the game config
+   * recorded none). Honest zeros/empty map only when no data exists.
+   */
+  byNumPlayers: Record<
     string,
     {
       gamesPlayed: number;
@@ -892,6 +910,183 @@ function isUnattributedModelKey(key: string): boolean {
  * models"), which fails if either surface's cap drifts.
  */
 export const BENCHMARK_MODEL_ROW_LIMIT = 10;
+
+/**
+ * DF-MAFIA-AI-BENCHMARK-39: one per-role / per-configuration cell of a
+ * model's performance breakdown, carrying the SAME distinct-game win
+ * semantics as the row it belongs to (one win per game per model,
+ * MAF-GAP-048) — never a player-row count.
+ */
+export type BenchmarkBreakdownEntry = {
+  gamesPlayed: number;
+  wins: number;
+  winRate: number;
+};
+
+/**
+ * DF-MAFIA-AI-BENCHMARK-39: the full breakdown published with every
+ * served model row (both /benchmark/report `modelPerformance` and
+ * /benchmark/compare `models`):
+ *   - `rolePerformance`: per-ROLE {gamesPlayed, wins, winRate} for the
+ *     roles the model actually played (from real players rows, counted
+ *     per DISTINCT game; roles the model never played are absent —
+ *     never fabricated).
+ *   - `byNumPlayers`: per-CONFIGURATION split keyed by the game's
+ *     `config.numPlayers` ("5", "10", ...) — a blended winRate cannot be
+ *     read as a skill score when 94% of ended games are 5-player (mafia
+ *     side 3.7% of wins) while 10-player games split differently.
+ *
+ * Attribution semantics (deliberately asymmetric, both honest):
+ *   - role cells exclude role='UNASSIGNED' (no role = no role claim);
+ *     wins come from players.won per row — the same source the existing
+ *     compare-specific rolePerformance map used before DF-39 pulled it
+ *     into this shared builder.
+ *   - byNumPlayers cells count ALL participation for that configuration
+ *     (UNASSIGNED included, matching getModelStats' gamesPlayed WHERE),
+ *     so the buckets reconcile with the row's blended gamesPlayed/wins
+ *     instead of silently under-counting legacy rows.
+ * Rows the model does not appear in are absent from the returned map —
+ * empty is honest, fabricated is not.
+ */
+export function getModelPerformanceBreakdown(
+  gameRepository: GameRepository,
+  modelList?: string[],
+): Map<
+  string,
+  {
+    rolePerformance: Record<string, BenchmarkBreakdownEntry>;
+    byNumPlayers: Record<string, BenchmarkBreakdownEntry>;
+  }
+> {
+  const result = new Map<
+    string,
+    {
+      rolePerformance: Record<string, BenchmarkBreakdownEntry>;
+      byNumPlayers: Record<string, BenchmarkBreakdownEntry>;
+    }
+  >();
+  let db;
+  try {
+    db = gameRepository.getDatabase();
+  } catch {
+    return result;
+  }
+  if (!db) return result;
+
+  try {
+    const pProvExpr = normalizedProviderSql('p');
+    const pModelExpr = normalizedModelSql('p');
+    const degenerateJoin = `JOIN games gdeg ON gdeg.id = p.game_id
+        AND COALESCE((${GameRepositoryClass.DEGENERATE_GAME_SQL.replace(/\bg\./g, 'gdeg.')}), 0) = 0
+        AND COALESCE((${GameRepositoryClass.MOCK_GAME_SQL.replace(/\bg\./g, 'gdeg.')}), 0) = 0`;
+    const baseWhere = `
+        WHERE p.provider IS NOT NULL AND p.model IS NOT NULL
+          AND p.provider != '${OBJECT_OBJECT_SENTINEL}'
+          AND p.model != '${OBJECT_OBJECT_SENTINEL}'
+      `;
+    const filterParams: string[] = [];
+    let modelFilterSql = '';
+    if (modelList && modelList.length > 0) {
+      const placeholders = modelList.map(() => '?').join(',');
+      modelFilterSql = ` AND (p.model IN (${placeholders}) OR ${pModelExpr} IN (${placeholders}))`;
+      filterParams.push(...modelList, ...modelList);
+    }
+    const selectExpr = `${pProvExpr} as provider, ${pModelExpr} as model`;
+
+    const perCell = (gamesPlayed: unknown, wins: unknown): BenchmarkBreakdownEntry => {
+      const gp = (gamesPlayed as number) || 0;
+      const w = (wins as number) || 0;
+      return {
+        gamesPlayed: gp,
+        wins: w,
+        winRate: gp > 0 ? w / gp : 0,
+      };
+    };
+
+    // --- per (model, role): roles the model actually played ---
+    const roleRows = db
+      .prepare(
+        `SELECT ${selectExpr},
+              p.role, COUNT(DISTINCT p.game_id) as games_played,
+              COUNT(DISTINCT CASE WHEN p.won = 1 THEN p.game_id END) as wins
+        FROM players p
+        ${degenerateJoin}
+        ${baseWhere}
+          AND p.role != 'UNASSIGNED'
+        ${modelFilterSql}
+        GROUP BY ${pProvExpr}, ${pModelExpr}, p.role`,
+      )
+      .all(...filterParams) as Array<{
+      provider: string;
+      model: string;
+      role: string;
+      games_played: number;
+      wins: number;
+    }>;
+
+    for (const row of roleRows) {
+      if (!row.provider || !row.model) continue;
+      const key = `${row.provider}/${row.model}`;
+      let entry = result.get(key);
+      if (!entry) {
+        entry = { rolePerformance: {}, byNumPlayers: {} };
+        result.set(key, entry);
+      }
+      entry.rolePerformance[row.role as string] = perCell(
+        row.games_played,
+        row.wins,
+      );
+    }
+
+    // --- per (model, numPlayers): DISTINCT games at the configuration
+    // grain, NOT a sum over role cells — one game holding the model in
+    // two roles (one player MAFIA, one same-model DOCTOR) must count
+    // once per configuration.
+    const numPlayerRows = db
+      .prepare(
+        `SELECT ${selectExpr},
+              json_extract(gdeg.config, '$.numPlayers') as num_players,
+              COUNT(DISTINCT p.game_id) as games_played,
+              COUNT(DISTINCT CASE WHEN p.won = 1 THEN p.game_id END) as wins
+        FROM players p
+        ${degenerateJoin}
+        ${baseWhere}
+        ${modelFilterSql}
+        GROUP BY ${pProvExpr}, ${pModelExpr}, num_players`,
+      )
+      .all(...filterParams) as Array<{
+      provider: string;
+      model: string;
+      num_players: number | null;
+      games_played: number;
+      wins: number;
+    }>;
+
+    for (const row of numPlayerRows) {
+      if (!row.provider || !row.model) continue;
+      const key = `${row.provider}/${row.model}`;
+      let entry = result.get(key);
+      if (!entry) {
+        entry = { rolePerformance: {}, byNumPlayers: {} };
+        result.set(key, entry);
+      }
+      // The bucket key is the persisted `config.numPlayers` value as a
+      // string ("5", "10", ...). A game with no recorded numPlayers
+      // stays auditable under the explicit "unknown" bucket — an
+      // unexplained null on a served row is junk, so the reason is the
+      // bucket name itself.
+      const numPlayers = row.num_players;
+      const bucket =
+        numPlayers === null || numPlayers === undefined
+          ? 'unknown'
+          : String(numPlayers);
+      entry.byNumPlayers[bucket] = perCell(row.games_played, row.wins);
+    }
+  } catch {
+    // players/games unavailable — breakdowns stay honestly empty.
+  }
+  return result;
+}
 
 /**
  * Get comprehensive model comparison report.
@@ -984,50 +1179,12 @@ export function getCompareReport(
         AND COALESCE((${GameRepositoryClass.DEGENERATE_GAME_SQL.replace(/\bg\./g, 'gdeg.')}), 0) = 0
         AND COALESCE((${GameRepositoryClass.MOCK_GAME_SQL.replace(/\bg\./g, 'gdeg.')}), 0) = 0`;
 
-  // ===== Per-model role-specific performance =====
-  let roleQueryBody = `
-        ${pProvExpr} as provider,
-        ${pModelExpr} as model,
-        p.role,
-        COUNT(DISTINCT p.game_id) as games_played,
-        COUNT(DISTINCT CASE WHEN p.won = 1 THEN p.game_id END) as wins
-      FROM players p
-      ${degenerateJoin}
-      WHERE p.provider IS NOT NULL AND p.model IS NOT NULL
-        AND p.role != 'UNASSIGNED'
-        AND p.provider != '${OBJECT_OBJECT_SENTINEL}'
-        AND p.model != '${OBJECT_OBJECT_SENTINEL}'
-    `;
-  const roleParams: string[] = [];
-
-  if (modelList) {
-    const placeholders = modelList.map(() => '?').join(',');
-    roleQueryBody += ` AND (p.model IN (${placeholders}) OR ${pModelExpr} IN (${placeholders}))`;
-    roleParams.push(...modelList, ...modelList);
-  }
-
-  const roleQuery = `SELECT ${roleQueryBody} GROUP BY ${pProvExpr}, ${pModelExpr}, p.role`;
-  const roleRows = db
-    .prepare(roleQuery)
-    .all(...roleParams) as Record<string, unknown>[];
-
-  const rolePerfMap = new Map<
-    string,
-    Record<string, { gamesPlayed: number; wins: number; winRate: number }>
-  >();
-  for (const row of roleRows) {
-    const key = `${row.provider}/${row.model}`;
-    if (!rolePerfMap.has(key)) {
-      rolePerfMap.set(key, {});
-    }
-    const gp = row.games_played as number;
-    const w = row.wins as number;
-    rolePerfMap.get(key)![row.role as string] = {
-      gamesPlayed: gp,
-      wins: w,
-      winRate: gp > 0 ? w / gp : 0,
-    };
-  }
+  // ===== Per-model breakdown (DF-MAFIA-AI-BENCHMARK-39) =====
+  // rolePerformance (per-role distinct-game cells) + byNumPlayers
+  // (per-config.numPlayers split) — one shared builder, used by BOTH
+  // benchmark endpoints so the report's modelPerformance rows carry the
+  // same maps and a blended winRate can never be read as a skill score.
+  const breakdownMap = getModelPerformanceBreakdown(gameRepository, modelList ?? undefined);
 
   // ===== Avg cost per model (normalized key, MAF-GAP-036/045) =====
   const tuProvExpr = normalizedProviderSql('tu');
@@ -1132,6 +1289,7 @@ export function getCompareReport(
   // benchmark endpoints agree on the leaderboard key set.
   const toCompareRow = (m: (typeof modelComparison)[number]): CompareModelRow => {
     const key = `${m.provider}/${m.model}`;
+    const breakdown = breakdownMap.get(key);
     return {
       provider: m.provider,
       model: m.model,
@@ -1143,7 +1301,11 @@ export function getCompareReport(
       avgLatency: Math.round(latencyMap.get(key) || m.avgLatency || 0),
       avgRolePerformance:
         Math.round(((roleAvgMap.get(key) || 0) as number) * 100) / 100,
-      rolePerformance: rolePerfMap.get(key) || {},
+      // DF-MAFIA-AI-BENCHMARK-39: per-role + per-numPlayers breakdowns
+      // from the real players rows — never a fabricated cell, absent
+      // roles/configurations are simply not in the maps.
+      rolePerformance: breakdown?.rolePerformance ?? {},
+      byNumPlayers: breakdown?.byNumPlayers ?? {},
     };
   };
 
