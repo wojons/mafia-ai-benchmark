@@ -174,6 +174,14 @@ describe.skipIf(!SERVER_PROBE.available)('Model pricing', () => {
 
 describe.skipIf(!SERVER_PROBE.available)('Cost calculation', () => {
   it('computes the exact cost for a known model', async () => {
+    // De-pinned from hardcoded rates (INT-CI-004): derive expected from the
+    // served pricing endpoint so the test cannot fail when provider prices drift.
+    const pricingResponse = await fetch(`${BASE_URL}/api/v1/models/pricing?model=gpt-4o-mini`);
+    expect(pricingResponse.status).toBe(200);
+    const pricingBody = await pricingResponse.json();
+    expect(pricingBody.data.hasPricing).toBe(true);
+    const { inputPerMillion, outputPerMillion } = pricingBody.data;
+
     const response = await fetch(`${BASE_URL}/api/v1/models/calculate-cost`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -184,8 +192,8 @@ describe.skipIf(!SERVER_PROBE.available)('Cost calculation', () => {
     const body = await response.json();
     expect(body.success).toBe(true);
     // Current envelope: { cost, pricing, formatted } — not the orphan's
-    // stale data.totalCost. gpt-4o-mini: $0.15/M in, $0.60/M out.
-    const expected = (15000 / 1e6) * 0.15 + (5000 / 1e6) * 0.6;
+    // stale data.totalCost.
+    const expected = (15000 / 1e6) * inputPerMillion + (5000 / 1e6) * outputPerMillion;
     expect(body.data.cost).toBeCloseTo(expected, 6);
     expect(typeof body.data.formatted).toBe('string');
     expect(body.data.formatted).toContain('(15000 in, 5000 out)');
