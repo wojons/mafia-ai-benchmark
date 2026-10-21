@@ -2,13 +2,15 @@
   "scheduler_tick": "mafia-ai-benchmark-foreman-2026-10-21-04-05-00",
   "board_tick": 265,
   "created_at": "2026-10-21T04:40:00Z",
+  "finished_at": "2026-10-21T05:26:00Z",
   "budget": 12,
   "wave_size": 4,
   "base_sha": "4686d9f",
   "base_ref": "origin/main",
   "model": "glm-5.3-flash",
   "provider": "ollama-cloud",
-  "notes": "Serial-merge wave. Four mutually independent file clusters: server stats-collector (DF-39), apps/cli scripts+README (README-3), apps/web GameList (DF-42), apps/server db/migrate (QA-20). No shared files between branches.",
+  "result": "ALL 4 MERGED AND CLOSED — battery 418/418 + 557/557 + 112/skip + 90/90, build 4/4, lint 3/3; verdicts tier2 COMPLETE for all four; final content sha cab7f6c, board closeout 193fcd2, CI green on both",
+  "notes": "Serial-merge wave. Four mutually independent file clusters: server stats-collector (DF-39), apps/cli scripts+README (README-3), apps/web GameList (DF-42), apps/server db/migrate (QA-20). No shared files between branches; all three finished non-DF-39 workers delivered in ~5 min, DF-39 in ~19 min.",
   "workers": [
     {
       "id": "DF-MAFIA-AI-BENCHMARK-39",
@@ -18,8 +20,12 @@
       "model": "glm-5.3-flash",
       "provider": "ollama-cloud",
       "brief": "/tmp/maf265-brief-DF-39.txt",
-      "status": "dispatched",
-      "files": ["apps/server/src/services/stats-collector/models.ts", "apps/server/src/services/stats-collector/index.ts", "apps/server/src/__tests__/services/"]
+      "status": "merged",
+      "commit": "2d8b4e3",
+      "merge_commit": "056a249",
+      "verdict": "bf669050",
+      "tier2": "COMPLETE (6/6 criteria)",
+      "live_verified": "yes - container rebuilt, in-container models.ts md5 == HEAD; compare+report both serve rolePerformance + byNumPlayers"
     },
     {
       "id": "README-3",
@@ -29,8 +35,12 @@
       "model": "glm-5.3-flash",
       "provider": "ollama-cloud",
       "brief": "/tmp/maf265-brief-README-3.txt",
-      "status": "dispatched",
-      "files": ["apps/cli/package.json", "README.md"]
+      "status": "merged",
+      "commit": "d579416",
+      "merge_commit": "2cc25ad",
+      "verdict": "81d11057",
+      "tier2": "COMPLETE (5/5 criteria)",
+      "follow_up": "cab7f6c - restored the @types/uuid manifest specifier the worker's dev-run bumped (its merge commit 056a249 failed CI at 'Install dependencies' with ERR_PNPM_OUTDATED_LOCKFILE); frozen-lockfile clean afterwards"
     },
     {
       "id": "DF-MAFIA-AI-BENCHMARK-42",
@@ -40,8 +50,12 @@
       "model": "glm-5.3-flash",
       "provider": "ollama-cloud",
       "brief": "/tmp/maf265-brief-DF-42.txt",
-      "status": "dispatched",
-      "files": ["apps/web/src/components/GameList.tsx", "apps/web/src/services/", "apps/web/src/__tests__/"]
+      "status": "merged",
+      "commit": "23f1f20",
+      "merge_commit": "88f2c6d",
+      "verdict": "d6a70612",
+      "tier2": "COMPLETE (5/5 criteria)",
+      "open_leg": "the row's live 10-player create leg was not exercised (cost + live-DB write); invariant proven by construction + catalog fixture test"
     },
     {
       "id": "QA-MAFIA-AI-BENCHMARK-20",
@@ -51,8 +65,13 @@
       "model": "glm-5.3-flash",
       "provider": "ollama-cloud",
       "brief": "/tmp/maf265-brief-QA-20.txt",
-      "status": "dispatched",
-      "files": ["apps/server/src/db/migrate.ts", "apps/server/package.json", "apps/server/src/__tests__/db/"]
+      "status": "merged",
+      "commit": "3c63575",
+      "merge_commit": "dc5bbdd",
+      "verdict": "7d7629b9",
+      "first_verdict": "b44e544d (tier2 FAIL: the import-safety arm asserted the absence of the checkout's gitignored apps/server/data/mafia.db)",
+      "follow_up": "7eb790a - the arm now runs the import in a child process with a throwaway cwd; tier2 4/4 on re-judge"
     }
-  ]
+  ],
+  "recovery_state": "closed - no workers alive, every branch merged into main and reachable, worktrees left on disk as evidence (RELEASE-002 / MAF-GAP-072-R2 are pre-existing from earlier ticks, untouched)"
 }
