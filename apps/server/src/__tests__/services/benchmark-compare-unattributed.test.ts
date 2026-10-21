@@ -32,6 +32,7 @@ import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import express from 'express';
 import type { Server } from 'http';
 import { createBenchmarkRouter } from '../../routes/benchmark.js';
+import { createStatsRouter } from '../../routes/stats.js';
 import { StatsCollector } from '../../services/stats-collector.js';
 import { getModelComparison } from '../../services/stats-collector/models.js';
 import { createSqliteBackedRepository } from './mocks.js';
@@ -196,6 +197,200 @@ describe('DF-MAFIA-AI-BENCHMARK-36 — compare/report CUSTOM bucket parity', () 
     expect(h2h.map((r) => `${r.modelA}|${r.modelB}`)).toContain(
       'openai/gpt-4o-mini|openai/gpt-4o',
     );
+  });
+
+  // DF-MAFIA-AI-BENCHMARK-40: with model_matchups EMPTY (or holding no row
+  // for a recorded pairing), BOTH head-to-head surfaces derive rows from
+  // benchmark_games with the run report's winner semantics; the CUSTOM/*
+  // passthrough pairing stays ghost-filtered. Self-contained harness: each
+  // test builds its OWN repo + app on a fresh sqlite store so the shared
+  // beforeEach wiring (and its afterEach teardown) stays untouched.
+  describe('DF-40: head-to-head derived from benchmark_games', () => {
+    const buildHarness = (): {
+      repo: FakeRepo;
+      fetch: (app: ReturnType<typeof express>, path: string) => Promise<any>;
+      close: (app: ReturnType<typeof express>) => Promise<void>;
+    } => {
+      const r = createSqliteBackedRepository() as unknown as FakeRepo;
+      const fetchDataLocal = async (app: ReturnType<typeof express>, path: string) => {
+        const srv = await new Promise<Server>((resolve) => {
+          const listener = app.listen(0, '127.0.0.1', () => resolve(listener as Server));
+        });
+        const port = (srv.address() as { port: number }).port;
+        try {
+          const response = await fetch(`http://127.0.0.1:${port}${path}`);
+          expect(response.status).toBe(200);
+          const body = await response.json();
+          expect(body.success).toBe(true);
+          return body.data;
+        } finally {
+          await new Promise<void>((resolve, reject) => {
+            srv.close((err) => (err ? reject(err) : resolve()));
+          });
+        }
+      };
+      const close = async (_app: ReturnType<typeof express>) => {
+        r.db.close();
+      };
+      return { repo: r, fetch: fetchDataLocal, close };
+    };
+
+    /** Seed benchmark_games with two pairings: a real one (gemini vs mini,
+     *  2 completed games, gemini's side wins both) and a CUSTOM passthrough
+     *  ghost pairing. model_matchups keeps only the seeded mini-vs-4o row. */
+    const seedDf40Store = (repo: FakeRepo): void => {
+      repo.db
+        .prepare(
+          `INSERT INTO model_matchups
+             (id, model_a_provider, model_a, model_b_provider, model_b,
+              games_played, model_a_wins, model_b_wins, ties)
+           VALUES ('mu-seed', 'openai', 'gpt-4o-mini', 'openai', 'gpt-4o', 10, 6, 4, 0)`,
+        )
+        .run();
+
+      repo.insertBenchmarkRun({
+        id: 'run-df40',
+        config: { models: ['openai/gpt-4o-mini', 'google/gemini-2.5-flash'] },
+        status: 'COMPLETED',
+      });
+      for (const gameId of ['bg-1', 'bg-2']) {
+        repo.seedGame({
+          id: gameId,
+          status: 'ENDED',
+          winner: 'MAFIA',
+          duration: 60_000,
+          players: [
+            {
+              id: `${gameId}-mA`, name: 'mafia-A', role: 'MAFIA',
+              isMafia: true, won: 1, joinOrder: 0,
+              provider: 'google', model: 'gemini-2.5-flash',
+            },
+            {
+              id: `${gameId}-tB`, name: 'town-B', role: 'VILLAGER',
+              isMafia: false, won: 0, joinOrder: 1,
+              provider: 'openai', model: 'gpt-4o-mini',
+            },
+          ],
+        });
+        repo.insertBenchmarkGame({
+          game_id: gameId, run_id: 'run-df40', pairing_id: 'p-gemini-vs-mini',
+          model_a: 'google/gemini-2.5-flash', model_b: 'openai/gpt-4o-mini',
+          seed: 1, model_a_role: 'VILLAGER', model_b_role: 'VILLAGER',
+          winner: 'MAFIA', completed_at: Date.now(), valid: 1,
+        });
+      }
+
+      // A CUSTOM passthrough pairing in benchmark_games (bare model spec
+      // parses to the CUSTOM provider): the DF-36 ghost filter keeps it
+      // out of every head-to-head surface, exactly like a persisted
+      // CUSTOM row.
+      for (const gameId of ['bg-3', 'bg-4']) {
+        repo.seedGame({
+          id: gameId,
+          status: 'ENDED',
+          winner: 'MAFIA',
+          duration: 60_000,
+          players: [
+            {
+              id: `${gameId}-mA`, name: 'mafia-A', role: 'MAFIA',
+              isMafia: true, won: 1, joinOrder: 0,
+              provider: 'CUSTOM', model: 'local-ghost',
+            },
+            {
+              id: `${gameId}-tB`, name: 'town-B', role: 'VILLAGER',
+              isMafia: false, won: 0, joinOrder: 1,
+              provider: 'openai', model: 'gpt-4o-mini',
+            },
+          ],
+        });
+        repo.insertBenchmarkGame({
+          game_id: gameId, run_id: 'run-df40', pairing_id: 'p-ghost',
+          model_a: 'local-ghost', model_b: 'openai/gpt-4o-mini',
+          seed: 1, model_a_role: 'VILLAGER', model_b_role: 'VILLAGER',
+          winner: 'MAFIA', completed_at: Date.now(), valid: 1,
+        });
+      }
+    };
+
+    it('derives head-to-head rows from benchmark_games when model_matchups carries no row (DF-40)', async () => {
+      const { repo: localRepo, fetch, close } = buildHarness();
+      let app: ReturnType<typeof express> | null = null;
+      try {
+        seedDf40Store(localRepo);
+        const statsCollector = new StatsCollector(localRepo as never);
+        app = express();
+        app.use(express.json());
+        app.use(
+          '/',
+          createBenchmarkRouter({
+            benchmarkRunner: {} as never,
+            statsCollector,
+          } as never),
+        );
+
+        const data = await fetch(app, '/api/v1/benchmark/compare');
+        const h2h = data.headToHead as Array<{
+          modelA: string; modelB: string; gamesPlayed: number;
+          modelAWins: number; modelBWins: number; ties: number;
+        }>;
+
+        const keys = h2h.map((r) => `${r.modelA}|${r.modelB}`);
+        // The DERIVED pairing appears with the run-report win semantics.
+        expect(keys).toContain('google/gemini-2.5-flash|openai/gpt-4o-mini');
+        const derived = h2h.find(
+          (r) => r.modelA === 'google/gemini-2.5-flash' && r.modelB === 'openai/gpt-4o-mini',
+        )!;
+        expect(derived.gamesPlayed).toBe(2);
+        expect(derived.modelAWins).toBe(2);
+        expect(derived.modelBWins).toBe(0);
+        expect(derived.ties).toBe(0);
+
+        // The seeded pairing is counted ONCE — the persisted aggregates.
+        const persisted = h2h.find(
+          (r) => r.modelA === 'openai/gpt-4o-mini' && r.modelB === 'openai/gpt-4o',
+        )!;
+        expect(persisted.gamesPlayed).toBe(10);
+        expect(keys.filter((k) => k === 'openai/gpt-4o-mini|openai/gpt-4o').length).toBe(1);
+
+        // The CUSTOM passthrough pairing stays out of headToHead.
+        expect(keys.some((k) => k.toUpperCase().startsWith('CUSTOM/'))).toBe(false);
+      } finally {
+        if (app) await close(app);
+      }
+    });
+
+    it('/api/v1/stats/matchups derives the same benchmark_games pairing (DF-40 surface parity)', async () => {
+      const { repo: localRepo, fetch, close } = buildHarness();
+      let app: ReturnType<typeof express> | null = null;
+      try {
+        seedDf40Store(localRepo);
+        const statsCollector = new StatsCollector(localRepo as never);
+        app = express();
+        app.use(express.json());
+        app.use('/', createStatsRouter({
+          statsCollector,
+          gameRepository: localRepo,
+        } as never));
+
+        const rows = (await fetch(app, '/api/v1/stats/matchups')) as Array<{
+          modelA: string; modelB: string; gamesPlayed: number;
+          modelAWins: number; modelBWins: number; ties: number;
+        }>;
+        const keys = rows.map((r) => `${r.modelA}|${r.modelB}`);
+        expect(keys).toContain('google/gemini-2.5-flash|openai/gpt-4o-mini');
+        const derived = rows.find(
+          (r) => r.modelA === 'google/gemini-2.5-flash' && r.modelB === 'openai/gpt-4o-mini',
+        )!;
+        expect(derived.gamesPlayed).toBe(2);
+        expect(derived.modelAWins).toBe(2);
+        expect(derived.modelBWins).toBe(0);
+        expect(derived.ties).toBe(0);
+        // Persisted precedence again: the seeded pairing counted once.
+        expect(keys.filter((k) => k === 'openai/gpt-4o-mini|openai/gpt-4o').length).toBe(1);
+      } finally {
+        if (app) await close(app);
+      }
+    });
   });
 
   it('keeps the model-row key set identical when the store holds MORE than 10 real models (DF-36b)', async () => {

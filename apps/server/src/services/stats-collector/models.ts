@@ -9,6 +9,7 @@ import { GameRepository as GameRepositoryClass } from '../../db/repository.js';
 import { getGameWinnerFromEvents } from './wins.js';
 import { getDegenerateGameIds } from './degenerate.js';
 import { getMockGameIds, getMockGameCounts } from './mock.js';
+import { deriveMatchupsFromBenchmarkGames } from './derived-matchups.js';
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 type AnyRecord = Record<string, any>;
@@ -1358,7 +1359,7 @@ export function getCompareReport(
   // DF-36: a matchup pairing that involves the mis-key family is not a
   // real head-to-head — drop those pairs from the comparison surface
   // (their aggregate stays auditable in `unattributedModels`).
-  const headToHead = h2hRows
+  const persistedH2h = h2hRows
     .map((row) => ({
       modelA: `${row.model_a_provider || ''}/${row.model_a || ''}`,
       modelB: `${row.model_b_provider || ''}/${row.model_b || ''}`,
@@ -1371,6 +1372,31 @@ export function getCompareReport(
       (row) =>
         !isUnattributedModelKey(row.modelA) && !isUnattributedModelKey(row.modelB),
     );
+
+  // DF-MAFIA-AI-BENCHMARK-40: nothing in the tree writes model_matchups,
+  // so the persisted-only query above yields an empty headToHead on live
+  // stores even though benchmark_games persists real pairings. Derive the
+  // missing pairings from benchmark_games and merge — NO DOUBLE COUNTING
+  // via persisted-precedence (a pairing the persisted table already
+  // describes keeps its persisted row; only pairings the table carries no
+  // row for are derived; see stats-collector/matchups.ts for the same
+  // merge on the /stats/matchups surface). Derived rows pass the same
+  // DF-36 ghost filter so CUSTOM/* pairings stay out exactly as today.
+  const persistedKeys = new Set(
+    persistedH2h.map(
+      (r) => `${r.modelA.toLowerCase()}|${r.modelB.toLowerCase()}`,
+    ),
+  );
+  const derivedH2h = deriveMatchupsFromBenchmarkGames(gameRepository).filter(
+    (row) =>
+      !persistedKeys.has(`${row.modelA.toLowerCase()}|${row.modelB.toLowerCase()}`) &&
+      !isUnattributedModelKey(row.modelA) &&
+      !isUnattributedModelKey(row.modelB),
+  );
+
+  const headToHead = [...persistedH2h, ...derivedH2h]
+    .sort((a, b) => b.gamesPlayed - a.gamesPlayed)
+    .slice(0, 50);
 
   // ===== Trends (game-by-game data) =====
   let trendQuery = `

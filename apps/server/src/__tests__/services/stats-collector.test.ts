@@ -1728,6 +1728,116 @@ describe('StatsCollector', () => {
     it('returns empty array when model_matchups is empty', () => {
       expect(stats.getMatchups()).toEqual([]);
     });
+
+    // DF-MAFIA-AI-BENCHMARK-40: derivation must leave a genuinely empty
+    // store empty — this fixture seeds NO benchmark pairings either, so a
+    // fabricated row here would break the honest-empty contract.
+    it('returns empty when the store holds no pairings at all (model_matchups empty + no benchmark_games)', () => {
+      expect(repo.db.prepare('SELECT COUNT(*) AS n FROM benchmark_games').get()).toMatchObject({ n: 0 });
+      expect(stats.getMatchups()).toEqual([]);
+    });
+
+    // DF-MAFIA-AI-BENCHMARK-40: with model_matchups EMPTY and ONE pair of
+    // models in benchmark_games (2 completed valid games, same winner),
+    // the pairing is DERIVED from benchmark_games and reconciles with the
+    // seeded rows. The compare surface (data.headToHead) is non-empty for
+    // the same store.
+    it('derives the head-to-head row from benchmark_games when model_matchups is empty', () => {
+      // Two completed valid games of the SAME pairing, mini wins both.
+      // Winner semantics match benchmark-runner.ts getRunReport(): the
+      // side winner is joined to real players-row side attribution.
+      repo.insertBenchmarkRun({ id: 'run-df40', config: { models: ['openai/gpt-4o-mini', 'openai/gpt-4o'] }, status: 'COMPLETED' });
+      // Real side attribution per game: mini's players sit on MAFIA (won=1);
+      // gpt-4o plays town and loses. These mirror the players rows the
+      // terminal-event subscription + setPlayersWon actually write.
+      for (const gameId of ['bg-1', 'bg-2']) {
+        repo.seedGame({
+          id: gameId, status: 'ENDED', winner: 'MAFIA', duration: 60_000,
+          players: [
+            { id: `${gameId}-m1`, name: 'M1', role: 'MAFIA', joinOrder: 0, isMafia: true, provider: 'openai', model: 'gpt-4o-mini', won: 1 },
+            { id: `${gameId}-t1`, name: 'T1', role: 'VILLAGER', joinOrder: 1, isMafia: false, provider: 'openai', model: 'gpt-4o', won: 0 },
+          ],
+        });
+      }
+      repo.insertBenchmarkGame({
+        game_id: 'bg-1', run_id: 'run-df40', pairing_id: 'p-mini-vs-4o',
+        model_a: 'openai/gpt-4o-mini', model_b: 'openai/gpt-4o',
+        seed: 1, model_a_role: 'VILLAGER', model_b_role: 'VILLAGER',
+        winner: 'MAFIA', completed_at: Date.now(), valid: 1,
+      });
+      repo.insertBenchmarkGame({
+        game_id: 'bg-2', run_id: 'run-df40', pairing_id: 'p-mini-vs-4o',
+        model_a: 'openai/gpt-4o-mini', model_b: 'openai/gpt-4o',
+        seed: 2, model_a_role: 'VILLAGER', model_b_role: 'VILLAGER',
+        winner: 'MAFIA', completed_at: Date.now(), valid: 1,
+      });
+
+      const matchups = stats.getMatchups();
+      expect(matchups).toHaveLength(1);
+      expect(matchups[0]).toEqual({
+        modelA: 'openai/gpt-4o-mini',
+        modelB: 'openai/gpt-4o',
+        gamesPlayed: 2,
+        modelAWins: 2,
+        modelBWins: 0,
+        ties: 0,
+      });
+    });
+
+    // NO DOUBLE COUNTING: when BOTH sources describe the same pairing,
+    // the persisted model_matchups row is authoritative and the derived
+    // row for that pairing is dropped — the pairing is counted once.
+    it('does not double count a pairing present in both model_matchups and benchmark_games', () => {
+      repo.db
+        .prepare(
+          `INSERT INTO model_matchups
+             (id, model_a_provider, model_a, model_b_provider, model_b,
+              games_played, model_a_wins, model_b_wins, ties)
+           VALUES ('mu-persisted', 'openai', 'gpt-4o-mini', 'openai', 'gpt-4o', 10, 6, 4, 0)`,
+        )
+        .run();
+      // benchmark_games ALSO describes the same pairing (2 further games).
+      repo.insertBenchmarkRun({ id: 'run-df40b', config: { models: ['openai/gpt-4o-mini', 'openai/gpt-4o'] }, status: 'COMPLETED' });
+      repo.seedGame({
+        id: 'bg-1', status: 'ENDED', winner: 'MAFIA', duration: 60_000,
+        players: [
+          { id: 'bg-1-m1', name: 'M1', role: 'MAFIA', joinOrder: 0, isMafia: true, provider: 'openai', model: 'gpt-4o-mini', won: 1 },
+          { id: 'bg-1-t1', name: 'T1', role: 'VILLAGER', joinOrder: 1, isMafia: false, provider: 'openai', model: 'gpt-4o', won: 0 },
+        ],
+      });
+      repo.seedGame({
+        id: 'bg-2', status: 'ENDED', winner: 'TOWN', duration: 60_000,
+        players: [
+          { id: 'bg-2-m1', name: 'M1', role: 'MAFIA', joinOrder: 0, isMafia: true, provider: 'openai', model: 'gpt-4o-mini', won: 0 },
+          { id: 'bg-2-t1', name: 'T1', role: 'VILLAGER', joinOrder: 1, isMafia: false, provider: 'openai', model: 'gpt-4o', won: 1 },
+        ],
+      });
+      repo.insertBenchmarkGame({
+        game_id: 'bg-1', run_id: 'run-df40b', pairing_id: 'p',
+        model_a: 'openai/gpt-4o-mini', model_b: 'openai/gpt-4o',
+        seed: 1, model_a_role: 'VILLAGER', model_b_role: 'VILLAGER',
+        winner: 'MAFIA', completed_at: Date.now(), valid: 1,
+      });
+      repo.insertBenchmarkGame({
+        game_id: 'bg-2', run_id: 'run-df40b', pairing_id: 'p',
+        model_a: 'openai/gpt-4o-mini', model_b: 'openai/gpt-4o',
+        seed: 2, model_a_role: 'VILLAGER', model_b_role: 'VILLAGER',
+        winner: 'TOWN', completed_at: Date.now(), valid: 1,
+      });
+
+      const matchups = stats.getMatchups();
+      // Exactly ONE row for the pairing — the persisted aggregates (10/6/4),
+      // NOT a 12/7/4 blend of both sources.
+      expect(matchups).toHaveLength(1);
+      expect(matchups[0]).toEqual({
+        modelA: 'openai/gpt-4o-mini',
+        modelB: 'openai/gpt-4o',
+        gamesPlayed: 10,
+        modelAWins: 6,
+        modelBWins: 4,
+        ties: 0,
+      });
+    });
   });
 
   // ==========================================================================
