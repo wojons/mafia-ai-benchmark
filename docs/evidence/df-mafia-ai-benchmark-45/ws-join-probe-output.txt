@@ -1,0 +1,3 @@
+GID=7bc9d5de-4f8b-41a6-a2c6-18ffba68e9b7
+FIRST_REPLY_AFTER_JOIN={"type":"GAME_JOINED","payload":{"gameId":"7bc9d5de-4f8b-41a6-a2c6-18ffba68e9b7"},"timestamp":"2026-10-21T13:38:30.037Z"} | timeline=CONNECTED->GAME_JOINED
+7bc9d5de-4f8b-41a6-a2c6-18ffba68e9b7

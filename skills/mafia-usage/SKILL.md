@@ -47,7 +47,7 @@ won-game count; winRate ≤1 verified live; token/cost fields still 0).
 |---------|---------------|--------|
 | REST API | `http://localhost:3004` | ✅ works (`/health` and `/api/v1/health` both live) |
 | SSE stream | `GET /api/v1/games/<id>/events` with `Accept: text/event-stream` | ✅ works |
-| WebSocket | `ws://localhost:3004/ws` — protocol is `JOIN_GAME` (no `subscribe`) | ❌ DF-16 P0 (2026-09-25): connects + acks but delivers ZERO game events server-side — join registers a `game:<id>` EventBus topic nothing publishes to (EventBus is event-type-keyed) and broadcasts with `excludeClientId` on the joiner (websocket/index.ts:186). Poll REST/SSE instead. SUBSCRIBE {gameId} silently no-ops too (DF-19). **Re-verified live 2026-09-25 late tick on the fresh (post-DF-17-rebuild) deploy: spectator joined at t=3ms, zero events through GAME_OVER 101s later — DF-21 filed.** Wire shape matters: `{type:'JOIN_GAME', payload:{gameId}}` (bare `{gameId}` → ERROR) |
+| WebSocket | `ws://localhost:3004/ws` — send `{type:'JOIN_GAME', payload:{gameId}}` (exactly as apps/web/src/hooks/useGameEvents.ts does; bare `{gameId}` at top level → 'Invalid message format'). Replies: `CONNECTED` handshake, then `GAME_JOINED` confirming `payload.gameId`, then live `GAME_EVENT` frames. SUBSCRIBE {gameId} also works (aliases to JOIN_GAME, DF-MAFIA-AI-BENCHMARK-19) | ✅ |
 | Web dashboard | `http://localhost:5174` | ✅ fresh as of 2026-09-25 20:58 (DF-17 drift closed: images rebuilt from HEAD, stale Aug-10 bundle 404s). Spectate = **/watch/:gameId** (history hydration renders votes+discussion); /game/:gameId is the player board and shows placeholders for finished games. Known warts: `[object Object]/[object Object]` model row on /stats + CLI (DF-22); ghost "Active Games: 97" vs 5 real IN_PROGRESS rows (DF-23) |
 | CLI run-game | `pnpm --filter @mafia/cli dev -- run-game --players 5 --yes` | ✅ works (exit 0, ~1 s to create) |
 | CLI watch-game | `… dev -- watch-game <gid>` | ✅ works |
@@ -136,7 +136,12 @@ GAME_ENDED` (`data.winner`). Dialogue text lives in
 - **Flags DO survive `pnpm --filter @mafia/cli dev --` now** (the literal
   `--` separator is stripped in `apps/cli/src/index.ts`). Older notes
   claiming flags get swallowed are stale.
-- **WS protocol**: `JOIN_GAME` with `{gameId}` — no `subscribe` type.
+- **WS protocol**: send `{type:'JOIN_GAME', payload:{gameId}}` — verified live
+  2026-10-21: server replies `CONNECTED` then `GAME_JOINED` with
+  `payload.gameId` confirmed, then streams live `GAME_EVENT` frames (spectator
+  delivery works post-DF-16 fix). Bare `{gameId}` at the top level of the
+  frame is rejected with 'Invalid message format'. `SUBSCRIBE {gameId}` also
+  aliases to JOIN_GAME (DF-MAFIA-AI-BENCHMARK-19).
 - **`events?limit=N` is ignored** — the endpoint returns everything.
 - **Real games cost real tokens** — 5p gpt-4o-mini ~$0.01, 10p ~$0.07.
   Use cheap models for probing.
