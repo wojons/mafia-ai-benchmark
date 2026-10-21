@@ -1,8 +1,9 @@
 #!/usr/bin/env bash
 set -euo pipefail
 cd "$(dirname "$0")/.."
+pnpm install --frozen-lockfile
 CI=true pnpm run build
-PORT=3099 DB_PATH=./data/test-smoke.db node apps/server/dist/apps/server/src/index.js &
+PORT=3099 DB_PATH=./data/test-smoke.db node apps/server/dist/index.js &
 PID=$!
 trap 'kill $PID 2>/dev/null; wait $PID 2>/dev/null' EXIT
 for i in {1..30}; do curl -sf http://localhost:3099/health >/dev/null 2>&1 && break; sleep 1; done
