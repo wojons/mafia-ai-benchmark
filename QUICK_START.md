@@ -268,7 +268,7 @@ OPENAI_API_KEY=sk-or-v1-your-key-here
 # Optional
 PORT=3004                # Direct-run server port (default: 3004; compose exposes the container-internal :3000 on host :3004)
 TEST_BASE_URL=http://localhost:3004  # Where API integration tests look for the server (default: http://localhost:3004)
-DATABASE_PATH=./data/games.db  # SQLite path
+DB_PATH=./data/mafia.db  # SQLite path
 LOG_LEVEL=info           # debug, info, warn, error
 ```
 
