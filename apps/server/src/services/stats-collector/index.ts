@@ -172,6 +172,127 @@ function storeCachedReport(
   }
 }
 
+// ==================== COMPARE MEMOIZATION (PERF-MAFIA-3) ====================
+
+/**
+ * PERF-MAFIA-3: GET /api/v1/benchmark/compare cost 2.3-2.5s warm and cold
+ * at the 4K+ game corpus (every request pays full price for identical data)
+ * while /benchmark/report re-serves its full-fleet report from the
+ * PERF-MAFIA-2 watermark cache in microseconds. Memoize the compare report
+ * on the SAME data-watermark mechanism, keyed per GameRepository
+ * (module-level WeakMap — no external cache dep) and per `?models=` filter.
+ */
+
+export type CompareReport = ReturnType<typeof getCompareReport>;
+
+interface CompareCacheEntry {
+  watermark: string;
+  report: CompareReport;
+  /**
+   * PRAGMA data_version snapshot taken when the report was cached (same
+   * foreign-writer guard as the PERF-MAFIA-2 report cache).
+   */
+  dataVersion: number;
+}
+
+/**
+ * One map per GameRepository instance, keyed by the normalized filter:
+ * alternating `?models=` variants (dashboard switching between the
+ * unfiltered leaderboard and a filtered subset) must not thrash — each
+ * filter rides its OWN watermark entry. Tests get clean caches for free.
+ */
+const compareCacheByRepo = new WeakMap<
+  GameRepository,
+  Map<string, CompareCacheEntry>
+>();
+
+/**
+ * The compare fingerprint: the COMPLETE report watermark (every
+ * games/players/events/token_usage/api_calls/agent_sessions/
+ * player_model_assignments input is covered by computeReportWatermark) PLUS
+ * the sources getCompareReport() reads beyond it:
+ *   - benchmark_games: count + winner/team_winner/error/model_a/model_b
+ *     length sums + valid + completed_at sum — the head-to-head derivation
+ *     (deriveMatchupsFromBenchmarkGames) reads exactly these columns and a
+ *     a winner UPDATE on a benchmark_games row changes none of the base
+ *     watermark's tables;
+ *   - model_matchups: count + aggregate/winner-sum + model name lengths —
+ *     the persisted head-to-head source;
+ *   - players role-length sum: the compare-specific rolePerformance cells
+ *     and avgRolePerformance GROUP BY p.role, which the base watermark's
+ *     player sums do not cover;
+ *   - player_model_assignments: max(rowid) + provider/model/role/game_id
+ *     length sums — the legacy fallback-trend entries come from this table
+ *     and the base watermark covers only its row count (an in-place role
+ *     or provider UPDATE would otherwise ride a same-count cache hit).
+ * Combined into one stringified two-element array (base fingerprint + extra
+ * fingerprint) so equality is one === compare. A read failure returns null:
+ * the caller then skips the cache entirely (never serving stale data on a
+ * broken fingerprint).
+ */
+function computeCompareWatermark(repo: GameRepository): string | null {
+  const base = computeReportWatermark(repo);
+  if (base === null) return null;
+  try {
+    const db = repo.getDatabase();
+    const row = db.prepare(`
+      SELECT
+        (SELECT COUNT(*) FROM benchmark_games) AS bgCount,
+        (SELECT COALESCE(SUM(LENGTH(COALESCE(winner, '')) + LENGTH(COALESCE(team_winner, '')) + LENGTH(COALESCE(error, '')) + LENGTH(COALESCE(model_a, '')) + LENGTH(COALESCE(model_b, '')) + valid + COALESCE(completed_at, 0)), 0) FROM benchmark_games) AS bgFp,
+        (SELECT COUNT(*) FROM model_matchups) AS mmCount,
+        (SELECT COALESCE(SUM(games_played + model_a_wins + model_b_wins + ties + LENGTH(COALESCE(model_a, '')) + LENGTH(COALESCE(model_b, ''))), 0) FROM model_matchups) AS mmFp,
+        (SELECT COALESCE(SUM(LENGTH(COALESCE(role, ''))), 0) FROM players) AS playersRoleLen,
+        (SELECT COALESCE(MAX(rowid), 0) FROM player_model_assignments) AS pmaMaxRowid,
+        (SELECT COALESCE(SUM(LENGTH(COALESCE(provider, '')) + LENGTH(COALESCE(model, '')) + LENGTH(COALESCE(role, '')) + LENGTH(COALESCE(game_id, ''))), 0) FROM player_model_assignments) AS pmaTextLen
+    `).get() as Record<string, unknown> | undefined;
+    if (!row) return null;
+    return JSON.stringify([base, row]);
+  } catch {
+    // Extra fingerprint unavailable (older schema / partial store) — skip
+    // the cache and compute fresh. Never serve stale data on a broken key.
+    return null;
+  }
+}
+
+/** Cached-compare lookup; null = compute fresh. */
+function getCachedCompareReport(
+  repo: GameRepository,
+  cacheKey: string,
+): CompareCacheEntry | null {
+  // Same cross-connection guard as the report cache: data_version moves on
+  // any commit BY ANOTHER CONNECTION (foreign writers), while
+  // same-connection writes are caught by the watermark itself.
+  try {
+    const version = repo.getDatabase().pragma('data_version', { simple: true }) as number;
+    const entry = compareCacheByRepo.get(repo)?.get(cacheKey);
+    if (!entry) return null;
+    if (entry.dataVersion !== version) return null;
+    return entry;
+  } catch {
+    return null;
+  }
+}
+
+/** Store a freshly computed compare report under filter + watermark + version. */
+function storeCachedCompareReport(
+  repo: GameRepository,
+  cacheKey: string,
+  watermark: string,
+  report: CompareReport,
+): void {
+  try {
+    const version = repo.getDatabase().pragma('data_version', { simple: true }) as number;
+    let byFilter = compareCacheByRepo.get(repo);
+    if (!byFilter) {
+      byFilter = new Map();
+      compareCacheByRepo.set(repo, byFilter);
+    }
+    byFilter.set(cacheKey, { watermark, report, dataVersion: version });
+  } catch {
+    // best-effort: cache miss next time
+  }
+}
+
 // ==================== RE-EXPORTS ====================
 export { getAggregatedWins } from './wins.js';
 export { getGameWinnerFromEvents, computeDurationFromEvents } from './wins.js';
@@ -765,12 +886,67 @@ export class StatsCollector {
   }
   
   /**
-   * Get comprehensive model comparison report
+   * Get comprehensive model comparison report.
+   *
+   * PERF-MAFIA-3: the compare report is memoized on the same data-watermark
+   * mechanism the full-fleet report uses (PERF-MAFIA-2) — identical data
+   * re-serves from the cache in microseconds instead of paying ~2.4s of
+   * sequential SQL + per-row JS merge at the 4K+ game corpus. The cache is
+   * keyed per GameRepository (WeakMap) AND per normalized `?models=` filter
+   * (a filtered call never re-serves an unfiltered report), and the extra
+   * fingerprint adds the compare-only sources
+   * (benchmark_games / model_matchups / players.role) so the head-to-head
+   * derivation busts the cache too. A failed fingerprint always recomputes
+   * (fail-safe by construction — never serve stale data).
    */
   getCompareReport(modelFilter?: string[]) {
-    return getCompareReport(this.gameRepository, modelFilter);
+    // PERF-MAFIA-3: normalized filter key — order-insensitive collapse of
+    // adjacent/empty segments happens in the route layer; here only an
+    // absent filter and a present one are told apart.
+    const cacheKey =
+      modelFilter && modelFilter.length > 0
+        ? JSON.stringify(modelFilter)
+        : 'unfiltered';
+
+    // ---------------- PERF-MAFIA-3 compare memoization ----------------
+    // Fingerprint the data ONCE, BEFORE building: identical data re-serves
+    // the cached report instantly, and the same fingerprint stores the
+    // freshly built report under the exact data it was computed from. A
+    // BROKEN fingerprint (null — schema variant / test double) means
+    // uncacheable: compute fresh every call, NEVER memoize (fail-safe by
+    // construction — the cache can never serve stale data).
+    const currentWatermark = computeCompareWatermark(this.gameRepository);
+    const cached = currentWatermark !== null
+      ? getCachedCompareReport(this.gameRepository, cacheKey)
+      : null;
+    if (cached && cached.watermark === currentWatermark) {
+      // Identical data fingerprint and no foreign commit since cache
+      // time: identical input — identical report. Serve instantly.
+      return cached.report;
+    }
+
+    // Cache miss (foreign write, watermark change, filter change, or the
+    // fingerprint itself failed).
+    // PERF-MAFIA-3: no try/catch here — if the underlying
+    // getCompareReport() throws, the error propagates to the route's 500
+    // path UNCHANGED and the store call below is never reached, so an
+    // error fallback is never memoized (the next call retries).
+    const report = getCompareReport(this.gameRepository, modelFilter);
+
+    // PERF-MAFIA-3: store the built report under the watermark captured
+    // BEFORE building. If the data changed mid-build the stored
+    // fingerprint no longer matches, so the next call recomputes.
+    if (currentWatermark !== null) {
+      storeCachedCompareReport(
+        this.gameRepository,
+        cacheKey,
+        currentWatermark,
+        report,
+      );
+    }
+    return report;
   }
-  
+
   // ==================== EXPORT & REPORTING ====================
 
   /**
