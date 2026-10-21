@@ -48,18 +48,37 @@ describe('QA-MAFIA-AI-BENCHMARK-20 — db:migrate script entry', () => {
     tmpBase = '';
   });
 
-  it('importing the module does NOT run migrations (guard dormant under vitest)', async () => {
+  it('importing the module does NOT run migrations (guard dormant under vitest)', () => {
     tmpBase = fs.mkdtempSync(path.join(os.tmpdir(), 'mafia-qa20-import-'));
     const dbPath = path.join(tmpBase, 'untouched.db');
-    process.env.DB_PATH = dbPath;
 
-    // Import under vitest: argv[1] is vitest's entry, never this module.
-    await import('../../db/migrate.js');
+    // Checkout-independent import-safety arm: import the module from a CHILD
+    // process whose cwd is a throwaway directory and whose DB_PATH points at a
+    // throwaway file. A dormant guard means the child creates neither the
+    // DB_PATH file nor the default `./data/mafia.db` relative to its own cwd.
+    // (Asserting on the checkout's own data/mafia.db would be wrong: that path
+    // is a real gitignored runtime artifact on any box that has run the server.)
+    const childScript = path.join(tmpBase, 'import-only.mjs');
+    fs.writeFileSync(
+      childScript,
+      [
+        `const mod = await import(${JSON.stringify(migrateModulePath)});`,
+        `console.log('IMPORTED:' + Object.keys(mod).sort().join(','));`,
+      ].join('\n'),
+    );
 
+    const out = execFileSync('npx', ['tsx', childScript], {
+      cwd: tmpBase,
+      encoding: 'utf-8',
+      env: { ...process.env, DB_PATH: dbPath },
+      timeout: 60_000,
+    });
+
+    expect(out).toContain('IMPORTED:');
+    expect(out).not.toContain('Applied');
+    expect(out).not.toContain('schema initialized');
     expect(fs.existsSync(dbPath)).toBe(false);
-
-    // Also prove the default DB_PATH default target is untouched.
-    expect(fs.existsSync(path.join(serverRoot, 'data', 'mafia.db'))).toBe(false);
+    expect(fs.existsSync(path.join(tmpBase, 'data'))).toBe(false);
   });
 
   it('running the script creates the DB file at DB_PATH and applies the schema', () => {
