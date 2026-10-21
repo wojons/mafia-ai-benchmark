@@ -194,6 +194,29 @@ export const agentsAPI = {
   },
 };
 
+// Models API (DF-MAFIA-AI-BENCHMARK-42): GET /api/v1/models is the server's
+// OWN provider catalog — the authoritative list of providers it actually
+// talks to plus the models it has cached for them. The New Game modal's
+// presets are sourced from this endpoint so no UI option can reference a
+// provider id (e.g. 'openrouter') the server does not resolve.
+export interface CatalogModelEntry {
+  provider: string;
+  modelId: string;
+  displayName: string;
+}
+
+export interface ModelsCatalog {
+  providers: string[];
+  models: CatalogModelEntry[];
+  totalCached?: number;
+}
+
+export const modelsAPI = {
+  get: () => {
+    return fetchAPI<ModelsCatalog>('/models');
+  },
+};
+
 // Stats API
 export const statsAPI = {
   getGameStats: () => {
@@ -324,6 +347,7 @@ export const api = {
   agents: agentsAPI,
   stats: statsAPI,
   benchmark: benchmarkAPI,
+  models: modelsAPI,
 };
 
 export default api;
