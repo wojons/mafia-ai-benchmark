@@ -20,8 +20,8 @@
     "stats": "tsx src/index.ts stats",
     "list-games": "tsx src/index.ts list-games",
     "config": "tsx src/index.ts config",
-    "game:run": "tsx src/commands/run-game.ts",
-    "game:watch": "tsx src/commands/watch-game.ts"
+    "game:run": "tsx src/index.ts run-game",
+    "game:watch": "tsx src/index.ts watch-game"
   },
   "dependencies": {
     "chalk": "^5.3.0",
@@ -36,7 +36,7 @@
   "devDependencies": {
     "@types/inquirer": "^9.0.10",
     "@types/node": "^20.19.43",
-    "@types/uuid": "^9.0.0",
+    "@types/uuid": "^9.0.8",
     "@types/ws": "^8.18.2",
     "tsx": "^4.23.15",
     "typescript": "^5.4.0",
