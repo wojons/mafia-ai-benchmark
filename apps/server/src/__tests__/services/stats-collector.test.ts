@@ -1939,7 +1939,7 @@ describe('StatsCollector', () => {
   });
 });
 
-// ch:trace row=DF-MAFIA-AI-BENCHMARK-41 spec=apps/server/src/services/stats-collector/index.ts#getGameStats wave=none:serial-tick test=apps/server/src/__tests__/services/stats-collector.test.ts::uses one completed-game population for stats and report summary when mock games are present (DF-MAFIA-AI-BENCHMARK-41) doc=none:api-contract evidence=commit witness=none:foreman-binds-live-verdict verdict=none:pending-foreman-trace commit=none:pending-foreman-trace memory=none:foreman-writes
+// ch:trace row=DF-MAFIA-AI-BENCHMARK-41 spec=apps/server/src/services/stats-collector/index.ts#getGameStats wave=none:serial-tick test=apps/server/src/__tests__/services/stats-collector.test.ts::uses one completed-game population for stats and report summary when mock games are present (DF-MAFIA-AI-BENCHMARK-41) doc=none:api-contract evidence=.gitreins/history/2026-10-22/7acc2aeb/verdict.json witness=live:http://localhost:3004/api/v1/stats+report mafiaWinRate=0.021463414634146343 verdict=9a20feb1 commit=5f9fcaa memory=none:namespace-grant
 // STATUS: complete
-// TIER: T3 (state tests and commands actually run)
-// EVIDENCE: focused stats/mocks/degenerate 102/102; apps/server test:run 563/563; pnpm run build PASS; apps/server pnpm lint PASS with one pre-existing warning
+// TIER: T3 (server suite run by worker and foreman; merged-tree battery and live endpoint reads observed)
+// EVIDENCE: focused stats/mocks/degenerate 102/102; apps/server test:run 563/563 (worker) and 571/571 (foreman, rebased); pnpm run build PASS; apps/server pnpm lint PASS with one pre-existing warning
