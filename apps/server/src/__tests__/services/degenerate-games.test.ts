@@ -88,8 +88,9 @@ describe('degenerate-game exclusion from win stats (DF-MAFIA-AI-BENCHMARK-18)', 
       expect(s.townWins).toBe(1);
       // The excluded game must be surfaced, not silently dropped.
       expect(s.degenerateGames).toBe(1);
-      // Data preservation: the game row itself still exists and is ENDED.
-      expect(s.completedGames).toBe(2);
+      // Data preservation: the game row itself still exists and is ENDED;
+      // completedGames names the eligible benchmark population.
+      expect(s.completedGames).toBe(1);
     });
 
     it('excludes degenerate games on the event-derived winner path too (MAF-GAP-060 mixing rule intact)', () => {
@@ -307,7 +308,7 @@ describe('degenerate-game exclusion from win stats (DF-MAFIA-AI-BENCHMARK-18)', 
       // Existing envelope fields preserved.
       expect(body.data.mafiaWins).toBe(0);
       expect(body.data.townWins).toBe(0);
-      expect(body.data.completedGames).toBe(1);
+      expect(body.data.completedGames).toBe(0);
     });
   });
 });

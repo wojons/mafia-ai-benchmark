@@ -247,7 +247,7 @@ describe('mock-game detection and exclusion from stats (DF-MAFIA-AI-BENCHMARK-12
       expect(s.townWins).toBe(1);
       // Surfaced, not silently dropped (same style as degenerateGames).
       expect(s.mockGames).toBe(1);
-      expect(s.completedGames).toBe(2);
+      expect(s.completedGames).toBe(1);
     });
 
     it('reports mockGames 0 and untouched wins when no mock games exist', () => {

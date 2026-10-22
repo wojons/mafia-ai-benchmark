@@ -731,6 +731,12 @@ export class StatsCollector {
    */
   getGameStats(): GameStats {
     const stats = this.gameRepository.getGameStats();
+    // Winner aggregates exclude mock and degenerate games. Keep the
+    // completed-game denominator on that same eligible population, using a
+    // set so a game carrying both exclusion markers is removed only once.
+    const degenerateGameIds = getDegenerateGameIds(this.gameRepository);
+    const mockGameIds = getMockGameIds(this.gameRepository);
+    const excludedCompletedGameIds = new Set([...degenerateGameIds, ...mockGameIds]);
 
     let mafiaWins: number;
     let townWins: number;
@@ -744,7 +750,7 @@ export class StatsCollector {
       // Event-derived counts: exclude degenerate games (all-empty SAYS +
       // short duration / explicitly flagged) from the event-derived side
       // too — same exclusion rule, same source.
-      const excluded = getDegenerateGameIds(this.gameRepository);
+      const excluded = new Set(degenerateGameIds);
       const eventWins = this.gameRepository.getWinnerEventCounts();
       const eventDegenerate = getDegenerateGameCounts(this.gameRepository);
       // Re-walk ended games to attribute event counts per game: cheaper
@@ -763,7 +769,7 @@ export class StatsCollector {
       // DF-MAFIA-AI-BENCHMARK-12: mock games are excluded from the
       // event-derived side with the same subtraction rule — the mock
       // marker is the write-time flag, so read it back per game.
-      const mockExcluded = new Set(getMockGameIds(this.gameRepository));
+      const mockExcluded = new Set(mockGameIds);
       let mockMafia = 0;
       let mockTown = 0;
       for (const id of mockExcluded) {
@@ -808,7 +814,10 @@ export class StatsCollector {
     return {
       totalGames: stats.totalGames,
       activeGames,
-      completedGames: stats.completedGames,
+      // Keep the denominator aligned with the winner aggregates: mock and
+      // degenerate ENDED rows remain auditable through their public counts,
+      // but are outside the benchmark population.
+      completedGames: Math.max(0, stats.completedGames - excludedCompletedGameIds.size),
       failedGames,
       avgDuration: stats.avgDuration,
       mafiaWins,

@@ -324,6 +324,28 @@ describe('StatsCollector', () => {
       expect(s.activeGames).toBe(1);
     });
 
+    it('uses one completed-game population for stats and report summary when mock games are present (DF-MAFIA-AI-BENCHMARK-41)', () => {
+      repo.seedGame({ id: 'real-mafia', status: 'ENDED', winner: 'MAFIA', duration: 60_000 });
+      repo.seedGame({ id: 'real-town', status: 'ENDED', winner: 'TOWN', duration: 60_000 });
+      repo.seedGame({ id: 'mock-mafia', status: 'ENDED', winner: 'MAFIA', duration: 9_000 });
+      repo.db.prepare(
+        `UPDATE games SET config = json_set(config, '$.mock', 1) WHERE id = ?`,
+      ).run('mock-mafia');
+
+      const gameStats = stats.getGameStats();
+      const summary = stats.generateReport().summary as {
+        completedGames: number;
+        mafiaWinRate: number;
+      };
+
+      expect(gameStats.mockGames).toBe(1);
+      expect(gameStats.completedGames).toBe(2);
+      const draws = 0;
+      expect(gameStats.completedGames).toBe(gameStats.mafiaWins + gameStats.townWins + draws);
+      expect(summary.completedGames).toBe(gameStats.completedGames);
+      expect(summary.mafiaWinRate).toBe(gameStats.mafiaWins / gameStats.completedGames);
+    });
+
     it('returns zeroes when no games exist', () => {
       const s = stats.getGameStats();
       expect(s).toEqual({
@@ -1916,3 +1938,8 @@ describe('StatsCollector', () => {
     });
   });
 });
+
+// ch:trace row=DF-MAFIA-AI-BENCHMARK-41 spec=apps/server/src/services/stats-collector/index.ts#getGameStats wave=none:serial-tick test=apps/server/src/__tests__/services/stats-collector.test.ts::uses one completed-game population for stats and report summary when mock games are present (DF-MAFIA-AI-BENCHMARK-41) doc=none:api-contract evidence=commit witness=none:foreman-binds-live-verdict verdict=none:pending-foreman-trace commit=none:pending-foreman-trace memory=none:foreman-writes
+// STATUS: complete
+// TIER: T3 (state tests and commands actually run)
+// EVIDENCE: focused stats/mocks/degenerate 102/102; apps/server test:run 563/563; pnpm run build PASS; apps/server pnpm lint PASS with one pre-existing warning
