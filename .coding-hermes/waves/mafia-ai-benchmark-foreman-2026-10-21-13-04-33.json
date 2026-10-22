@@ -1,0 +1,41 @@
+{
+  "tick_id": "mafia-ai-benchmark-foreman-2026-10-21-13-04-33",
+  "project": "mafia-ai-benchmark",
+  "base": "64f065cacdf6f7f0db10334e0c6940746368ca66",
+  "wave_budget": 12,
+  "workers": [
+    {
+      "task_id": "PERF-MAFIA-3",
+      "worktree": "/home/kara/worktrees/mafia-ai-benchmark-PERF-MAFIA-3",
+      "branch": "wt/PERF-MAFIA-3",
+      "base": "64f065c"
+    },
+    {
+      "task_id": "README-1-R2",
+      "worktree": "/home/kara/worktrees/mafia-ai-benchmark-README-1-R2",
+      "branch": "wt/README-1-R2",
+      "base": "64f065c"
+    },
+    {
+      "task_id": "README-4",
+      "worktree": "/home/kara/worktrees/mafia-ai-benchmark-README-4",
+      "branch": "wt/README-4",
+      "base": "64f065c"
+    },
+    {
+      "task_id": "DF-MAFIA-AI-BENCHMARK-45",
+      "worktree": "/home/kara/worktrees/mafia-ai-benchmark-DF-MAFIA-AI-BENCHMARK-45",
+      "branch": "wt/DF-MAFIA-AI-BENCHMARK-45",
+      "base": "64f065c"
+    },
+    {
+      "task_id": "DF-MAFIA-AI-BENCHMARK-46",
+      "worktree": "/home/kara/worktrees/mafia-ai-benchmark-DF-MAFIA-AI-BENCHMARK-46",
+      "branch": "wt/DF-MAFIA-AI-BENCHMARK-46",
+      "base": "64f065c"
+    }
+  ],
+  "dispatch_state": "prepared",
+  "finished_at": "2026-10-22T02:09:30-05:00",
+  "status": "recovered"
+}
