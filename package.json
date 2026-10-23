@@ -1,6 +1,6 @@
 {
   "name": "mafia-ai-benchmark",
-  "version": "1.0.0",
+  "version": "1.1.0",
   "description": "Multi-agent AI Mafia game benchmark system with THINK vs SAYS split-pane consciousness",
   "private": true,
   "packageManager": "pnpm@11.13.1",

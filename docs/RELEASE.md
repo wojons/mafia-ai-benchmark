@@ -49,4 +49,7 @@ the consumer path is tag-pinned docs. Previous release remains the fallback.
 
 ## History
 
+- v1.1.0 — 2026-10-23 — second release; 225 commits since v1.0.0 (5 feat /
+  34 fix / 2 perf, no breaking), trust repairs on win-rate, matchups and
+  stale-game surfaces (cut from RELEASE-005).
 - v1.0.0 — 2026-09-29 — first public release (RELEASE-001/003/004).

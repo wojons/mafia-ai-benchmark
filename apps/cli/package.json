@@ -1,6 +1,6 @@
 {
   "name": "@mafia/cli",
-  "version": "1.0.0",
+  "version": "1.1.0",
   "private": true,
   "description": "mafiactl CLI for running games, benchmarks, and managing the Mafia AI Benchmark system",
   "main": "dist/index.js",
@@ -30,8 +30,7 @@
     "inquirer": "^9.2.0",
     "ora": "^8.0.0",
     "uuid": "^14.0.3",
-    "ws": "^8.22.0",
-    "zod": "^3.22.0"
+    "ws": "^8.22.0"
   },
   "devDependencies": {
     "@types/inquirer": "^9.0.10",
