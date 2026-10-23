@@ -23,6 +23,7 @@ import { setupWebSocket } from './websocket/index.js';
 import { bodyParseErrorHandler } from './middleware/body-parse-error.js';
 import { adminAuthMiddleware } from './middleware/auth.js';
 import { DEFAULT_PORT } from './config.js';
+import { GameLifecycleReconciler } from './services/game-lifecycle-reconciler.js';
 
 dotenv.config();
 
@@ -36,6 +37,7 @@ export interface ServerContext {
   gameRepository: GameRepository;
   benchmarkRunner: BenchmarkRunner;
   legacyAdapter: LegacyGameAdapter | null;
+  gameLifecycle?: GameLifecycleReconciler;
 }
 
 async function main(): Promise<void> {
@@ -46,14 +48,32 @@ async function main(): Promise<void> {
   const gameRepository = new GameRepositoryDefault((migrator as any).db);
 
   const eventBus = new EventBus();
-  const statsCollector = new StatsCollector(gameRepository);
+
+  // The reconciler is shared by startup, stats, and game read routes. Its live
+  // owner callback intentionally checks both in-memory engines: persisted
+  // IN_PROGRESS rows without a current owner are only retained while their
+  // heartbeat/event evidence is recent.
+  let gameEngine: GameEngine | undefined;
+  let legacyAdapter: LegacyGameAdapter | null = null;
+  const gameLifecycle = new GameLifecycleReconciler(gameRepository, {
+    liveGameIds: () => {
+      const liveIds = new Set<string>();
+      for (const gameId of gameEngine?.getActiveGames() ?? []) liveIds.add(gameId);
+      for (const gameId of legacyAdapter?.getActiveGames() ?? []) {
+        if (legacyAdapter?.getGameState(gameId)?.status === 'RUNNING') liveIds.add(gameId);
+      }
+      return liveIds;
+    },
+  });
+
+  const statsCollector = new StatsCollector(gameRepository, gameLifecycle);
   const agentCoordinator = new AgentCoordinator(eventBus, statsCollector);
-  const gameEngine = new GameEngine(gameRepository, agentCoordinator, eventBus, statsCollector);
+  const initializedGameEngine = new GameEngine(gameRepository, agentCoordinator, eventBus, statsCollector);
+  gameEngine = initializedGameEngine;
 
   // Legacy engine adapter (the path that actually plays games). Created with
   // the same singleton pattern as routes/index.ts so benchmark games and
   // regular games share one adapter instance.
-  let legacyAdapter: LegacyGameAdapter | null = null;
   try {
     legacyAdapter = LegacyGameAdapter.getInstance(eventBus, gameRepository);
     console.log('✅ Legacy game adapter initialized');
@@ -62,11 +82,12 @@ async function main(): Promise<void> {
   }
 
   const bootstrapContext: ServerContext = {
-    gameEngine,
+    gameEngine: initializedGameEngine,
     agentCoordinator,
     eventBus,
     statsCollector,
     gameRepository,
+    gameLifecycle,
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     benchmarkRunner: null as any,
     legacyAdapter,
@@ -74,6 +95,17 @@ async function main(): Promise<void> {
   const benchmarkRunner = new BenchmarkRunner(bootstrapContext);
   bootstrapContext.benchmarkRunner = benchmarkRunner;
   const context: ServerContext = bootstrapContext;
+
+  // Retire persisted games whose owner disappeared before serving any reads.
+  // The shared read seam below makes this idempotent for rows written later.
+  const gameLifecycleSummary = gameLifecycle.reconcile();
+  console.log(
+    'Game lifecycle reconciliation: ' +
+      `${gameLifecycleSummary.retired} retired, ` +
+      `${gameLifecycleSummary.preservedLive} live, ` +
+      `${gameLifecycleSummary.preservedRecent} recent, ` +
+      `${gameLifecycleSummary.inspected} inspected`,
+  );
 
   // Recover benchmark runs stranded by a previous shutdown before serving
   // traffic: run completion normally depends on in-process event
