@@ -183,6 +183,10 @@ The full game (players, roles, state) is read afterwards via
       "status": "ENDED",
       "players": 5,
       "createdAt": "2026-08-25T16:27:48.540Z",
+      "startedAt": "2026-08-25T16:27:50.100Z",
+      "endedAt": "2026-08-25T16:30:02.132Z",
+      "winner": "TOWN",
+      "duration": 131032,
       "config": {
         "numPlayers": 5,
         "engineType": "legacy",
@@ -197,9 +201,17 @@ The full game (players, roles, state) is read afterwards via
 
 **Notes (realigned to the live API):**
 
-- List rows are SUMMARY objects — `players` is the player COUNT (number), not an array; there is no `phase`/`dayNumber`/`aliveCount`/`winner` field at list level (those live on the detail endpoint under `currentState` / top-level `winner`).
-- `config` carries the same shape as the detail endpoint's config; `config.winner` is present on ended games.
-- `createdAt` is an ISO-8601 string, not epoch millis. The envelope is `{success, data, count}` — there is no `total`/`limit`/`offset` echo.
+- List rows are SUMMARY objects — `players` is the player COUNT (number), not an array; there is no `phase`/`dayNumber`/`aliveCount` field at list level (those live on the detail endpoint under `currentState`).
+- PERF-MAFIA-4: every row carries the terminal state, so clients never need a
+  per-row `GET /api/v1/games/:id` to fill a history table. `winner`
+  (`"MAFIA"`/`"TOWN"`), `endedAt` (ISO-8601) and `duration` (milliseconds) are
+  ALWAYS present as keys; `null` means "not recorded" — no decided outcome, no
+  terminal timestamp, no computable span. `endedAt` falls back to the terminal
+  `GAME_OVER`/`GAME_ENDED` event timestamp for legacy engines that never wrote
+  `games.ended_at`; `duration` is the persisted column, else `endedAt - createdAt`.
+- `config` carries the same shape as the detail endpoint's config; `config.winner` is present on ended games (the list-level `winner` falls back to it for historical rows).
+- `createdAt`/`startedAt`/`endedAt` are ISO-8601 strings, not epoch millis. The envelope is `{success, data, count}` — there is no `total`/`limit`/`offset` echo.
+- The page is projected in one SQL statement (`GameRepository.listGameSummaries`) — no per-row hydration; `GET /api/v1/games/:id` remains the source for `currentState`/`events`/player objects.
 
 ---
 

@@ -66,6 +66,11 @@ export const gamesAPI = {
       status: string;
       players: number;
       createdAt: string;
+      /** PERF-MAFIA-4: terminal state is served on the LIST rows. */
+      endedAt?: string | null;
+      winner?: 'MAFIA' | 'TOWN' | null;
+      duration?: number | null;
+      startedAt?: string | null;
       config: Record<string, unknown>;
     }>>(`/games${query ? `?${query}` : ''}`);
   },

@@ -54,7 +54,10 @@ interface MatchupData {
 
 interface GameRecord extends GameHistoryRow {
   config: Record<string, unknown>;
-  /** Detail-endpoint-only fields (present when this row was enriched). */
+  /**
+   * Terminal fields served by GET /api/v1/games (PERF-MAFIA-4). `startedAt`
+   * is list-only metadata; `gameOverAt` is retained for detail payloads.
+   */
   startedAt?: string | null;
   gameOverAt?: string | null;
 }
@@ -104,40 +107,11 @@ const BenchmarkDashboard: React.FC = () => {
       .then((res) => {
         const data = (res as unknown as Record<string, unknown>).data || res;
         const arr = Array.isArray(data) ? (data as GameRecord[]) : [];
-        // DF-MAFIA-AI-BENCHMARK-14: list rows carry createdAt only — an ended
-        // game's endedAt comes from its detail endpoint (startedAt/gameOverAt
-        // stay null on ended rows, so they are never the duration source).
-        const ended = arr.filter((g) => g.status === 'ENDED');
-        if (ended.length === 0) {
-          setGames(arr);
-          return;
-        }
-        return Promise.all(
-          ended.map((g) =>
-            gamesAPI
-              .get(g.id)
-              .then((detail) => {
-                const d = detail as unknown as {
-                  createdAt?: string | Date;
-                  endedAt?: string | Date | null;
-                };
-                return {
-                  id: g.id,
-                  createdAt: d.createdAt ? new Date(d.createdAt).toISOString() : g.createdAt,
-                  endedAt: d.endedAt ? new Date(d.endedAt).toISOString() : null,
-                };
-              })
-              .catch(() => ({ id: g.id, createdAt: g.createdAt, endedAt: null })),
-          ),
-        ).then((details) => {
-          const byId = new Map(details.map((d) => [d.id, d]));
-          setGames(
-            arr.map((g) => {
-              const d = byId.get(g.id);
-              return d ? { ...g, createdAt: d.createdAt, endedAt: d.endedAt } : g;
-            }),
-          );
-        });
+        // PERF-MAFIA-4: the list rows now carry winner / endedAt / duration,
+        // so the history table is fed straight from ONE request. The previous
+        // fan-out (one GET /api/v1/games/:id per ENDED row) cost 39-43 extra
+        // requests and ~2020 ms aggregate on a cold Stats load.
+        setGames(arr);
       })
       .catch(console.error)
       .finally(() => setGamesLoading(false));

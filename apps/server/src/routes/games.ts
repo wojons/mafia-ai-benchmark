@@ -282,7 +282,12 @@ export function createGamesRouter(
         offset: req.query.offset ? parseInt(req.query.offset as string) : 0,
       };
 
-      const games = gameRepository.listGames(filters);
+      // PERF-MAFIA-4: list rows carry the terminal state (winner / endedAt /
+      // duration) and are projected in ONE SQL statement — `listGames()`
+      // hydrated every row through getGame() (2N extra queries) and still
+      // served no winner or end timestamp, which forced the Stats tab to
+      // fetch one detail per history row.
+      const games = gameRepository.listGameSummaries(filters);
 
       // Also include legacy games if adapter is available
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -301,40 +306,49 @@ export function createGamesRouter(
             }
             const events = gameRepository.getEvents(gameId);
             const playerSet = new Set<string>();
+            let legacyWinner: 'MAFIA' | 'TOWN' | null = null;
+            let legacyEndedAt: string | null = null;
             for (const event of events) {
               if (event.actorId) playerSet.add(event.actorId);
+              // The legacy adapter publishes the outcome as a GAME_ENDED
+              // event; its timestamp IS the game's end (the adapter never
+              // writes games.ended_at). Same fallback chain as the summary
+              // projection: last terminal event wins.
+              const isTerminal =
+                event.type === 'GAME_ENDED' ||
+                event.metadata?.phase === 'GAME_OVER';
+              if (!isTerminal) continue;
+              const eventWinner = (event.data as Record<string, unknown> | undefined)
+                ?.winner;
+              if (eventWinner === 'MAFIA' || eventWinner === 'TOWN') {
+                legacyWinner = eventWinner;
+              }
+              const ts = event.timestamp;
+              legacyEndedAt = (
+                ts instanceof Date ? ts : new Date(ts as unknown as string)
+              ).toISOString();
             }
+            const createdAt = state.startedAt.toISOString();
+            const legacyDuration =
+              legacyEndedAt && Date.parse(legacyEndedAt) > Date.parse(createdAt)
+                ? Date.parse(legacyEndedAt) - Date.parse(createdAt)
+                : null;
             legacyGames.push({
               id: gameId,
               status: legacyStatus,
               players: playerSet.size,
-              createdAt: state.startedAt.toISOString(),
+              createdAt,
+              startedAt: createdAt,
+              endedAt: legacyEndedAt,
+              winner: legacyWinner,
+              duration: legacyDuration,
               config: { engineType: 'legacy' },
             });
           }
         }
       }
 
-      const allGames = [
-        ...games.map((g) => {
-          let playerCount = g.players.length;
-          if (playerCount === 0 && g.events.length > 0) {
-            const actorIds = new Set<string>();
-            for (const event of g.events) {
-              if (event.actorId) actorIds.add(event.actorId);
-            }
-            playerCount = actorIds.size;
-          }
-          return {
-            id: g.id,
-            status: g.status,
-            players: playerCount,
-            createdAt: g.createdAt,
-            config: g.config,
-          };
-        }),
-        ...legacyGames,
-      ];
+      const allGames = [...games, ...legacyGames];
 
       // DF-MAFIA-AI-BENCHMARK-5: a game the legacy adapter started is ALSO
       // inserted into the repository (the adapter persists an IN_PROGRESS

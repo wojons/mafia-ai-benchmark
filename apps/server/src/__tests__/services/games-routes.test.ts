@@ -7,7 +7,7 @@
  * merged result. These tests seed both DB games and a fake legacy adapter
  * with active games to prove the merged response honors ?limit=N.
  */
-import { describe, it, expect, beforeEach, afterEach } from 'vitest';
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import express from 'express';
 import type { Server } from 'http';
 import { createGamesRouter } from '../../routes/games.js';
@@ -586,5 +586,159 @@ describe('GET /api/v1/games/:gameId/events honors ?limit', () => {
       expect(body.success).toBe(false);
       expect(body.error).toContain('Invalid limit');
     }
+  });
+});
+
+/**
+ * PERF-MAFIA-4: the list payload must carry the game's terminal state.
+ *
+ * GET /api/v1/games?limit=50 used to return {id, status, createdAt, config,
+ * players} only — no winner, no endedAt, no duration — so the Stats tab's
+ * Game History table fanned out one GET /api/v1/games/:id per ENDED row
+ * (39-43 extra requests, ~2020 ms aggregate cold). These tests pin both
+ * halves of the fix: every row carries winner/endedAt/duration (null when
+ * genuinely unknown, never omitted), and the page is projected without
+ * per-row getGame() hydration.
+ */
+describe('GET /api/v1/games list rows carry terminal state (PERF-MAFIA-4)', () => {
+  let repo: FakeRepo;
+  let server: Server | undefined;
+  let baseUrl: string;
+
+  const start = async (legacyIds: string[] = []) => {
+    const app = express();
+    app.use(express.json());
+    app.use(
+      '/',
+      createGamesRouter(
+        { gameEngine: {}, gameRepository: repo, eventBus: createFakeEventBus() } as any,
+        legacyIds.length > 0 ? createLegacyAdapterWithGames(legacyIds) : null,
+      ),
+    );
+    await new Promise<void>((resolve) => {
+      server = app.listen(0, '127.0.0.1', () => resolve());
+    });
+    const address = server.address() as { port: number };
+    baseUrl = `http://127.0.0.1:${address.port}`;
+  };
+
+  afterEach(async () => {
+    if (server) {
+      const openServer = server;
+      server = undefined;
+      await new Promise<void>((resolve, reject) => {
+        openServer.close((err) => (err ? reject(err) : resolve()));
+      });
+    }
+  });
+
+  it('serves winner, endedAt and duration from the persisted columns', async () => {
+    repo = createSqliteBackedRepository() as unknown as FakeRepo;
+    repo.seedGame({ id: 'g-ended', status: 'ENDED', winner: 'MAFIA' });
+    // created_at is stamped by seedGame; end the game 6m 28s later so the
+    // duration is a real, computable span.
+    const createdAt = (
+      repo.db.prepare('SELECT created_at FROM games WHERE id = ?').get('g-ended') as {
+        created_at: number;
+      }
+    ).created_at;
+    const endedAt = createdAt + 388_590;
+    repo.db
+      .prepare('UPDATE games SET ended_at = ? WHERE id = ?')
+      .run(endedAt, 'g-ended');
+    await start();
+
+    const body = await (await fetch(`${baseUrl}/api/v1/games?limit=3`)).json();
+    const row = body.data[0];
+    expect(row.winner).toBe('MAFIA');
+    expect(row.endedAt).toBe(new Date(endedAt).toISOString());
+    expect(row.duration).toBe(388_590);
+  });
+
+  it('derives endedAt and winner from the terminal event when ended_at is not recorded', async () => {
+    repo = createSqliteBackedRepository() as unknown as FakeRepo;
+    repo.seedGame({
+      id: 'g-legacy-ended',
+      status: 'ENDED',
+      events: [
+        { type: 'GAME_STARTED', data: {}, phase: 'SETUP' },
+        { type: 'GAME_ENDED', data: { winner: 'TOWN' }, phase: 'GAME_OVER' },
+      ],
+    });
+    await start();
+
+    const body = await (await fetch(`${baseUrl}/api/v1/games?limit=3`)).json();
+    const row = body.data[0];
+    // The legacy engine never writes games.ended_at; the terminal event's
+    // timestamp is the end, and its data.winner is the outcome.
+    expect(row.winner).toBe('TOWN');
+    expect(typeof row.endedAt).toBe('string');
+    expect(Number.isNaN(Date.parse(row.endedAt))).toBe(false);
+  });
+
+  it('falls back to config.winner for historical rows with no winner column', async () => {
+    repo = createSqliteBackedRepository() as unknown as FakeRepo;
+    repo.seedGame({ id: 'g-config-winner', status: 'ENDED', winner: null });
+    repo.db
+      .prepare("UPDATE games SET config = json_set(config, '$.winner', 'TOWN') WHERE id = ?")
+      .run('g-config-winner');
+    await start();
+
+    const body = await (await fetch(`${baseUrl}/api/v1/games?limit=3`)).json();
+    expect(body.data[0].winner).toBe('TOWN');
+  });
+
+  it('emits winner/endedAt/duration keys with null (never omitted) for a running game', async () => {
+    repo = createSqliteBackedRepository() as unknown as FakeRepo;
+    repo.seedGame({ id: 'g-running', status: 'IN_PROGRESS' });
+    await start();
+
+    const body = await (await fetch(`${baseUrl}/api/v1/games?limit=3`)).json();
+    const row = body.data[0];
+    for (const key of ['winner', 'endedAt', 'duration']) {
+      expect(Object.prototype.hasOwnProperty.call(row, key)).toBe(true);
+      expect(row[key]).toBeNull();
+    }
+  });
+
+  it('carries the terminal fields on merged legacy rows too', async () => {
+    repo = createSqliteBackedRepository() as unknown as FakeRepo;
+    repo.seedGame({ id: 'g-db', status: 'ENDED', winner: 'TOWN' });
+    await start(['legacy-1']);
+
+    const body = await (await fetch(`${baseUrl}/api/v1/games?limit=50`)).json();
+    const legacyRow = body.data.find((g: { id: string }) => g.id === 'legacy-1');
+    expect(legacyRow).toBeDefined();
+    for (const key of ['winner', 'endedAt', 'duration']) {
+      expect(Object.prototype.hasOwnProperty.call(legacyRow, key)).toBe(true);
+    }
+  });
+
+  it('projects a 50-row page without per-row getGame() hydration', async () => {
+    repo = createSqliteBackedRepository() as unknown as FakeRepo;
+    for (let i = 0; i < 50; i++) {
+      repo.seedGame({
+        id: `g-page-${i}`,
+        status: i % 2 === 0 ? 'ENDED' : 'IN_PROGRESS',
+        winner: i % 2 === 0 ? 'MAFIA' : null,
+        // Events + players per row: the hydration path would have loaded
+        // every one of them for every row.
+        players: [
+          { id: `p-${i}-0`, name: 'Ann', role: 'MAFIA', joinOrder: 0 },
+          { id: `p-${i}-1`, name: 'Bob', role: 'TOWN', joinOrder: 1 },
+        ],
+        events: [{ type: 'GAME_STARTED', data: {}, phase: 'SETUP' }],
+      });
+    }
+    const getGameSpy = vi.spyOn(repo as unknown as { getGame: (id: string) => unknown }, 'getGame');
+    await start();
+
+    const body = await (await fetch(`${baseUrl}/api/v1/games?limit=50`)).json();
+    expect(body.data).toHaveLength(50);
+    // The whole page is one SQL projection — no per-row getGame() (which
+    // cost 2 extra queries + JSON parse per game).
+    expect(getGameSpy).not.toHaveBeenCalled();
+    expect(body.data[0].players).toBe(2);
+    getGameSpy.mockRestore();
   });
 });

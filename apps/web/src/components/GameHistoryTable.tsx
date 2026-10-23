@@ -8,17 +8,29 @@ export interface GameHistoryRow {
   createdAt: string;
   /** Present on ENDED list/detail rows; absent on running games. */
   endedAt?: string | null;
+  /**
+   * PERF-MAFIA-4: decoded outcome served on the LIST rows now, so the table
+   * never needs a per-game detail fetch. `null`/absent = undecided.
+   */
+  winner?: 'MAFIA' | 'TOWN' | null;
+  /** PERF-MAFIA-4: persisted duration (ms) — fallback when endedAt is absent. */
+  duration?: number | null;
   config: Record<string, unknown>;
 }
 
 const DASH = '\u2014';
 
 export function getWinner(game: GameHistoryRow): string {
+  // PERF-MAFIA-4: prefer the decoded list field; historical detail payloads
+  // (and legacy rows) still carry the outcome inside config.winner, so that
+  // stays as the fallback rather than being dropped.
+  const decode = (value: unknown): string | null => {
+    if (value === 'Mafia' || value === 'MAFIA') return 'Mafia';
+    if (value === 'Town' || value === 'TOWN') return 'Town';
+    return null;
+  };
   const cfg = game.config || {};
-  const winner = cfg.winner as string | undefined;
-  if (winner === 'Mafia' || winner === 'MAFIA') return 'Mafia';
-  if (winner === 'Town' || winner === 'TOWN') return 'Town';
-  return 'Unknown';
+  return decode(game.winner) ?? decode(cfg.winner) ?? 'Unknown';
 }
 
 export function getPlayers(game: GameHistoryRow): string {
@@ -48,6 +60,17 @@ export function computeGameDuration(
   const ended = Date.parse(endedAt);
   if (Number.isNaN(created) || Number.isNaN(ended)) return DASH;
   return formatDuration(ended - created);
+}
+
+// PERF-MAFIA-4: the duration cell consumes the ENDED list row directly —
+// endedAt when present, else the persisted games.duration (ms) the list now
+// serves for rows whose engine never wrote an end timestamp. Straight '—'
+// when neither is available.
+export function getDuration(game: GameHistoryRow): string {
+  const fromTimestamps = computeGameDuration(game.createdAt, game.endedAt);
+  if (fromTimestamps !== DASH) return fromTimestamps;
+  if (typeof game.duration === 'number') return formatDuration(game.duration);
+  return DASH;
 }
 
 interface GameHistoryTableProps {
@@ -117,7 +140,7 @@ const GameHistoryTable: React.FC<GameHistoryTableProps> = ({ games, loading }) =
                   </span>
                 </td>
                 <td className="py-3 px-2 text-right text-[var(--color-text-secondary)]">
-                  {computeGameDuration(g.createdAt, g.endedAt)}
+                  {getDuration(g)}
                 </td>
                 <td className="py-3 px-2 text-right text-xs text-[var(--color-text-muted)]">
                   {formatDistanceToNow(new Date(g.createdAt), { addSuffix: true })}

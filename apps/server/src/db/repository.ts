@@ -28,6 +28,32 @@ export interface PlayerModelAssignmentRow {
   created_at: number;
 }
 
+/**
+ * Flat list-row projection of a game (PERF-MAFIA-4).
+ *
+ * Returned by `GameRepository.listGameSummaries()` for list surfaces that
+ * need winner / endedAt / duration without hydrating the full game. Every
+ * field is always present: `null` means "not recorded" (no terminal
+ * timestamp, undecided game, no computable duration), never "field omitted",
+ * so clients can rely on the shape.
+ */
+export interface GameListSummary {
+  id: string;
+  status: Game['status'];
+  /** Player rows, falling back to distinct event actorIds for live games. */
+  players: number;
+  /** ISO-8601 (list rows are JSON payloads, never Date objects). */
+  createdAt: string;
+  startedAt: string | null;
+  /** games.ended_at, else the terminal event's timestamp. */
+  endedAt: string | null;
+  /** games.winner, else config.winner, else the terminal event's winner. */
+  winner: 'MAFIA' | 'TOWN' | null;
+  /** Persisted games.duration (ms), else endedAt - createdAt. */
+  duration: number | null;
+  config: Record<string, unknown>;
+}
+
 export class GameRepository {
   private db: Database.Database;
 
@@ -339,6 +365,154 @@ export class GameRepository {
     const rows = this.db.prepare(query).all(...params) as Record<string, unknown>[];
     
     return rows.map(row => this.getGame(row.id as string)!).filter(Boolean);
+  }
+
+  /**
+   * List games as FLAT SUMMARY rows for list surfaces (PERF-MAFIA-4).
+   *
+   * `listGames()` hydrates every row through `getGame()`, which runs two more
+   * queries per game (all events + all players) and then JSON-parses them —
+   * so a `?limit=50` listing cost 1 + 2*N queries and returned no winner /
+   * endedAt / duration. The Stats tab worked around that by fanning out one
+   * GET /api/v1/games/:id per history row (39-43 extra requests, ~2020 ms
+   * aggregate cold).
+   *
+   * This method answers the list question in ONE statement: the game columns
+   * plus three correlated subqueries (player row count, event-derived actor
+   * count, terminal event timestamp + winner). The winner falls back the same
+   * way `getGame()` does — games.winner column, then config.winner for
+   * historical legacy rows, then the terminal GAME_OVER/GAME_ENDED event.
+   * `endedAt` falls back to the terminal event timestamp for legacy engines
+   * that never wrote games.ended_at, and `duration` is the persisted column
+   * else endedAt - createdAt.
+   *
+   * Unknown values are `null` (not omitted): null endedAt = the game has no
+   * terminal timestamp recorded, null winner = undecided, null duration =
+   * neither the column nor a computable span. Callers can rely on the shape.
+   */
+  listGameSummaries(filters?: {
+    status?: Game['status'];
+    limit?: number;
+    offset?: number;
+  }): GameListSummary[] {
+    let query = `
+      SELECT
+        g.id          AS id,
+        g.status      AS status,
+        g.created_at  AS created_at,
+        g.started_at  AS started_at,
+        g.ended_at    AS ended_at,
+        g.duration    AS duration,
+        g.winner      AS winner,
+        g.config      AS config,
+        (
+          SELECT COUNT(*) FROM players p WHERE p.game_id = g.id
+        ) AS player_row_count,
+        (
+          SELECT COUNT(DISTINCT e.actor_id) FROM events e
+          WHERE e.game_id = g.id AND e.actor_id IS NOT NULL
+        ) AS event_actor_count,
+        (
+          SELECT MAX(e.timestamp) FROM events e
+          WHERE e.game_id = g.id
+            AND (e.phase = 'GAME_OVER' OR e.type IN ('GAME_OVER', 'GAME_ENDED'))
+        ) AS terminal_event_at,
+        (
+          SELECT json_extract(e.data, '$.winner') FROM events e
+          WHERE e.game_id = g.id
+            AND (e.phase = 'GAME_OVER' OR e.type IN ('GAME_OVER', 'GAME_ENDED'))
+          ORDER BY e.sequence DESC
+          LIMIT 1
+        ) AS terminal_winner
+      FROM games g`;
+    const conditions: string[] = [];
+    const params: unknown[] = [];
+
+    if (filters?.status) {
+      conditions.push('g.status = ?');
+      params.push(filters.status);
+    }
+
+    if (conditions.length > 0) {
+      query += ' WHERE ' + conditions.join(' AND ');
+    }
+
+    query += ' ORDER BY g.created_at DESC';
+
+    if (filters?.limit) {
+      query += ' LIMIT ?';
+      params.push(filters.limit);
+
+      if (filters?.offset) {
+        query += ' OFFSET ?';
+        params.push(filters.offset);
+      }
+    }
+
+    const rows = this.db.prepare(query).all(...params) as Array<
+      Record<string, unknown>
+    >;
+
+    return rows.map((row) => this.toGameListSummary(row));
+  }
+
+  /**
+   * Project one list row onto the flat summary shape (see
+   * `listGameSummaries`). Extracted so the winner / endedAt / duration
+   * fallback chain is identical for every row.
+   */
+  private toGameListSummary(row: Record<string, unknown>): GameListSummary {
+    const createdAt = row.created_at as number;
+
+    const parsedConfig: Record<string, unknown> = (() => {
+      try {
+        const parsed = JSON.parse(row.config as string);
+        return parsed && typeof parsed === 'object'
+          ? (parsed as Record<string, unknown>)
+          : {};
+      } catch {
+        return {};
+      }
+    })();
+
+    const asTeam = (value: unknown): 'MAFIA' | 'TOWN' | null =>
+      value === 'MAFIA' || value === 'TOWN' ? value : null;
+
+    const winner =
+      asTeam(row.winner) ?? asTeam(parsedConfig.winner) ?? asTeam(row.terminal_winner);
+
+    const endedAtMs =
+      (row.ended_at as number | null | undefined) ??
+      (row.terminal_event_at as number | null | undefined) ??
+      null;
+
+    const persistedDuration =
+      typeof row.duration === 'number' && row.duration > 0 ? row.duration : null;
+    const computedDuration =
+      endedAtMs !== null && createdAt !== null && endedAtMs > createdAt
+        ? endedAtMs - createdAt
+        : null;
+
+    const playerRows = (row.player_row_count as number | null) ?? 0;
+    const eventActors = (row.event_actor_count as number | null) ?? 0;
+
+    return {
+      id: row.id as string,
+      status: row.status as Game['status'],
+      // Same fallback the list route used inline: the players table is empty
+      // for live adapter games (rows land at ROLES_ASSIGNED), so the event
+      // stream's distinct actorIds stand in until real rows exist.
+      players: playerRows > 0 ? playerRows : eventActors,
+      createdAt: new Date(createdAt).toISOString(),
+      startedAt:
+        row.started_at != null
+          ? new Date(row.started_at as number).toISOString()
+          : null,
+      endedAt: endedAtMs !== null ? new Date(endedAtMs).toISOString() : null,
+      winner,
+      duration: persistedDuration ?? computedDuration,
+      config: parsedConfig,
+    };
   }
   
   // ==================== PLAYERS ====================
