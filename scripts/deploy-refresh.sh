@@ -48,6 +48,42 @@ else
   echo "deploy-refresh: drift detected — stamp ${stamp:0:12} != HEAD ${HEAD_SHA:0:12}"
 fi
 
+if benchmark_runs_json="$(curl -s --max-time 5 http://localhost:3004/api/v1/benchmark/runs 2>/dev/null)"; then
+  if command -v jq >/dev/null 2>&1; then
+    active_runs_summary="$(jq -r '
+      [.data[]? | select(.status == "RUNNING" or .status == "IN_PROGRESS")]
+      | [length, (map((.id // "") | tostring) | join(","))]
+      | @tsv
+    ' <<<"$benchmark_runs_json")"
+  elif command -v python3 >/dev/null 2>&1; then
+    active_runs_summary="$(python3 -c '
+import json
+import sys
+
+payload = json.load(sys.stdin)
+active = [
+    run for run in (payload.get("data") or [])
+    if run.get("status") in {"RUNNING", "IN_PROGRESS"}
+]
+print("{}\t{}".format(
+    len(active),
+    ",".join(str(run.get("id", "")) for run in active),
+))
+' <<<"$benchmark_runs_json")"
+  else
+    echo "deploy-refresh: cannot parse benchmark runs (neither jq nor python3 is available)" >&2
+    exit 1
+  fi
+
+  IFS=$'\t' read -r active_runs_count active_run_ids <<<"$active_runs_summary"
+  if (( active_runs_count > 0 )); then
+    echo "deploy-refresh: skipped — ${active_runs_count} active benchmark run(s) detected (ids: ${active_run_ids})" >&2
+    exit 0
+  fi
+else
+  echo "deploy-refresh: benchmark run check unavailable — proceeding with rebuild" >&2
+fi
+
 if [[ "$DRY_RUN" == "1" ]]; then
   echo "deploy-refresh: [dry-run] would run: docker compose build server web && docker compose up -d server web"
   exit 0
