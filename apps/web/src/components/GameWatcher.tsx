@@ -32,6 +32,7 @@ const GameWatcher: React.FC = () => {
     setRefreshEpoch((n) => n + 1);
   }, []);
   const { stale, reconnecting } = useConnectionWatchdog(gameId ?? null, handleStale);
+  const isLive = currentGame?.status === 'IN_PROGRESS';
 
   useEffect(() => {
     if (gameId) {
@@ -115,9 +116,9 @@ const GameWatcher: React.FC = () => {
       <div className="watcher-header">
         <div className="game-info">
           <h1>👀 Watching Game {gameId?.substring(0, 8)}</h1>
-          <div className="live-indicator">
-            <span className="pulse" />
-            <span>LIVE</span>
+          <div className={`live-indicator${isLive ? '' : ' not-live'}`}>
+            {isLive && <span className="pulse" />}
+            <span>{isLive ? 'LIVE' : currentGame.status.replace(/_/g, ' ')}</span>
           </div>
         </div>
         <button className="btn" onClick={() => navigate('/')}>

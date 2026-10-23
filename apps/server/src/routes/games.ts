@@ -70,6 +70,14 @@ export function createGamesRouter(
   const { gameEngine, gameRepository, eventBus } = context;
   const router = Router();
 
+  // Reconcile persisted rows before every game read. Startup performs the same
+  // pass, while this read seam covers rows discovered after boot and keeps the
+  // list/detail/watch surfaces honest without changing response shapes.
+  router.use((req, _res, next) => {
+    if (req.method === 'GET') context.gameLifecycle?.reconcile();
+    next();
+  });
+
   // ==================== GAME REPLAY & EVENTS ====================
 
   // Get game events (REST JSON) with optional visibility filter

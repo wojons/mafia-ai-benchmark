@@ -7,6 +7,10 @@
 import { GameRepository } from '../../db/repository.js';
 import { v4 as uuidv4 } from 'uuid';
 import {
+  GameLifecycleReconciler,
+  STALE_IN_PROGRESS_MAX_MS,
+} from '../game-lifecycle-reconciler.js';
+import {
   getGameWinnerFromEvents,
   computeDurationFromEvents,
 } from './wins.js';
@@ -410,7 +414,7 @@ export interface AgentStats {
  * reported as "Active Games" forever; only genuinely-fresh games count.
  * NULL started_at never counts as active.
  */
-export const ACTIVE_FRESHNESS_MS = 24 * 60 * 60 * 1000;
+export const ACTIVE_FRESHNESS_MS = STALE_IN_PROGRESS_MAX_MS;
 
 /**
  * Empty report shape shared by generateReport()'s error fallback — keeps
@@ -441,9 +445,11 @@ function createEmptyReport(): Record<string, unknown> {
 
 export class StatsCollector {
   private gameRepository: GameRepository;
+  private gameLifecycle?: GameLifecycleReconciler;
   
-  constructor(gameRepository: GameRepository) {
+  constructor(gameRepository: GameRepository, gameLifecycle?: GameLifecycleReconciler) {
     this.gameRepository = gameRepository;
+    this.gameLifecycle = gameLifecycle;
   }
   
   // ==================== TOKEN USAGE ====================
@@ -730,6 +736,9 @@ export class StatsCollector {
    * townWins=13 != completedGames.
    */
   getGameStats(): GameStats {
+    // Reconcile persisted lifecycle state before calculating any aggregate so
+    // stats and the games read surface observe the same population.
+    this.gameLifecycle?.reconcile();
     const stats = this.gameRepository.getGameStats();
     // Winner aggregates exclude mock and degenerate games. Keep the
     // completed-game denominator on that same eligible population, using a
@@ -782,33 +791,37 @@ export class StatsCollector {
       void eventDegenerate;
     }
 
-    // DF-MAFIA-AI-BENCHMARK-23: the repository's activeGames counts ALL
-    // status='IN_PROGRESS' rows, but the legacy orphan zombies (97 live
-    // rows, started months ago) are not real active games. Recount with a
-    // 24h started_at freshness window — pure SQL, same table, no writes.
-    // NULL started_at never counts as active. The CSV/export/report paths
-    // all consume THIS method, so one filter covers every surface.
     let activeGames: number;
-    try {
-      const freshRow = this.gameRepository.getDatabase().prepare(`
-        SELECT COUNT(*) as count FROM games
-        WHERE status = 'IN_PROGRESS'
-          AND started_at IS NOT NULL
-          AND started_at >= ?
-      `).get(Date.now() - ACTIVE_FRESHNESS_MS) as { count: number };
-      activeGames = freshRow.count;
-    } catch {
-      // games table unavailable — fall back to the repository counter
-      // (the same value this method reported before the freshness filter).
-      activeGames = stats.activeGames;
+    if (this.gameLifecycle) {
+      // The lifecycle seam has already retired rows with stale heartbeat/event
+      // evidence and preserved rows owned by a live in-memory engine. Count
+      // exactly the remaining persisted IN_PROGRESS population.
+      const activeRow = this.gameRepository.getDatabase().prepare(`
+        SELECT COUNT(*) as count FROM games WHERE status = 'IN_PROGRESS'
+      `).get() as { count: number };
+      activeGames = activeRow.count;
+    } else {
+      // Compatibility fallback for callers that construct StatsCollector
+      // without the production lifecycle seam (older embedders/tests).
+      try {
+        const freshRow = this.gameRepository.getDatabase().prepare(`
+          SELECT COUNT(*) as count FROM games
+          WHERE status = 'IN_PROGRESS'
+            AND started_at IS NOT NULL
+            AND started_at >= ?
+        `).get(Date.now() - ACTIVE_FRESHNESS_MS) as { count: number };
+        activeGames = freshRow.count;
+      } catch {
+        activeGames = stats.activeGames;
+      }
     }
 
     // MAF-GAP-050 reconciliation identity (total = active + completed +
-    // failed) must keep holding: rows demoted from active by the freshness
-    // filter (stale zombies + NULL started_at) are neither active nor
-    // completed, so they join the failedGames bucket — the same
-    // "non-terminal, not-counted-elsewhere" bucket MAF-GAP-050 defined.
-    const demotedFromActive = Math.max(0, stats.activeGames - activeGames);
+    // failed) must keep holding. With the lifecycle seam, stale rows are
+    // CANCELLED before this point and are already included in failedGames.
+    const demotedFromActive = this.gameLifecycle
+      ? 0
+      : Math.max(0, stats.activeGames - activeGames);
     const failedGames = stats.failedGames + demotedFromActive;
 
     return {
