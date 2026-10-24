@@ -17,9 +17,12 @@
       "gates": {
         "branch_tip": "DEGRADED PASS: secrets/lsp PASS; diff-mode lint/tests had no staged files",
         "fresh_tree": "pnpm install --frozen-lockfile PASS; pnpm test --force PASS (8/8 tasks); pnpm run build PASS (4/4); pnpm run lint PASS (3/3); gitreins guard DEGRADED PASS (secrets/lsp PASS; no staged files)",
-        "stale_base": "rebased onto main 3959604 before merge",
-        "board_code_mix": "none"
+        "stale_base": "rebased onto main 3959604 before merge; verified merged commit 9376e8d is an ancestor of current main 52f136c",
+        "board_code_mix": "none",
+        "recovery_cleanup": "worktree absent and branch absent; no new merge required because the recovered merge is already on current main"
       }
     }
-  ]
+  ],
+  "finished_at": "2026-10-24T14:24:46Z",
+  "recovery_note": "Recovered prior serial wave before dispatch. The worker branch/worktree had already been merged and cleaned by the prior closeout; current main contains the merge. No new work dispatched because recovery must complete first and the remaining board has fewer than two independent tasks only after selecting a task, while this recovery tick's evidence closeout is the required action."
 }
