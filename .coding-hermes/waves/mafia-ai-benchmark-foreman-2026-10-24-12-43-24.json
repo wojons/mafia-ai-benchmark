@@ -10,7 +10,16 @@
       "branch": "wt/SUP-DEPS-20261018-MAB",
       "base": "77b2e0981b05102bccb8ff4745b30de4230ce272",
       "model": "gpt-5.6-luna",
-      "provider": "openai-codex"
+      "provider": "openai-codex",
+      "status": "merged",
+      "commit": "9376e8db8f44ab6ba409d018a92a175bf8a4f63d",
+      "finished_at": "2026-10-24T14:02:03Z",
+      "gates": {
+        "branch_tip": "DEGRADED PASS: secrets/lsp PASS; diff-mode lint/tests had no staged files",
+        "fresh_tree": "pnpm install --frozen-lockfile PASS; pnpm test --force PASS (8/8 tasks); pnpm run build PASS (4/4); pnpm run lint PASS (3/3); gitreins guard DEGRADED PASS (secrets/lsp PASS; no staged files)",
+        "stale_base": "rebased onto main 3959604 before merge",
+        "board_code_mix": "none"
+      }
     }
   ]
 }
