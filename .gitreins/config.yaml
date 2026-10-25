@@ -1,3 +1,5 @@
+# Keep diff mode for ordinary source changes. The repository-owned pre-commit
+# wrapper promotes package manifests and lockfiles to `gitreins guard --full`.
 guards:
   test_mode: diff
   secrets: true
