@@ -75,6 +75,53 @@ describe('BenchmarkLeaderboard', () => {
     expect(html).toMatch(/\$0\.0129/);
   });
 
+  it('renders role and player-count breakdowns and warns about dominant seat assignment', () => {
+    const html = renderToString(
+      <BenchmarkLeaderboard
+        payload={{
+          success: true,
+          data: {
+            models: [
+              {
+                provider: 'openai',
+                model: 'gpt-4o-mini',
+                gamesPlayed: 10,
+                wins: 8,
+                winRate: 0.8,
+                rolePerformance: {
+                  MAFIA: { gamesPlayed: 9, wins: 2, winRate: 2 / 9 },
+                  VILLAGER: { gamesPlayed: 1, wins: 1, winRate: 1 },
+                },
+                byNumPlayers: {
+                  '5': { gamesPlayed: 9, wins: 8, winRate: 8 / 9 },
+                  '10': { gamesPlayed: 1, wins: 0, winRate: 0 },
+                },
+              },
+              {
+                provider: 'legacy',
+                model: 'no-breakdown',
+                gamesPlayed: 2,
+                wins: 1,
+                winRate: 0.5,
+              },
+            ],
+          },
+        }}
+        loading={false}
+      />,
+    );
+    const text = html.replace(/<!-- -->/g, '');
+
+    expect(text).toContain('Role breakdown:');
+    expect(text).toContain('MAFIA: 9 games, 2 wins (22.2%)');
+    expect(text).toContain('Player-count breakdown:');
+    expect(text).toContain('5-player: 9 games, 8 wins (88.9%)');
+    expect(text).toContain('Headline win rate reflects seat assignment: 90.0% of games used 5-player seats.');
+    expect(text).toContain('legacy');
+    expect(text).toContain('no-breakdown');
+    expect(text.match(/Headline win rate reflects seat assignment/g)).toHaveLength(1);
+  });
+
   it('renders real zero metrics as-is (never as em-dash placeholders)', () => {
     const html = renderToString(<BenchmarkLeaderboard payload={liveShapedEnvelope} loading={false} />);
     // avgTokensPerGame: 0 on the gpt-4o-mini live-shaped row -> literal "0".

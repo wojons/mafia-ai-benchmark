@@ -1,5 +1,11 @@
 import React from 'react';
 
+export interface CompareBreakdownEntry {
+  gamesPlayed: number;
+  wins: number;
+  winRate: number;
+}
+
 export interface CompareModelRow {
   provider: string;
   model: string;
@@ -9,6 +15,8 @@ export interface CompareModelRow {
   avgTokensPerGame?: number;
   avgCostPerGame?: number;
   avgLatency?: number;
+  rolePerformance?: Record<string, CompareBreakdownEntry>;
+  byNumPlayers?: Record<string, CompareBreakdownEntry>;
 }
 
 /**
@@ -79,6 +87,34 @@ export function sortLeaderboardRows(rows: CompareModelRow[]): CompareModelRow[] 
   return [...rows].sort((a, b) => b.gamesPlayed - a.gamesPlayed || b.wins - a.wins);
 }
 
+function formatBreakdownEntry(entry: CompareBreakdownEntry): string {
+  return `${entry.gamesPlayed} games, ${entry.wins} wins (${(entry.winRate * 100).toFixed(1)}%)`;
+}
+
+function formatPlayerCountLabel(playerCount: string): string {
+  return playerCount === 'unknown' ? 'unknown player count' : `${playerCount}-player`;
+}
+
+function dominantPlayerCount(
+  byNumPlayers: Record<string, CompareBreakdownEntry>,
+  gamesPlayed: number,
+): { label: string; share: number } | undefined {
+  if (gamesPlayed <= 0) return undefined;
+
+  const dominant = Object.entries(byNumPlayers).reduce<
+    [string, CompareBreakdownEntry] | undefined
+  >((current, entry) => {
+    if (!current || entry[1].gamesPlayed > current[1].gamesPlayed) return entry;
+    return current;
+  }, undefined);
+
+  if (!dominant) return undefined;
+  const share = dominant[1].gamesPlayed / gamesPlayed;
+  return share >= 0.9
+    ? { label: formatPlayerCountLabel(dominant[0]), share }
+    : undefined;
+}
+
 interface BenchmarkLeaderboardProps {
   /** Raw compare payload: envelope or unwrapped data shape. */
   payload: unknown;
@@ -146,30 +182,77 @@ const BenchmarkLeaderboard: React.FC<BenchmarkLeaderboardProps> = ({ payload, lo
           </tr>
         </thead>
         <tbody>
-          {rows.map((m) => (
-            <tr key={`${m.provider}/${m.model}`} className="border-b border-[var(--color-border)]">
-              <td className="py-2 px-2 text-[var(--color-text)] whitespace-nowrap">
-                <span
-                  className="inline-block w-2 h-2 rounded-full mr-2 align-middle"
-                  style={{ backgroundColor: getProviderColor(m.provider) }}
-                />
-                <span className="font-medium">{m.provider}</span>
-                <span className="text-[var(--color-text-muted)]">/{m.model}</span>
-              </td>
-              <td className="py-2 px-2 text-right text-[var(--color-text-secondary)]">{m.gamesPlayed}</td>
-              <td className="py-2 px-2 text-right text-[var(--color-text-secondary)]">{m.wins}</td>
-              <td className="py-2 px-2 text-right text-[var(--color-text-secondary)]">
-                {(m.winRate * 100).toFixed(1)}%
-              </td>
-              {/* Live data can carry real zeros here — render them as-is, never as '—'. */}
-              <td className="py-2 px-2 text-right text-[var(--color-text-secondary)]">
-                {m.avgTokensPerGame ?? '—'}
-              </td>
-              <td className="py-2 px-2 text-right text-[var(--color-text-secondary)]">
-                {m.avgCostPerGame !== undefined ? `$${m.avgCostPerGame.toFixed(4)}` : '—'}
-              </td>
-            </tr>
-          ))}
+          {rows.map((m) => {
+            const roleEntries = Object.entries(m.rolePerformance ?? {});
+            const playerCountEntries = Object.entries(m.byNumPlayers ?? {});
+            const dominant = dominantPlayerCount(m.byNumPlayers ?? {}, m.gamesPlayed);
+            const hasBreakdown = roleEntries.length > 0 || playerCountEntries.length > 0;
+
+            return (
+              <React.Fragment key={`${m.provider}/${m.model}`}>
+                <tr className="border-b border-[var(--color-border)]">
+                  <td className="py-2 px-2 text-[var(--color-text)] whitespace-nowrap">
+                    <span
+                      className="inline-block w-2 h-2 rounded-full mr-2 align-middle"
+                      style={{ backgroundColor: getProviderColor(m.provider) }}
+                    />
+                    <span className="font-medium">{m.provider}</span>
+                    <span className="text-[var(--color-text-muted)]">/{m.model}</span>
+                  </td>
+                  <td className="py-2 px-2 text-right text-[var(--color-text-secondary)]">{m.gamesPlayed}</td>
+                  <td className="py-2 px-2 text-right text-[var(--color-text-secondary)]">{m.wins}</td>
+                  <td className="py-2 px-2 text-right text-[var(--color-text-secondary)]">
+                    {(m.winRate * 100).toFixed(1)}%
+                  </td>
+                  {/* Live data can carry real zeros here — render them as-is, never as '—'. */}
+                  <td className="py-2 px-2 text-right text-[var(--color-text-secondary)]">
+                    {m.avgTokensPerGame ?? '—'}
+                  </td>
+                  <td className="py-2 px-2 text-right text-[var(--color-text-secondary)]">
+                    {m.avgCostPerGame !== undefined ? `$${m.avgCostPerGame.toFixed(4)}` : '—'}
+                  </td>
+                </tr>
+                {hasBreakdown ? (
+                  <tr className="border-b border-[var(--color-border)]">
+                    <td
+                      className="py-2 px-2 text-[var(--color-text-secondary)] text-xs"
+                      colSpan={6}
+                      data-testid={`model-breakdown-${m.provider}-${m.model}`}
+                    >
+                      <div className="grid gap-1 md:grid-cols-2">
+                        {roleEntries.length > 0 ? (
+                          <div>
+                            <span className="font-semibold">Role breakdown:</span>{' '}
+                            {roleEntries.map(([role, entry]) => (
+                              <span className="mr-3" key={role}>
+                                {role}: {formatBreakdownEntry(entry)}
+                              </span>
+                            ))}
+                          </div>
+                        ) : null}
+                        {playerCountEntries.length > 0 ? (
+                          <div>
+                            <span className="font-semibold">Player-count breakdown:</span>{' '}
+                            {playerCountEntries.map(([playerCount, entry]) => (
+                              <span className="mr-3" key={playerCount}>
+                                {formatPlayerCountLabel(playerCount)}: {formatBreakdownEntry(entry)}
+                              </span>
+                            ))}
+                          </div>
+                        ) : null}
+                        {dominant ? (
+                          <p className="md:col-span-2" data-testid="seat-assignment-note">
+                            Headline win rate reflects seat assignment: {(dominant.share * 100).toFixed(1)}% of games
+                            used {dominant.label} seats.
+                          </p>
+                        ) : null}
+                      </div>
+                    </td>
+                  </tr>
+                ) : null}
+              </React.Fragment>
+            );
+          })}
         </tbody>
       </table>
     </div>
