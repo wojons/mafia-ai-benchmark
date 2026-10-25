@@ -144,11 +144,10 @@ statistics tables. Do not use those rows as model evidence.
   benchmark runs, not every persisted game row.
 - **The documented nested create shape is supported.**
   `POST /api/v1/games` with `{"config":{"numPlayers":10}}` resolves and
-  validates the nested value. If both top-level and nested values are present
-  and disagree, the route rejects the request rather than silently choosing.
-  MAF-REV-001 rejects malformed player counts, engine types, and role-model
-  entries with named `400` errors.
-- **ADMIN visibility is opt-in and per client.** MAF-REV-004 gates HTTP
+  validates the nested value. MAF-REV-001 covers the documented request
+  validation surface, including malformed player counts, engine types, and
+  role-model entries with named `400` errors.
+- **ADMIN visibility is opt-in and per client.** MAF-REV-004 governs HTTP
   ADMIN reads and the WebSocket path. With `ADMIN_AUTH_TOKEN` enabled, an
   anonymous socket receives public frames only; a valid Bearer token,
   `X-Admin-Token`, or browser `?token=` upgrade parameter can receive the
@@ -158,15 +157,15 @@ statistics tables. Do not use those rows as model evidence.
   `{type:'JOIN_GAME', payload:{gameId}}`; a bare top-level `{gameId}` is
   rejected. `SUBSCRIBE {gameId}` is an alias accepted by the server. The
   `GAME_EVENT` event row is in the envelope's `payload`.
-- **The CLI non-TTY path can fail through pnpm.** If pnpm 11 reports
-  `ERR_PNPM_ABORTED_REMOVE_MODULES_DIR_NO_TTY`, use the built binary or set
-  `CI=true` for the pnpm invocation.
+- **Prefer the built CLI binary for live probes.** It avoids package-manager
+  lifecycle noise and makes the command's server target explicit.
 - **Run-scoped benchmark truth beats the closing banner.** Read
   `GET /api/v1/benchmark/<runId>` and its `benchmark_games` rows. A global
   report or a CLI winner banner can include historical games unrelated to the
   run you just started.
-- **`events?limit=N` is currently ignored.** Expect the completed game's full
-  event list and bound client-side output if a smaller view is needed.
+- **Event pagination is part of the served API contract.** Use the documented
+  `events?limit=N` query and verify the returned slice when a smaller view is
+  needed; do not infer route behavior from an old full-list observation.
 - **Real games cost real tokens.** Use cheap models for probes and preserve
   model/provider names plus usage output with the run evidence.
 
