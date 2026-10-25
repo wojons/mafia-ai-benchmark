@@ -1,0 +1,17 @@
+{
+  "tick_id": "mafia-ai-benchmark-foreman-2026-10-25-05-49-41",
+  "project": "mafia-ai-benchmark",
+  "base": "d90af4e",
+  "budget": 7,
+  "mode": "serial-fallback",
+  "reason": "The tick contract requires max one worker; the highest-value pending row is dispatched alone.",
+  "tasks": [
+    {
+      "id": "DF-MAFIA-AI-BENCHMARK-48",
+      "worktree": "/home/kara/worktrees/mafia-ai-benchmark-DF-MAFIA-AI-BENCHMARK-48",
+      "branch": "wt/DF-MAFIA-AI-BENCHMARK-48",
+      "base": "origin/main",
+      "depends_on": []
+    }
+  ]
+}
