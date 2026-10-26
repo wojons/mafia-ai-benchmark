@@ -17,7 +17,21 @@ pnpm monorepo with 4 workspace packages:
 
 ## Quality Gates
 
-Every commit runs GitReins guards (secrets, build, lint, tests). See AGENTS.md for details.
+Every commit runs GitReins guards (secrets, build, lint, tests). Install the
+repository-owned hook once per checkout so the hook cannot resolve through a
+temporary `core.hooksPath`:
+
+```bash
+./scripts/install-gitreins-hook.sh
+./scripts/install-gitreins-hook.sh --check
+```
+
+The hook preserves GitReins diff-mode selection for ordinary source changes.
+Any staged root or workspace `package.json`, or any `pnpm-lock.yaml`, is treated
+as a repository-wide dependency change and invokes `gitreins guard --full`, so
+all workspace tests run even when no source test file maps to the manifest.
+Verify the selected path and guard mode with the commands above and with a
+staged dependency-only probe before committing dependency changes.
 
 ## Testing
 
