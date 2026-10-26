@@ -1,0 +1,14 @@
+{
+  "tick": "mafia-ai-benchmark-foreman-2026-10-25-19-31-06",
+  "budget": 6,
+  "mode": "serial",
+  "tasks": [
+    {
+      "id": "RELENG-MAFIA-20261023-04",
+      "worktree": "/home/kara/worktrees/mafia-ai-benchmark-RELENG-MAFIA-20261023-04",
+      "branch": "wt/RELENG-MAFIA-20261023-04",
+      "base": "origin/main",
+      "base_sha": "3dfe37d"
+    }
+  ]
+}
