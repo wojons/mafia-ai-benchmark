@@ -23,7 +23,8 @@ published to npm**; do not add a publish lane without updating this doc.
 ## Gates (enforced by `scripts/release.sh`)
 
 - Working tree clean (board/gitreins lock files excluded).
-- No existing tags (first-cut repo; tags are never force-moved).
+- Target release tag is absent locally and on `origin`; previous tags are allowed
+  and remain immutable.
 - `main` fully pushed; CI run on HEAD sha is `success` (check per-job, an
   `all-clear`-style mask has not existed here — single `ci.yml` workflow).
 - `pnpm audit --prod` reports zero known vulnerabilities.
