@@ -9,6 +9,40 @@ import * as fs from 'fs';
 import * as path from 'path';
 import chalk from 'chalk';
 
+const SUPPORTED_CONFIG_KEYS = [
+  'name',
+  'numPlayers',
+  'nightDuration',
+  'dayDuration',
+  'votingDuration',
+  'llmProvider',
+  'llmModel',
+  'temperature',
+  'enable3D',
+  'enableVoice',
+] as const;
+
+type SupportedConfigKey = (typeof SUPPORTED_CONFIG_KEYS)[number];
+type NestedSection = 'game' | 'llm' | 'visualization';
+
+type ConfigLocation = {
+  section?: NestedSection;
+  nestedKey?: string;
+};
+
+const CONFIG_LOCATIONS: Record<SupportedConfigKey, ConfigLocation> = {
+  name: {},
+  numPlayers: { section: 'game', nestedKey: 'numPlayers' },
+  nightDuration: { section: 'game', nestedKey: 'nightPhaseDuration' },
+  dayDuration: { section: 'game', nestedKey: 'dayPhaseDuration' },
+  votingDuration: { section: 'game', nestedKey: 'votingDuration' },
+  llmProvider: { section: 'llm', nestedKey: 'provider' },
+  llmModel: { section: 'llm', nestedKey: 'model' },
+  temperature: { section: 'llm', nestedKey: 'temperature' },
+  enable3D: { section: 'visualization', nestedKey: 'enable3D' },
+  enableVoice: { section: 'visualization', nestedKey: 'enableVoice' },
+};
+
 export class ConfigCommand extends Command {
   constructor() {
     super('config');
@@ -66,27 +100,33 @@ export class ConfigCommand extends Command {
       console.log(chalk.gray('No configuration found. Run: ') + chalk.cyan('mafiactl init\n'));
       return;
     }
+
+    const displayConfig = this.normalizeConfig(config);
     
     console.log(chalk.white('Game Settings:'));
-    console.log(`  Name:              ${chalk.yellow((config.name as string) || 'N/A')}`);
-    console.log(`  Players:           ${chalk.yellow((config.numPlayers as number)?.toString() || 'N/A')}`);
-    console.log(`  Night Duration:    ${chalk.yellow((config.nightDuration as number)?.toString() || 'N/A')}`);
-    console.log(`  Day Duration:      ${chalk.yellow((config.dayDuration as number)?.toString() || 'N/A')}`);
-    console.log(`  Voting Duration:   ${chalk.yellow((config.votingDuration as number)?.toString() || 'N/A')}`);
+    console.log(`  Name:              ${chalk.yellow((displayConfig.name as string) || 'N/A')}`);
+    console.log(`  Players:           ${chalk.yellow((displayConfig.numPlayers as number)?.toString() || 'N/A')}`);
+    console.log(`  Night Duration:    ${chalk.yellow((displayConfig.nightDuration as number)?.toString() || 'N/A')}`);
+    console.log(`  Day Duration:      ${chalk.yellow((displayConfig.dayDuration as number)?.toString() || 'N/A')}`);
+    console.log(`  Voting Duration:   ${chalk.yellow((displayConfig.votingDuration as number)?.toString() || 'N/A')}`);
     
     console.log(chalk.white('\nLLM Settings:'));
-    console.log(`  Provider:          ${chalk.yellow((config.llmProvider as string) || 'N/A')}`);
-    console.log(`  Model:             ${chalk.yellow((config.llmModel as string) || 'N/A')}`);
-    console.log(`  Temperature:       ${chalk.yellow((config.temperature as number)?.toString() || 'N/A')}`);
+    console.log(`  Provider:          ${chalk.yellow((displayConfig.llmProvider as string) || 'N/A')}`);
+    console.log(`  Model:             ${chalk.yellow((displayConfig.llmModel as string) || 'N/A')}`);
+    console.log(`  Temperature:       ${chalk.yellow((displayConfig.temperature as number)?.toString() || 'N/A')}`);
     
     console.log(chalk.white('\nVisualization:'));
-    console.log(`  3D Mode:           ${chalk.yellow((config.enable3D as boolean)?.toString() || 'N/A')}`);
-    console.log(`  Voice:             ${chalk.yellow((config.enableVoice as boolean)?.toString() || 'N/A')}`);
+    console.log(`  3D Mode:           ${chalk.yellow((displayConfig.enable3D as boolean)?.toString() || 'N/A')}`);
+    console.log(`  Voice:             ${chalk.yellow((displayConfig.enableVoice as boolean)?.toString() || 'N/A')}`);
     
     console.log('');
   }
   
   async setConfig(key: string, value: string): Promise<void> {
+    if (!this.isSupportedConfigKey(key)) {
+      throw new Error(`Unsupported configuration key "${key}". Valid keys: ${SUPPORTED_CONFIG_KEYS.join(', ')}`);
+    }
+
     console.log(chalk.cyan(`\nSetting ${key} = ${value}\n`));
 
     const config = this.loadConfig();
@@ -98,7 +138,14 @@ export class ConfigCommand extends Command {
     else if (value === 'false') parsedValue = false;
     else if (/^-?\d+(\.\d+)?$/.test(value)) parsedValue = Number(value);
 
-    existing[key] = parsedValue;
+    const location = CONFIG_LOCATIONS[key];
+    if (location.section && this.hasNestedConfigShape(existing)) {
+      const section = this.asRecord(existing[location.section]);
+      section[location.nestedKey as string] = parsedValue;
+      existing[location.section] = section;
+    } else {
+      existing[key] = parsedValue;
+    }
     this.saveConfig(existing);
 
     console.log(chalk.green(`✓ Configuration updated — ${key} = ${JSON.stringify(parsedValue)}\n`));
@@ -139,6 +186,40 @@ export class ConfigCommand extends Command {
     console.log(chalk.green('✓ Configuration reset to defaults\n'));
   }
   
+  private normalizeConfig(raw: Record<string, unknown>): Record<string, unknown> {
+    const game = this.asRecord(raw.game);
+    const llm = this.asRecord(raw.llm);
+    const visualization = this.asRecord(raw.visualization);
+
+    return {
+      name: raw.name,
+      numPlayers: game.numPlayers ?? raw.numPlayers,
+      nightDuration: game.nightPhaseDuration ?? raw.nightDuration,
+      dayDuration: game.dayPhaseDuration ?? raw.dayDuration,
+      votingDuration: game.votingDuration ?? raw.votingDuration,
+      llmProvider: llm.provider ?? raw.llmProvider,
+      llmModel: llm.model ?? raw.llmModel,
+      temperature: llm.temperature ?? raw.temperature,
+      enable3D: visualization.enable3D ?? raw.enable3D,
+      enableVoice: visualization.enableVoice ?? raw.enableVoice,
+    };
+  }
+
+  private isSupportedConfigKey(key: string): key is SupportedConfigKey {
+    return (SUPPORTED_CONFIG_KEYS as readonly string[]).includes(key);
+  }
+
+  private hasNestedConfigShape(config: Record<string, unknown>): boolean {
+    return ['game', 'llm', 'visualization'].some((section) => Object.hasOwn(config, section));
+  }
+
+  private asRecord(value: unknown): Record<string, unknown> {
+    if (typeof value === 'object' && value !== null && !Array.isArray(value)) {
+      return value as Record<string, unknown>;
+    }
+    return {};
+  }
+
   private loadConfig(): Record<string, unknown> {
     const file = path.resolve(process.cwd(), 'mafia.config.json');
     try {
