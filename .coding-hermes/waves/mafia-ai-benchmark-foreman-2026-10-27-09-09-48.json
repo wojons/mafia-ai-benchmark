@@ -1,0 +1,61 @@
+{
+  "wave_id": "wave-2026-10-27-09-09-48",
+  "tick": "mafia-ai-benchmark-foreman-2026-10-27-09-09-48",
+  "tick_number": 289,
+  "created_at": "2026-10-27T09:20:00Z",
+  "wave_budget": 1,
+  "status": "in_progress",
+  "mode": "serial-fallback",
+  "mode_reason": "WAVE_BUDGET=1; only one dispatchable implementation row exists (DF-MAFIA-AI-BENCHMARK-44 docs leg). README-4/README-5/README-6/DOC-19 premises verified already satisfied at HEAD 5c3d714 -> verification-only closes, no worker.",
+  "pending_census": ["README-4", "README-5", "README-6", "DF-MAFIA-AI-BENCHMARK-44", "DOC-19"],
+  "selected_row": "DF-MAFIA-AI-BENCHMARK-44",
+  "tasks": ["DF-MAFIA-AI-BENCHMARK-44"],
+  "worktrees": {},
+  "briefs": ["/tmp/maf-2026-10-27-09-09-48-DF-44-docs-brief.txt"],
+  "dispatch": {
+    "DF-MAFIA-AI-BENCHMARK-44": {
+      "worker_model": "glm-5.3-flash",
+      "worker_provider": "zai-glm-default",
+      "lane_probe": "hermes chat -q LANE_OK -> session 20261027_041809_e7e1d0, agent.log API call #1 model=glm-5.3-flash provider=custom, no 'Fallback activated' line (real lane, not PAYG substitution)",
+      "wrapper_pid": 3063989,
+      "brief": "/tmp/maf-2026-10-27-09-09-48-DF-44-docs-brief.txt",
+      "log": "/tmp/maf-2026-10-27-09-09-48-worker.log",
+      "kickoff_cmd": "bash /tmp/maf-dispatch-df44-docs.sh (hermes chat -q $(cat brief) -m glm-5.3-flash --provider zai-glm-default -s coding-hermes-worker --ignore-rules -Q)",
+      "scope": "QUICK_START.md only (sudo-less Node>=20 bootstrap recipe)",
+      "off_by_one": "not consulted: docs-row work, no debug/error involved"
+    }
+  },
+  "foreman_direct_leg": {
+    "row": "DF-MAFIA-AI-BENCHMARK-44",
+    "leg": "live install leg on the DESIGNATED host",
+    "host": "bunker-las-03 (bunker3, 100.69.3.13), Debian 13 trixie, 6 vCPU, 31 GB RAM, 90 GB free",
+    "host_probe": "ssh bunker3 'echo HOST_OK; systemctl is-active bunkerd' -> HOST_OK / active",
+    "script": "/tmp/mab-install-leg.sh (staged to bunker3:~/mab-install-leg.sh)",
+    "run": "20261027T091935Z",
+    "result": {
+      "clone_rc": 0,
+      "clone_secs": 8,
+      "pnpm_bootstrap": "curl -fsSL https://get.pnpm.io/install.sh | sh - rc=0 in 16s (run 20261027T091810Z); reused by the recorded run (now at ~/.local/share/pnpm/bin/pnpm)",
+      "install_rc": 0,
+      "install_secs": 55,
+      "build_rc": 0,
+      "build_secs": 16,
+      "turbo": "4 successful, 4 total (15.034s)",
+      "entrypoint": "apps/server/dist/index.js PRESENT",
+      "health": "HTTP 200 after 1s, body carries the memory field (real mafia server, not the DuckBrain daemon)",
+      "games_probe": "GET /api/v1/games?limit=1 -> 200 {\"success\":true,\"data\":[],\"count\":0}",
+      "db_file": "4096 bytes created at $BASE/leg.db",
+      "teardown": "server stopped, 0 remaining",
+      "head": "5c3d714e916733992fde3b32c388ec417378cda3"
+    },
+    "log": "/tmp/mab-leg-bunker3.out"
+  },
+  "verification_only_closes": {
+    "README-4": "grep -n DATABASE_PATH QUICK_START.md -> exit 1 no output; DB_PATH/./data/mafia.db identical in QUICK_START.md:291, apps/server/src/index.ts:45, .env.sample:99",
+    "README-5": "README.md:51 names DEFAULT_MODEL; grep MODEL README.md has no bare-MODEL-required claim",
+    "README-6": "grep 'run a benchmark' README.md -> exit 1; (apps/cli) tsx src/index.ts benchmark -> exit 0 prints 'Benchmark Report'",
+    "DOC-19": "pnpm test:counts exit 0 'Synced ... server 585, shared 418, cli 113, web 94 (total 1210)'; git diff --quiet README.md exit 0; README.md:29/417 carry per-package counts"
+  },
+  "evidence": ["/tmp/mab-tick289-premise-evidence.txt", "/tmp/mab-leg-bunker3.out", "/tmp/mafia-test-counts.log"],
+  "results": {}
+}

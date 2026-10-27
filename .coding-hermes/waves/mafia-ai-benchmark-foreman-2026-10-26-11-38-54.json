@@ -1,0 +1,17 @@
+{
+  "tick": "mafia-ai-benchmark-foreman-2026-10-26-11-38-54",
+  "project": "mafia-ai-benchmark",
+  "base": "origin/main",
+  "base_sha": "094a1e565f7c31d693b2778694fe8a67b6fc450b",
+  "budget": 12,
+  "mode": "serial-fallback",
+  "reason": "Only one selected dispatchable implementation row; release authorization row RELEASE-006 is owner-gated and remains pending.",
+  "workers": [
+    {
+      "task_id": "RELENG-MAFIA-20261023-03",
+      "worktree": "/home/kara/worktrees/mafia-ai-benchmark-RELENG-MAFIA-20261023-03",
+      "branch": "wt/RELENG-MAFIA-20261023-03",
+      "status": "reserved"
+    }
+  ]
+}
