@@ -26,7 +26,7 @@ An advanced AI-powered Mafia game simulation that benchmarks different AI models
 - **☀️ Day Phase**: Discussion, voting, lynching
 - **📊 Event Sourcing**: Complete game audit trail with visibility levels
 - **💰 Cost Tracking**: Track API costs per game and player
-- **🧪 1183 Tests**: Comprehensive test coverage (418 shared, 562 server, 113 CLI, 90 web)
+- **🧪 1210 Tests**: Comprehensive test coverage (418 shared, 585 server, 113 CLI, 94 web)
 
 ## 🚀 Quick Start
 
@@ -48,7 +48,7 @@ nano .env
 # server boots but LLM-backed games need real keys copied from .env.sample.
 
 # OPENAI_API_KEY=sk-or-v1-YOUR-KEY-HERE
-# OPENAI_BASE_URL and MODEL are also required — see .env.sample for all options
+# OPENAI_BASE_URL and DEFAULT_MODEL are also required — see .env.sample for all options
 
 # 3. Build all packages
 pnpm build
@@ -56,7 +56,7 @@ pnpm build
 # 4. Start the server
 pnpm --filter @mafia/server dev
 
-# 5. In another terminal, run a benchmark
+# 5. In another terminal, show the accumulated benchmark report
 pnpm --filter @mafia/cli dev -- benchmark
 
 # Benchmark multiple models head-to-head (default: openai/gpt-4o-mini,openai/gpt-4o)
@@ -228,7 +228,7 @@ See **[specs/correct-night-flow.md](specs/correct-night-flow.md)** for complete 
 | Command | Purpose | When to Use |
 | --- | --- | --- |
 | `pnpm --filter @mafia/cli game:run` | **Run a game** | Playing Mafia with AI agents |
-| `pnpm --filter @mafia/cli dev -- benchmark` | **Run benchmark** | Automated model evaluation |
+| `pnpm --filter @mafia/cli dev -- benchmark` | **Show accumulated report** | View accumulated model evaluation |
 | `pnpm --filter @mafia/cli stats` | **View stats** | Game and model statistics |
 | `pnpm --filter @mafia/cli list-games` | **List games** | Browse recent games |
 | `pnpm --filter @mafia/cli run config show` | **View config** | Check current settings |
@@ -252,16 +252,16 @@ See **[specs/correct-night-flow.md](specs/correct-night-flow.md)** for complete 
 | Command | Purpose | When to Use |
 | --- | --- | --- |
 | `pnpm --filter @mafia/server dev` | **Start server** | Run REST API + WebSocket |
-| `pnpm --filter @mafia/server test:run` | **Run tests** | Verify server tests (562) |
+| `pnpm --filter @mafia/server test:run` | **Run tests** | Verify server tests (585) |
 
 ### Root Commands
 
 ```bash
 pnpm install              # Install all dependencies
 pnpm build                # Build all packages (4/4)
-pnpm --filter @mafia/server test:run    # Server tests (562)
+pnpm --filter @mafia/server test:run    # Server tests (585)
 pnpm --filter @mafia/shared test:run    # Shared tests (418)
-pnpm --filter @mafia/web test:run       # Web tests (90)
+pnpm --filter @mafia/web test:run       # Web tests (94)
 ```
 
 ## 🎭 Roles
@@ -302,9 +302,9 @@ mafia-ai-benchmark/
 
 ```bash
 # All tests from root
-pnpm --filter @mafia/server test:run   # Server (562 tests)
+pnpm --filter @mafia/server test:run   # Server (585 tests)
 pnpm --filter @mafia/shared test:run   # Shared (418 tests)
-pnpm --filter @mafia/web test:run      # Web (90 tests)
+pnpm --filter @mafia/web test:run      # Web (94 tests)
 ```
 
 **Live-server integration tests (`TEST_BASE_URL`).** A handful of server
@@ -328,7 +328,7 @@ server and pins `TEST_BASE_URL` to it (see `.github/workflows/ci.yml`).
 > the leaderboard. Use a scratch server, or make sure the stack's data is
 > disposable, before setting `TEST_BASE_URL`.
 
-**Test Coverage**: 1183 tests (418 shared, 562 server, 113 CLI, 90 web)
+**Test Coverage**: 1210 tests (418 shared, 585 server, 113 CLI, 94 web)
 
 **Test counts are generated — don't hand-edit them.** Every test count in this
 README is produced from live vitest output by `pnpm test:counts`
@@ -414,7 +414,7 @@ MIT License - see LICENSE file
 
 ---
 
-**Status**: ✅ Production Ready | ✅ Fully Documented | ✅ 1183 Tests (all 1183 passing: 418 shared, 562 server, 113 CLI, 90 web)
+**Status**: ✅ Production Ready | ✅ Fully Documented | ✅ 1210 Tests (all 1210 passing: 418 shared, 585 server, 113 CLI, 94 web)
 
 **Quick Start**: See [QUICK_START.md](QUICK_START.md) for 5-minute setup guide!
 
