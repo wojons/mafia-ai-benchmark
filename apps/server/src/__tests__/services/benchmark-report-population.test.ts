@@ -22,6 +22,14 @@ type BenchmarkData = {
     inProgress: number;
     completedGames: number;
     mockGames: number;
+    population: {
+      totalGames: number;
+      completedGames: number;
+      mockGames: number;
+      inProgress: number;
+      failedGames: number;
+      cancelledGames: number;
+    };
     failedGames: number;
     cancelledGames: number;
   };
@@ -118,6 +126,14 @@ describe('GET /api/v1/benchmark/report — population declaration (DF-MAFIA-AI-B
     expect(summary.inProgress).toBeGreaterThan(0);
     expect(summary.cancelledGames).toBeGreaterThan(0);
     expect(summary.failedGames).toBeGreaterThan(0);
+    expect(summary.population).toEqual({
+      totalGames: 5,
+      completedGames: summary.completedGames,
+      mockGames: summary.mockGames,
+      inProgress: summary.inProgress,
+      failedGames: summary.failedGames,
+      cancelledGames: summary.cancelledGames,
+    });
 
     expect(summary.inProgress).toBe(summary.activeGames);
     expect(summary.totalGames).toBe(
