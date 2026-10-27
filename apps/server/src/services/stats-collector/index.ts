@@ -1058,6 +1058,14 @@ export class StatsCollector {
           inProgress: gameStats.activeGames,
           completedGames: gameStats.completedGames,
           mockGames,
+          population: {
+            totalGames: gameStats.totalGames,
+            completedGames: gameStats.completedGames,
+            mockGames,
+            inProgress: gameStats.activeGames,
+            failedGames,
+            cancelledGames,
+          },
           // MAF-GAP-050: games that never reached a terminal outcome
           // (SETUP / PAUSED / unknown status). CANCELLED is published in its
           // own bucket below so every game occupies exactly one population
