@@ -20,7 +20,7 @@ const program = new Command();
 program
   .name('mafiactl')
   .description('Mafia AI Benchmark CLI - Manage games, agents, and benchmarks')
-  .version(version || '1.0.0')
+  .version(version)
   .option('--verbose', 'Enable verbose logging')
   .option('--config <path>', 'Config file path', './mafia.config.json');
 
