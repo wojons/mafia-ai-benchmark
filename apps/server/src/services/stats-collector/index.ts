@@ -19,6 +19,7 @@ import {
   getDegenerateGameIds,
 } from './degenerate.js';
 import {
+  getMockGameCounts,
   getMockGameIds,
 } from './mock.js';
 import {
@@ -416,6 +417,18 @@ export interface AgentStats {
  */
 export const ACTIVE_FRESHNESS_MS = STALE_IN_PROGRESS_MAX_MS;
 
+/** Count cancelled rows for the report's explicit population buckets. */
+function getCancelledGameCount(repo: GameRepository): number {
+  try {
+    const row = repo.getDatabase().prepare(
+      "SELECT COUNT(*) AS count FROM games WHERE status = 'CANCELLED'",
+    ).get() as { count: number };
+    return row.count;
+  } catch {
+    return 0;
+  }
+}
+
 /**
  * Empty report shape shared by generateReport()'s error fallback — keeps
  * the response contract stable (generatedAt / summary / modelPerformance /
@@ -430,6 +443,9 @@ function createEmptyReport(): Record<string, unknown> {
       activeGames: 0,
       completedGames: 0,
       failedGames: 0,
+      mockGames: 0,
+      inProgress: 0,
+      cancelledGames: 0,
       failedGameIds: [],
       mafiaWinRate: 0,
       avgDuration: 0,
@@ -1010,6 +1026,12 @@ export class StatsCollector {
 
     try {
       const gameStats = this.getGameStats();
+      const mockGames = getMockGameCounts(this.gameRepository);
+      const cancelledGames = getCancelledGameCount(this.gameRepository);
+      // The repository's legacy failedGames bucket includes CANCELLED rows.
+      // Publish those rows separately while keeping actual failed rows in the
+      // failedGames field so the population buckets are disjoint.
+      const failedGames = Math.max(0, gameStats.failedGames - cancelledGames);
       const modelComparison = getModelComparison(this.gameRepository);
       const agentStats = this.getAgentStats();
 
@@ -1033,13 +1055,15 @@ export class StatsCollector {
         summary: {
           totalGames: gameStats.totalGames,
           activeGames: gameStats.activeGames,
+          inProgress: gameStats.activeGames,
           completedGames: gameStats.completedGames,
+          mockGames,
           // MAF-GAP-050: games that never reached a terminal outcome
-          // (SETUP / PAUSED / CANCELLED / unknown status). totalGames is
-          // the sum of active + completed + failed by construction, so the
-          // report always reconciles; failedGameIds makes stuck games
-          // auditable instead of invisible.
-          failedGames: gameStats.failedGames,
+          // (SETUP / PAUSED / unknown status). CANCELLED is published in its
+          // own bucket below so every game occupies exactly one population
+          // bucket without changing the completed-game denominator.
+          failedGames,
+          cancelledGames,
           failedGameIds: this.gameRepository.getFailedGames().map(g => ({
             id: g.id,
             status: g.status,
