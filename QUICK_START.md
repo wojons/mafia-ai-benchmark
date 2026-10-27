@@ -77,8 +77,21 @@ pnpm run server
 # Start the web UI (on port 5174)
 pnpm run web
 
-# Or start it on a custom port (vite accepts --port):
-pnpm run dev:web -- --port 5199
+# Or start the web-only dev server on a custom port (vite accepts --port):
+# Use this web-specific command for fresh-machine probes; do not pass --port to
+# `npm run dev` / `pnpm run dev`, which forwards it to turbo instead.
+npm run dev:web -- --port 5199
+# The equivalent pnpm invocation is also supported:
+# pnpm run dev:web -- --port 5199
+```
+
+For a bounded fresh-machine UI probe, start the web server with the command above,
+then verify the requested port before stopping it:
+
+```bash
+npm run dev:web -- --port 3111
+curl -fsS -o /dev/null -w '%{http_code}\n' http://127.0.0.1:3111/
+# Expected output: 200
 ```
 
 Open http://localhost:5174 to watch games in real time.
@@ -144,7 +157,7 @@ The game will:
 | `pnpm install`                             | Install all dependencies       |
 | `pnpm run server`                          | Start the game server          |
 | `pnpm run web`                             | Start the web dashboard        |
-| `pnpm run dev:web -- --port N`             | Start web dashboard on port N  |
+| `npm run dev:web -- --port N` (or pnpm equivalent) | Start web dashboard on port N  |
 | `pnpm test`                                | Run all tests                  |
 | `pnpm run build`                           | Build all workspaces           |
 
