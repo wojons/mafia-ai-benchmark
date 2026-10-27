@@ -6,7 +6,7 @@ The DuckBrain sync-twin integration contract — per-tick /sync markers (`/sync/
 
 That document covers:
 
-- **Endpoints** — `/api/v1/games`, `/api/v1/agents`, `/api/v1/stats`, `/api/v1/benchmark`, `/api/v1/benchmark/report`, `/api/v1/models`, health checks. (There is NO `/api/v1/players` route on the server — an earlier revision of this list advertised one and it 404'd; per-player data lives at `/api/v1/games/:gameId/players`.)
+- **Endpoints** — `/api/v1/games`, `/api/v1/agents`, `/api/v1/stats`, `/api/v1/benchmark`, `/api/v1/benchmark/report`, `/api/v1/benchmark/runs/{runId}/report`, `/api/v1/models`, health checks. (There is NO `/api/v1/players` route on the server — an earlier revision of this list advertised one and it 404'd; per-player data lives at `/api/v1/games/:gameId/players`.)
 - **WebSocket protocol** — `/ws` connection, event shapes, streaming (the
   code-extracted reference for the live protocol is
   [`api/websocket.md`](api/websocket.md))
@@ -25,6 +25,77 @@ gamesPlayed`. Legacy usage-only games (e.g. `token_usage` rows with
 "no attributable wins," not "lost every game." Game-level winners are never
 attributed to models that did not play. See [`specs/api-specs.md`](../specs/api-specs.md)
 → "Benchmark Report" for the full contract.
+
+### Run-scoped benchmark report (DF-MAFIA-AI-BENCHMARK-28)
+
+`GET /api/v1/benchmark/runs/{runId}/report` returns the report for a single
+benchmark run, derived from that run's own `benchmark_games` + `players` rows
+only. The global `GET /api/v1/benchmark/report` mixes every run ever recorded,
+so a fresh 2-game run's closing verdict would quote lifetime aggregates; the
+run-scoped endpoint answers "what did THIS run show" instead.
+
+**Path parameter:** `runId` (string) — the identifier returned by the run
+start endpoint.
+
+**Response — `200`** under the standard `{ success, data }` envelope:
+
+```json
+{
+  "success": true,
+  "data": {
+    "runId": "string",
+    "status": "QUEUED | RUNNING | COMPLETED | CANCELLED | FAILED",
+    "generatedAt": "ISO-8601 timestamp",
+    "summary": {
+      "totalGames": 0,
+      "completedGames": 0,
+      "validGames": 0,
+      "failedGames": 0,
+      "gamesWithWinner": 0
+    },
+    "modelPerformance": [
+      {
+        "provider": "string",
+        "model": "string",
+        "gamesPlayed": 0,
+        "wins": 0,
+        "losses": null,
+        "winRate": 0,
+        "avgTokens": 0,
+        "avgCost": 0
+      }
+    ],
+    "pairings": [
+      {
+        "id": "string",
+        "modelA": "string",
+        "modelB": "string",
+        "games": 0,
+        "completed": 0,
+        "aWins": 0,
+        "bWins": 0,
+        "unattributed": 0
+      }
+    ]
+  }
+}
+```
+
+- `status` is the run's current lifecycle state; the endpoint is available
+  **regardless of run status** and fields are computed live — an in-flight
+  run shows partial counts.
+- `summary.gamesWithWinner` counts games with a decided side winner
+  (attributable games); the rest carry games but no wins.
+- `modelPerformance.losses` counts defeats only when the model has at least
+  one win somewhere in the run (`null` = "no attributable losses", the same
+  honest floor as the CLI display). Only real (comparable) models are ranked.
+- `pairings` are run-scoped head-to-heads; `aWins` / `bWins` / `unattributed`
+  partition `completed` (winner = which model side won that game).
+
+**`404`** — unknown `runId`: `{ "success": false, "error": "Benchmark run
+<runId> not found" }` (RouteError envelope). **`500`** — report generation
+failure: `{ "success": false, "error": "Failed to generate benchmark run
+report" }`.
 
 ## Health checks
 
