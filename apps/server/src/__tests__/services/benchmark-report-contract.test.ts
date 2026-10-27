@@ -448,7 +448,16 @@ describe('GET /api/v1/benchmark/report — data-integrity contract (MAF-GAP-064)
     const report = await fetchReport();
     expect(report.summary.totalGames).toBe(9); // g1..g9
     expect(report.summary.completedGames).toBe(8); // all except CANCELLED g3
-    expect(report.summary.failedGames).toBe(1); // g3
+    expect(report.summary.failedGames).toBe(0); // g3 is explicit cancellation
+    expect(report.summary.cancelledGames).toBe(1);
+    expect(report.summary.inProgress).toBe(0);
+    expect(report.summary.totalGames).toBe(
+      report.summary.completedGames +
+        report.summary.mockGames +
+        report.summary.inProgress +
+        report.summary.failedGames +
+        report.summary.cancelledGames,
+    );
     expect(report.summary.activeGames).toBe(0);
   });
 

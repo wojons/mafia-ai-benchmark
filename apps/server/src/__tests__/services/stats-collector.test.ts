@@ -1673,7 +1673,9 @@ describe('StatsCollector', () => {
 
       const report = stats.generateReport();
       const summary = report.summary as any;
-      expect(summary.failedGames).toBe(2);
+      expect(summary.failedGames).toBe(1);
+      expect(summary.cancelledGames).toBe(1);
+      expect(summary.inProgress).toBe(summary.activeGames);
       expect(summary.failedGameIds).toHaveLength(2);
       expect(summary.failedGameIds[0]).toMatchObject({
         id: 'stuck1',
@@ -1686,9 +1688,14 @@ describe('StatsCollector', () => {
         status: 'SETUP',
         endedAt: null,
       });
-      // MAF-GAP-050 acceptance: the summary reconciles on live data.
+      // MAF-GAP-050 acceptance: the summary now reconciles with explicit
+      // mock/in-progress/cancelled buckets.
       expect(summary.totalGames).toBe(
-        summary.activeGames + summary.completedGames + summary.failedGames,
+        summary.completedGames +
+          summary.mockGames +
+          summary.inProgress +
+          summary.failedGames +
+          summary.cancelledGames,
       );
     });
 
