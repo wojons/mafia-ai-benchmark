@@ -18,6 +18,24 @@ describe('ConfigCommand', () => {
     dayDuration: 90,
     votingDuration: 25,
   };
+  const nestedInitConfigData = {
+    name: 'Mafia Game',
+    game: {
+      numPlayers: 10,
+      nightPhaseDuration: 60,
+      dayPhaseDuration: 120,
+      votingDuration: 30,
+    },
+    llm: {
+      provider: 'openai',
+      model: 'openai/gpt-4o-mini',
+      temperature: 0.7,
+    },
+    visualization: {
+      enable3D: false,
+      enableVoice: false,
+    },
+  };
 
   beforeEach(() => {
     cmd = new ConfigCommand();
@@ -55,6 +73,16 @@ describe('ConfigCommand', () => {
     expect(console.log).toHaveBeenCalled();
   });
 
+  it('showConfig normalizes the nested shape written by init', async () => {
+    writeFileSync(path.join(tmpDir, 'mafia.config.json'), JSON.stringify(nestedInitConfigData, null, 2));
+
+    await cmd.showConfig({ json: false });
+
+    const output = vi.mocked(console.log).mock.calls.flat().join('\n');
+    expect(output).toContain('Players:           10');
+    expect(output).toContain('Provider:          openai');
+  });
+
   it('showConfig outputs JSON with --json flag', async () => {
     writeFileSync(path.join(tmpDir, 'mafia.config.json'), JSON.stringify(configData, null, 2));
     const spy = vi.spyOn(console, 'log').mockImplementation(() => {});
@@ -73,6 +101,25 @@ describe('ConfigCommand', () => {
     const saved = JSON.parse(readFileSync(path.join(tmpDir, 'mafia.config.json'), 'utf-8'));
     expect(saved.numPlayers).toBe(12);
     expect(saved.llmProvider).toBe('anthropic'); // unchanged
+  });
+
+  it('setConfig updates nested init settings and showConfig displays the new value', async () => {
+    writeFileSync(path.join(tmpDir, 'mafia.config.json'), JSON.stringify(nestedInitConfigData, null, 2));
+
+    await cmd.setConfig('numPlayers', '8');
+    const saved = JSON.parse(readFileSync(path.join(tmpDir, 'mafia.config.json'), 'utf-8'));
+    expect(saved.game.numPlayers).toBe(8);
+    expect(saved.numPlayers).toBeUndefined();
+
+    await cmd.showConfig({ json: false });
+    const output = vi.mocked(console.log).mock.calls.flat().join('\n');
+    expect(output).toContain('Players:           8');
+  });
+
+  it('setConfig rejects unsupported keys with the supported-key list', async () => {
+    await expect(cmd.setConfig('players', '8')).rejects.toThrow(
+      'Unsupported configuration key "players". Valid keys: name, numPlayers',
+    );
   });
 
   it('setConfig creates config file if missing', async () => {

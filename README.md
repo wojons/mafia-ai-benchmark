@@ -19,7 +19,7 @@ An advanced AI-powered Mafia game simulation that benchmarks different AI models
 - **🤖 AI Agents**: Autonomous players powered by LLMs (GPT-4o-mini, Claude, etc.)
 - **🔀 Multiple AI Providers**: Benchmark any OpenRouter model head-to-head per player — e.g. `benchmark --models openai/gpt-4o-mini,openai/gpt-4o` (see [FLEXIBLE_PLAYER_MODELS.md](FLEXIBLE_PLAYER_MODELS.md) and [PERSONALIZED_AI_MODELS.md](PERSONALIZED_AI_MODELS.md))
 - **🎭 Dynamic Personas**: Unique characters with diverse backgrounds, communication styles, and personalities
-- **🎛️ Full Configuration**: Control players, roles, messaging limits, AI models, and more
+- **🎛️ Full Configuration**: Control players, phase durations, AI models, and more
 - **🎯 Correct Game Flow**: Mafia team discussion with consensus (not single-turn votes)
 - **💬 Split-Pane Consciousness**: Private reasoning (THINK) vs public statements (SAYS)
 - **🌙 Night Phase**: Mafia discussion, Doctor protection, Sheriff investigation, Vigilante action
@@ -184,22 +184,38 @@ pnpm --filter @mafia/cli dev -- run-game --players 7 --model openai/gpt-4o --aut
 
 ### Persistent Config Commands
 
-The `config` subcommand manages `mafia.config.json` (game parameters that persist across runs):
+The CLI stores configuration in `mafia.config.json` in the current directory.
+Initialize it non-interactively before using the config commands:
 
 ```bash
-# Show current configuration
+# Create the nested default configuration without prompts
+pnpm --filter @mafia/cli dev -- init --default
+
+# Show the normalized configuration
 pnpm --filter @mafia/cli run config show
 
-# Set a configuration value (arbitrary JSON key)
-pnpm --filter @mafia/cli run config set <key> <value>
+# Set a displayed scalar value, then prove it round-trips
+pnpm --filter @mafia/cli run config set numPlayers 8
+pnpm --filter @mafia/cli run config show
+# Players:           8
 
 # Reset to default settings
 pnpm --filter @mafia/cli run config reset
 ```
 
-> **Note:** `pnpm --filter @mafia/cli config ...` is intercepted by pnpm's built-in `config` command (ERR_PNPM_RECURSIVE_RUN_NO_SCRIPT), so config subcommands use the `run config ...` form (see line 230 note).
+`config set` accepts only displayed scalar keys: `name`, `numPlayers`,
+`nightDuration`, `dayDuration`, `votingDuration`, `llmProvider`, `llmModel`,
+`temperature`, `enable3D`, and `enableVoice`. It rejects other keys with the
+valid-key list instead of silently writing a value that `config show` cannot
+report. For configurations created by `init`, those keys update the matching
+nested `game`, `llm`, or `visualization` field.
 
-Role counts (mafia/doctor/sheriff/vigilante), messaging limits, and day-rounds are configured via `config set` or directly in `mafia.config.json` — they are NOT command-line flags.
+Role configuration is read from the `roles` array in the game config, where
+each entry has the form `{ "role": "MAFIA", "count": 3 }`. It is not a
+`config set` scalar; edit the `game.roles` array directly when needed. Messaging
+limits and day-rounds are not CLI configuration keys and have no config reader.
+
+> **Note:** `pnpm --filter @mafia/cli config ...` is intercepted by pnpm's built-in `config` command (ERR_PNPM_RECURSIVE_RUN_NO_SCRIPT), so config subcommands use the `run config ...` form (see line 247 note).
 
 See **[CONFIG_GUIDE.md](CONFIG_GUIDE.md)** for complete documentation of all configurable parameters.
 
@@ -215,7 +231,7 @@ See **[CONFIG_GUIDE.md](CONFIG_GUIDE.md)** for complete documentation of all con
 
 ### Day Phase
 
-1. **💬 Discussion** - All players discuss (configurable messages)
+1. **💬 Discussion** - All players discuss
 2. **🗳️ Voting** - Players vote to lynch someone
 3. **🏆 Win Check** - Mafia wins if ≥ town, Town wins if all mafia eliminated
 
@@ -227,6 +243,7 @@ See **[specs/correct-night-flow.md](specs/correct-night-flow.md)** for complete 
 
 | Command | Purpose | When to Use |
 | --- | --- | --- |
+| `pnpm --filter @mafia/cli dev -- init --default` | **Initialize config** | Create a non-interactive default config |
 | `pnpm --filter @mafia/cli game:run` | **Run a game** | Playing Mafia with AI agents |
 | `pnpm --filter @mafia/cli dev -- benchmark` | **Show accumulated report** | View accumulated model evaluation |
 | `pnpm --filter @mafia/cli stats` | **View stats** | Game and model statistics |
