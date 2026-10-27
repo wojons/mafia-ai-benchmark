@@ -276,7 +276,16 @@ mafiactl benchmark --games 2 --export benchmark-report.json
 mafiactl benchmark --games 2 --timeout 60
 ```
 
-**Caveat:** `benchmark export` is listed as a subcommand in `--help` but currently does nothing (it is registered without an action handler and exits 0 with no output). Use `benchmark --export <path>` instead.
+**`benchmark export`:** Exports benchmark report data from the server as JSON or CSV. By default, JSON is written to stdout. Supported options:
+- `-f, --format <format>` — Output format: `json` or `csv` (default: `json`).
+- `-g, --games <n>` — Number of games to include (default: `50`).
+- `-o, --output <file>` — Write the export to a file instead of stdout.
+- `--server <url>` — Server base URL (default: `http://localhost:3004`).
+
+For example:
+```bash
+mafiactl benchmark export --format csv --games 50 --output benchmark.csv
+```
 
 ---
 
