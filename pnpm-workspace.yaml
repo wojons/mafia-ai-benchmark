@@ -8,7 +8,7 @@ overrides:
   ws: ">=8.22.0"
   qs: ">=6.16.0"
   uuid: ">=14.0.3"
-  body-parser: ">=1.20.6"
+  body-parser: ">=2.4.0"
   fflate: ">=0.6.11"
   proxy-addr: ">=2.0.8 <3.0.0"
 
