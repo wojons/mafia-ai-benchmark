@@ -1,10 +1,11 @@
 {
   "wave_id": "wave-2026-10-27-09-09-48",
   "tick": "mafia-ai-benchmark-foreman-2026-10-27-09-09-48",
-  "tick_number": 289,
+  "tick_number": 288,
   "created_at": "2026-10-27T09:20:00Z",
+  "closed_at": "2026-10-27T09:58:00Z",
   "wave_budget": 1,
-  "status": "in_progress",
+  "status": "complete",
   "mode": "serial-fallback",
   "mode_reason": "WAVE_BUDGET=1; only one dispatchable implementation row exists (DF-MAFIA-AI-BENCHMARK-44 docs leg). README-4/README-5/README-6/DOC-19 premises verified already satisfied at HEAD 5c3d714 -> verification-only closes, no worker.",
   "pending_census": ["README-4", "README-5", "README-6", "DF-MAFIA-AI-BENCHMARK-44", "DOC-19"],
@@ -18,24 +19,26 @@
       "worker_provider": "zai-glm-default",
       "lane_probe": "hermes chat -q LANE_OK -> session 20261027_041809_e7e1d0, agent.log API call #1 model=glm-5.3-flash provider=custom, no 'Fallback activated' line (real lane, not PAYG substitution)",
       "wrapper_pid": 3063989,
+      "worker_session": "20261027_042008_f64ea2",
       "brief": "/tmp/maf-2026-10-27-09-09-48-DF-44-docs-brief.txt",
       "log": "/tmp/maf-2026-10-27-09-09-48-worker.log",
       "kickoff_cmd": "bash /tmp/maf-dispatch-df44-docs.sh (hermes chat -q $(cat brief) -m glm-5.3-flash --provider zai-glm-default -s coding-hermes-worker --ignore-rules -Q)",
       "scope": "QUICK_START.md only (sudo-less Node>=20 bootstrap recipe)",
-      "off_by_one": "not consulted: docs-row work, no debug/error involved"
+      "worker_exit": "0 (single process tree; -Q log empty until exit, liveness measured on the tree)",
+      "off_by_one": "discover javascript-documentation-test-count-sync -> not_found; no matching cached answer in data/answers; no non-trivial debug encountered, no submission"
     }
   },
   "foreman_direct_leg": {
     "row": "DF-MAFIA-AI-BENCHMARK-44",
     "leg": "live install leg on the DESIGNATED host",
     "host": "bunker-las-03 (bunker3, 100.69.3.13), Debian 13 trixie, 6 vCPU, 31 GB RAM, 90 GB free",
-    "host_probe": "ssh bunker3 'echo HOST_OK; systemctl is-active bunkerd' -> HOST_OK / active",
+    "host_probe": "ssh bunker3 'echo HOST_OK; systemctl is-active bunkerd' -> HOST_OK / active (the row's owner-block claimed the host offline ~15d - STALE)",
     "script": "/tmp/mab-install-leg.sh (staged to bunker3:~/mab-install-leg.sh)",
     "run": "20261027T091935Z",
     "result": {
       "clone_rc": 0,
       "clone_secs": 8,
-      "pnpm_bootstrap": "curl -fsSL https://get.pnpm.io/install.sh | sh - rc=0 in 16s (run 20261027T091810Z); reused by the recorded run (now at ~/.local/share/pnpm/bin/pnpm)",
+      "pnpm_bootstrap": "curl -fsSL https://get.pnpm.io/install.sh | sh - rc=0 in 16s (run 20261027T091810Z); reused by the recorded run (now at ~/.local/share/pnpm/bin/pnpm) - the docs recipe needs the exported PNPM_HOME on a non-interactive shell, which the recipe covers by telling the user to reopen the shell",
       "install_rc": 0,
       "install_secs": 55,
       "build_rc": 0,
@@ -51,11 +54,25 @@
     "log": "/tmp/mab-leg-bunker3.out"
   },
   "verification_only_closes": {
-    "README-4": "grep -n DATABASE_PATH QUICK_START.md -> exit 1 no output; DB_PATH/./data/mafia.db identical in QUICK_START.md:291, apps/server/src/index.ts:45, .env.sample:99",
-    "README-5": "README.md:51 names DEFAULT_MODEL; grep MODEL README.md has no bare-MODEL-required claim",
-    "README-6": "grep 'run a benchmark' README.md -> exit 1; (apps/cli) tsx src/index.ts benchmark -> exit 0 prints 'Benchmark Report'",
-    "DOC-19": "pnpm test:counts exit 0 'Synced ... server 585, shared 418, cli 113, web 94 (total 1210)'; git diff --quiet README.md exit 0; README.md:29/417 carry per-package counts"
+    "README-4": "grep -n DATABASE_PATH QUICK_START.md -> exit 1 no output; DB_PATH/./data/mafia.db identical in QUICK_START.md:291, apps/server/src/index.ts:45, .env.sample:99 (premise fixed by 3f60920, 2026-10-21)",
+    "README-5": "README.md:51 names DEFAULT_MODEL; grep MODEL README.md has no bare-MODEL-required claim (4aa5083)",
+    "README-6": "grep 'run a benchmark' README.md -> exit 1; (apps/cli) tsx src/index.ts benchmark -> exit 0 prints 'Benchmark Report' (4aa5083)",
+    "DOC-19": "pnpm test:counts exit 0 'Synced ... server 585, shared 418, cli 113, web 94 (total 1210)'; git diff --quiet README.md exit 0; README.md:29/417 carry per-package counts (4aa5083)"
   },
-  "evidence": ["/tmp/mab-tick289-premise-evidence.txt", "/tmp/mab-leg-bunker3.out", "/tmp/mafia-test-counts.log"],
-  "results": {}
+  "evidence": ["/tmp/mab-tick289-premise-evidence.txt", "/tmp/mab-leg-bunker3.out", "/tmp/mafia-test-counts.log", ".gitreins/history/2026-10-27/8255e273"],
+  "results": {
+    "DF-MAFIA-AI-BENCHMARK-44": {
+      "status": "completed",
+      "worker_commit": "a7c06287fd852ea4fa5ae71cba002e141e75f356",
+      "verdict": ".gitreins/history/2026-10-27/8255e273 -> task_id DF-MAFIA-AI-BENCHMARK-44, commit a7c0628, tier2 PASS COMPLETE, tier1 FAIL (standing .gitreins/** gitleaks-scope secrets baseline; lint+tests green)",
+      "board_close_commit": "9870e58",
+      "gitreins_task": "completed then deleted (0 in-progress entries remain; stale DF-MAFIA-AI-BENCHMARK-47 entry also cleared)"
+    },
+    "verification_only": {
+      "README-4": "complete (fix 3f60920)",
+      "README-5": "complete (fix 4aa5083)",
+      "README-6": "complete (fix 4aa5083)",
+      "DOC-19": "complete (fix 4aa5083)"
+    }
+  }
 }
