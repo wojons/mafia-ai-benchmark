@@ -4,7 +4,14 @@ Get up and running in 5 minutes!
 
 ## Prerequisites
 
-- **Node.js** v20 or higher
+- **Node.js** v20 or higher — on a dev box use your package manager. Bare/minimal box (no node, no npm, no sudo — Debian containers, CI images): install an official LTS tarball into your home dir, e.g. v22 (see https://nodejs.org/dist/latest-v22.x/ for the current filename)
+  ```bash
+  curl -fsSL https://nodejs.org/dist/latest-v22.x/node-v22.23.4-linux-x64.tar.xz -o /tmp/node.tar.xz
+  mkdir -p "$HOME/.local/opt/node" && tar -xJf /tmp/node.tar.xz --strip-components=1 -C "$HOME/.local/opt/node"
+  export PATH="$HOME/.local/opt/node/bin:$PATH"   # add to ~/.bashrc / ~/.profile to keep it
+  rm /tmp/node.tar.xz
+  ```
+  Verify with `node -v` and `npm -v` (should print v22.x); without this step every later command fails with `node: command not found`. Users who prefer not to install Node locally can instead run the whole stack via the compose path (`docker compose up -d --build`), which needs only Docker.
 - **pnpm** — dev box with Node+npm: `npm install -g pnpm` (or `corepack enable pnpm`). Bare/minimal box (no sudo, no npm — Debian containers, CI images): install to your home dir with
   `curl -fsSL https://get.pnpm.io/install.sh | sh -` then reopen your shell (the installer appends the pnpm dir to your PATH profile). Verify with `pnpm --version`; without this step every later command fails with `pnpm: command not found`.
 - **OpenRouter API Key** (free at https://openrouter.ai/keys)
