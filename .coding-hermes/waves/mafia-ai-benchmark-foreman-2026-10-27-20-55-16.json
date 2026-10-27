@@ -1,0 +1,15 @@
+{
+  "tick": "mafia-ai-benchmark-foreman-2026-10-27-20-55-16",
+  "project": "mafia-ai-benchmark",
+  "budget": 12,
+  "mode": "serial-fallback",
+  "reason": "Four pending rows are independent but the project contract requires max one worker per tick.",
+  "tasks": [
+    {
+      "id": "README-8",
+      "worktree": "/home/kara/worktrees/mafia-ai-benchmark-README-8",
+      "branch": "wt/README-8",
+      "base": "82c19c9"
+    }
+  ]
+}
