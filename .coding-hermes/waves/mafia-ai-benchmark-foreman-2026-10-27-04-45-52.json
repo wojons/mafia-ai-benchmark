@@ -1,0 +1,19 @@
+{
+  "tick": "mafia-ai-benchmark-foreman-2026-10-27-04-45-52",
+  "project": "mafia-ai-benchmark",
+  "base": "origin/main",
+  "base_sha": "b8860fd8cd6e3353b7784a70f78ac51b1ab59536",
+  "budget": 10,
+  "mode": "serial-fallback",
+  "reason": "Only one dispatchable implementation row was selected; the remaining pending rows are lower priority, owner-gated, or unrelated documentation work.",
+  "workers": [
+    {
+      "task_id": "QA-MAFIA-AI-BENCHMARK-11-R2",
+      "worktree": "/home/kara/worktrees/mafia-ai-benchmark-QA-MAFIA-AI-BENCHMARK-11-R2",
+      "branch": "wt/QA-MAFIA-AI-BENCHMARK-11-R2",
+      "base": "origin/main",
+      "base_sha": "b8860fd8cd6e3353b7784a70f78ac51b1ab59536",
+      "status": "reserved"
+    }
+  ]
+}
