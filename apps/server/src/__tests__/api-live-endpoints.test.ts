@@ -29,9 +29,12 @@
  * repository is out of MAF-GAP-074's scope (test-resurrection row); the port
  * pins the deterministic 400/404 arms so the routes' wiring is still guarded.
  *
- * Like api.test.ts / health.test.ts, the REST endpoint tests need a LIVE
- * mafia server (probeMafiaServer; skipped cleanly otherwise) and honor
- * TEST_BASE_URL. The SSE block (MAF-FLAKE-001) is hermetic instead: it
+ * Like health.test.ts, the REST endpoint tests run against a LIVE mafia
+ * server ONLY when TEST_BASE_URL is set explicitly (probeMafiaServer +
+ * README-7 gate; skipped cleanly otherwise) and honor it as their base URL.
+ * Per README-7 the suite is read-only: the one arm that used to POST a real
+ * game now uses a synthetic id (the 400 it asserts is produced before any
+ * game lookup). The SSE block (MAF-FLAKE-001) is hermetic instead: it
  * boots the real games router on an ephemeral port and never touches
  * :3004 — see its header below.
  */
@@ -39,27 +42,24 @@ import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import net from 'node:net';
 import express from 'express';
 import type { Server } from 'http';
-import { BASE_URL, probeMafiaServer } from './helpers/mafia-server';
+import { BASE_URL, LIVE_INTEGRATION_ENABLED, probeMafiaServer } from './helpers/mafia-server';
 import { createGamesRouter } from '../routes/games.js';
 import { EventBus } from '../services/event-bus.js';
 import { createSqliteBackedRepository } from './services/mocks.js';
 import type { ServerContext } from '../index.js';
 
+// README-7: the live server was probed on the implicit :3004 fallback before,
+// so these tests ran (and one arm even created a real game) against whatever
+// compose stack was up. They now run ONLY when TEST_BASE_URL is set
+// explicitly — the operator pinned a specific server — plus the usual probe.
 const SERVER_PROBE = await probeMafiaServer(BASE_URL);
 
-if (!SERVER_PROBE.available) {
-  console.warn(`\n⚠️  Skipping live API integration tests: ${SERVER_PROBE.message}\n`);
-}
+const LIVE_API_ENABLED = LIVE_INTEGRATION_ENABLED && SERVER_PROBE.available;
 
-async function createGame(): Promise<string> {
-  const response = await fetch(`${BASE_URL}/api/v1/games`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ numPlayers: 5 }),
-  });
-  expect(response.status).toBe(201);
-  const body = await response.json();
-  return body.data.gameId as string;
+if (LIVE_INTEGRATION_ENABLED && !SERVER_PROBE.available) {
+  console.warn(`\n⚠️  Skipping live API integration tests: ${SERVER_PROBE.message}\n`);
+} else if (!LIVE_INTEGRATION_ENABLED) {
+  console.warn('\n⚠️  Skipping live API integration tests: TEST_BASE_URL is not set — live integration tests only run against an explicitly pinned server (see README.md "Running Tests"); the hermetic api.test.ts covers the same wire shapes offline.\n');
 }
 
 // ---------------------------------------------------------------------------
@@ -67,7 +67,7 @@ async function createGame(): Promise<string> {
 // testGamesList*, carried against current shapes)
 // ---------------------------------------------------------------------------
 
-describe.skipIf(!SERVER_PROBE.available)('API info endpoint', () => {
+describe.skipIf(!LIVE_API_ENABLED)('API info endpoint', () => {
   it('GET /api/v1 returns version and endpoint list', async () => {
     const response = await fetch(`${BASE_URL}/api/v1`);
     expect(response.status).toBe(200);
@@ -80,7 +80,7 @@ describe.skipIf(!SERVER_PROBE.available)('API info endpoint', () => {
   });
 });
 
-describe.skipIf(!SERVER_PROBE.available)('Games list filters', () => {
+describe.skipIf(!LIVE_API_ENABLED)('Games list filters', () => {
   it('GET /api/v1/games returns a games array in the success envelope', async () => {
     const response = await fetch(`${BASE_URL}/api/v1/games`);
     expect(response.status).toBe(200);
@@ -102,7 +102,7 @@ describe.skipIf(!SERVER_PROBE.available)('Games list filters', () => {
   });
 });
 
-describe.skipIf(!SERVER_PROBE.available)('Server statistics', () => {
+describe.skipIf(!LIVE_API_ENABLED)('Server statistics', () => {
   it('GET /api/v1/stats exposes the GameStats fields', async () => {
     const response = await fetch(`${BASE_URL}/api/v1/stats`);
     expect(response.status).toBe(200);
@@ -122,7 +122,7 @@ describe.skipIf(!SERVER_PROBE.available)('Server statistics', () => {
 // testModelPricing*, testCalculateCost* — pinned to current envelope shapes)
 // ---------------------------------------------------------------------------
 
-describe.skipIf(!SERVER_PROBE.available)('Models catalog', () => {
+describe.skipIf(!LIVE_API_ENABLED)('Models catalog', () => {
   it('GET /api/v1/models returns providers and a models array (object envelope)', async () => {
     const response = await fetch(`${BASE_URL}/api/v1/models`);
     expect(response.status).toBe(200);
@@ -137,7 +137,7 @@ describe.skipIf(!SERVER_PROBE.available)('Models catalog', () => {
   });
 });
 
-describe.skipIf(!SERVER_PROBE.available)('Model pricing', () => {
+describe.skipIf(!LIVE_API_ENABLED)('Model pricing', () => {
   it('returns numeric per-million pricing for a known model', async () => {
     const response = await fetch(`${BASE_URL}/api/v1/models/pricing?model=gpt-4o-mini`);
     expect(response.status).toBe(200);
@@ -172,7 +172,7 @@ describe.skipIf(!SERVER_PROBE.available)('Model pricing', () => {
   });
 });
 
-describe.skipIf(!SERVER_PROBE.available)('Cost calculation', () => {
+describe.skipIf(!LIVE_API_ENABLED)('Cost calculation', () => {
   it('computes the exact cost for a known model', async () => {
     // De-pinned from hardcoded rates (INT-CI-004): derive expected from the
     // served pricing endpoint so the test cannot fail when provider prices drift.
@@ -235,7 +235,7 @@ describe.skipIf(!SERVER_PROBE.available)('Cost calculation', () => {
 // pins the deterministic validation arms only.
 // ---------------------------------------------------------------------------
 
-describe.skipIf(!SERVER_PROBE.available)('Model assignment routes (validation arms)', () => {
+describe.skipIf(!LIVE_API_ENABLED)('Model assignment routes (validation arms)', () => {
   it('POST players/:i/model returns 404 for an unknown game', async () => {
     const response = await fetch(`${BASE_URL}/api/v1/games/nonexistent-game-xyz/players/0/model`, {
       method: 'POST',
@@ -248,8 +248,14 @@ describe.skipIf(!SERVER_PROBE.available)('Model assignment routes (validation ar
     expect(body.error).toContain('Game not found');
   });
 
+  // NOTE (README-7): the missing-provider 400 arm validates BEFORE any game
+  // lookup (routes/models.ts checks provider/model first), so no game needs
+  // to exist — the synthetic id keeps this suite, when it runs pinned,
+  // READ-ONLY against whatever server it is pointed at. It used to POST a
+  // real 5-player game just to have an id and mutated the live benchmark DB
+  // on every run.
   it('POST players/:i/model returns 400 when provider/model are missing', async () => {
-    const gameId = await createGame();
+    const gameId = 'synthetic-read-only-game';
     const response = await fetch(`${BASE_URL}/api/v1/games/${gameId}/players/0/model`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -465,7 +471,7 @@ describe('SSE event streaming (hermetic router on ephemeral port)', () => {
 // Error handling (orphan: test404NotFound, testInvalidJSON — same envelopes)
 // ---------------------------------------------------------------------------
 
-describe.skipIf(!SERVER_PROBE.available)('Error envelopes', () => {
+describe.skipIf(!LIVE_API_ENABLED)('Error envelopes', () => {
   it('GET /api/v1/nonexistent returns 404 NOT_FOUND code', async () => {
     const response = await fetch(`${BASE_URL}/api/v1/nonexistent`);
     expect(response.status).toBe(404);

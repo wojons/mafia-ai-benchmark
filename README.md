@@ -307,6 +307,27 @@ pnpm --filter @mafia/shared test:run   # Shared (418 tests)
 pnpm --filter @mafia/web test:run      # Web (90 tests)
 ```
 
+**Live-server integration tests (`TEST_BASE_URL`).** A handful of server
+suites (`health.test.ts`, `api-live-endpoints.test.ts`) run against a REAL
+mafia server. They run ONLY when `TEST_BASE_URL` is set explicitly, e.g.:
+
+```bash
+TEST_BASE_URL=http://localhost:3004 pnpm --filter @mafia/server test:run
+```
+
+The server suite itself (`api.test.ts` and friends) is hermetic: it boots the
+real games router on an ephemeral port over an in-memory SQLite database, so
+`pnpm --filter @mafia/server test:run` with no `TEST_BASE_URL` never touches a
+live server or writes to the benchmark database. CI starts its own disposable
+server and pins `TEST_BASE_URL` to it (see `.github/workflows/ci.yml`).
+
+> ⚠️ **Isolation warning**: never point tests at a compose stack whose data
+> matters. Live integration tests can write games to the server they run
+> against (a pinned `TEST_BASE_URL` arms real-game coverage that appends
+> games to that stack's SQLite volume), which moves `GET /api/v1/stats` and
+> the leaderboard. Use a scratch server, or make sure the stack's data is
+> disposable, before setting `TEST_BASE_URL`.
+
 **Test Coverage**: 1183 tests (418 shared, 562 server, 113 CLI, 90 web)
 
 **Test counts are generated — don't hand-edit them.** Every test count in this
