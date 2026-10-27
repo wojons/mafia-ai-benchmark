@@ -1,0 +1,20 @@
+{
+  "tick": "mafia-ai-benchmark-foreman-2026-10-27-20-23-57",
+  "project": "mafia-ai-benchmark",
+  "base": "371e8eb4985540a6111b9a0907b01d0c01aef455",
+  "budget": 7,
+  "mode": "serial-fallback",
+  "reason": "Project foreman contract limits this tick to one worker; README-9 is the highest-value independent pending implementation row.",
+  "tasks": [
+    {
+      "id": "README-9",
+      "worktree": "/home/kara/worktrees/mafia-ai-benchmark-README-9",
+      "branch": "wt/README-9",
+      "base": "origin/main",
+      "base_sha": "371e8eb4985540a6111b9a0907b01d0c01aef455",
+      "model": "gpt-5.6-terra",
+      "provider": "openai-codex",
+      "state": "prepared"
+    }
+  ]
+}
