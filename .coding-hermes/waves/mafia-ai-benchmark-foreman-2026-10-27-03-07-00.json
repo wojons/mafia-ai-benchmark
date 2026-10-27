@@ -1,0 +1,21 @@
+{
+  "tick": "mafia-ai-benchmark-foreman-2026-10-27-03-07-00",
+  "project": "mafia-ai-benchmark",
+  "base": "origin/main",
+  "base_sha": "cfcae491ad4bc624a5ebe424449be4a797b75221",
+  "budget": 7,
+  "mode": "serial-fallback",
+  "reason": "Project foreman policy allows one worker per tick; the highest-value implementation row is DF-MAFIA-AI-BENCHMARK-41-R2.",
+  "workers": [
+    {
+      "task_id": "DF-MAFIA-AI-BENCHMARK-41-R2",
+      "worktree": "/home/kara/worktrees/mafia-ai-benchmark-DF-MAFIA-AI-BENCHMARK-41-R2",
+      "branch": "wt/DF-MAFIA-AI-BENCHMARK-41-R2",
+      "base_sha": "cfca491ad4bc624a5ebe424449be4a797b75221",
+      "brief": "/tmp/maf-foreman-2026-10-27-03-07-00-DF-MAFIA-AI-BENCHMARK-41-R2-brief.txt",
+      "model": "gpt-5.6-luna",
+      "provider": "openai-codex",
+      "status": "reserved"
+    }
+  ]
+}
