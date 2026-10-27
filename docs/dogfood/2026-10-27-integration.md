@@ -109,3 +109,98 @@ Installability is **proven** on a fresh Debian user at HEAD: install 14.2 s, bui
 - **No benchmark campaign re-driven** (real LLM spend, ~4 min/run): the money-bearing path was verified on 2026-10-20/23 and its report/compare/summary surfaces were re-read live here instead.
 - **No container restart for a cold-cache A/B**: 12 persisted IN_PROGRESS rows were present and a recreate is the known game-killer (DF-47) — the cold numbers were taken from the product's own recreate at 21:15:05Z instead.
 - **No scheduler state touched** (read-only lane): the foreman was not woken.
+
+---
+
+## Resumed delivery, same tick (`mafia-ai-benchmark-dogfood-2026-10-27-21-34-02`) — addendum 22:25Z
+
+**Split disclosure.** This tick fired twice. The earlier delivery of the SAME tick
+label landed the three rows (`DF-MAFIA-AI-BENCHMARK-23-R3`, `-39-R3`, `-49`), this
+report, the run-history entries, the `skills/mafia-usage/SKILL.md` correction and the
+install-leg cell grades in commits `6871b1d`, `d7e9e67` and `b0d87b9`. Those legs are
+**verified here, not repeated**: `origin/main` == `b0d87b9` at 22:20Z before this
+append, each of the three row ids appears exactly once in the committed blob, and the
+ghost population, the seat-caveat payload and the retired `report omits mockGames`
+claim all reproduce as that delivery wrote them. This addendum carries **only the
+delta** the earlier delivery's probe design could not see.
+
+### Delta 1 — two new rows (both defects are on surfaces the first pass never drove)
+
+| row | what a user hits | evidence class |
+|---|---|---|
+| `DF-MAFIA-AI-BENCHMARK-32-R2` (P3, recurrence of `-32`) | the persistent app header prints **0 / 0** ("0 active, 0 total") on every route while the body directly beneath it prints the real totals | live DOM read on `/games`, `/stats`, `/watch/<id>` + a dead-wire grep |
+| `PERF-MAFIA-5` (P3) | `/api/v1/benchmark/compare` **0.28 s warm → ~4 s per call while a game is live**, and the synchronous rebuild stalls every concurrent request | same-host warm-vs-live A/B + server log + browser resource timings |
+
+`DF-MAFIA-AI-BENCHMARK-32-R2` — `Header.tsx:51,54` renders `{stats.activeGames}` /
+`{stats.totalGames}` from `useGameStore().stats`; the slice's only writer is
+`updateStats` (`gameStore.ts:349`) and `grep -rn updateStats apps/web/src` finds no
+production caller (type at `:119`, impl at `:349`, test at
+`__tests__/gameStore.test.ts:184`). `-32`'s fix wired `headlineStats` for the Games
+tab (`gameStore.ts:228-255`, rendered `GameList.tsx:253-269`) and left this second
+counter orphaned. Measured on screen at `1c3e8f7`: `/stats` body
+`5078 Total Games / 4389 Completed / 88 Mafia Wins / 4301 Town Wins` with the chrome
+reading `0 / 0` in the same DOM; `/games` body `5077 Total / 12 Active / 0 Setup /
+4389 Completed`, chrome `0 / 0`.
+
+`PERF-MAFIA-5` — the earlier delivery's own Step 2b section measured the quiescent
+corpus (compare 0.32-0.35 s warm) and the cold process (5.8 s once) and concluded
+"one hit per process, not a recurring per-request cost", filing nothing. The arm it
+never varied is the product's normal state, **a live game**, and that arm inverts the
+conclusion. One host, one corpus, minutes apart:
+
+- game live (a 10-player game I created from the dashboard; events 126 → 129 in 5 s):
+  consecutive `compare` calls **4.056 s / 3.839 s / 3.748 s** — the memo never hits;
+- same command quiescent (that game ENDED): **4.239 s** once, then **0.284 / 0.265 /
+  0.276 s**; same shape on `/benchmark/report` (**4.593 s** then 0.234 s);
+- four requests fired together, as the Stats tab does: `compare 4.186 s`,
+  `stats 4.733 s`, `matchups 4.775 s`, `games?limit=50 4.196 s` — while that same
+  `games?limit=50` alone is **0.006 s**;
+- the server's own log agrees (`GET /api/v1/benchmark/compare - 200 (4769 ms)`,
+  `... - 304 (4103 ms)`), and a cold browser `/stats` paid compare **4969 ms**.
+Mechanism: `computeReportWatermark` (`stats-collector/index.ts:93-145`) fingerprints
+`(SELECT COUNT(*) FROM events)`, so every in-game event insert busts the cache; the
+rebuild is synchronous and starves the event loop. Host loadavg 5.3-17 throughout, so
+every number above is an upper bound.
+
+### Delta 2 — the `ui-probe` FAIL is HARNESS command shape, and its log DOES exist
+
+The install-leg entry (`b0d87b9`) left the `ui-probe` FAIL UNVERIFIED and unfiled
+because "no `ui*.log` was written and the agent is destroyed". That premise is
+incorrect: the cell's log **was** written and was still on the agent when this
+delivery polled it (agent `cfa91552`, `~/qa-logs-2224830/ui.log`, 168 B, mtime 22:00Z),
+and it was harvested before teardown. Its content:
+
+```
+> mafia-ai-benchmark@1.1.0 dev
+> turbo run dev --port 3111
+
+ ERROR  unexpected argument '--port' found
+
+Usage: turbo run [FLAGS]
+
+For more information, try '--help'.
+```
+
+So the probe is neither a shared-host port collision nor a recurrence of
+`QA-MAFIA-AI-BENCHMARK-11-R2`: the harness launches the UI as
+`turbo run dev --port 3111` against a repo whose `dev` script **is** `turbo run dev`,
+and turbo rejects `--port` as its own unknown flag, so no dev server is ever started
+and the cell observes `http=000`. **HARNESS-blocked, not a product defect** — no
+product row filed. (Correct harness shape for a turbo monorepo would be
+`pnpm --filter @mafia/web dev -- --port 3111` or `turbo run dev -- --port 3111`.)
+
+### Teardown census (re-verified, not asserted)
+
+`bunker info cfa91552` → `not_found: agent "cfa91552" not found`; `bunker list` contains
+**0** matches for `cfa91552`. The re-collect was idempotent: `bunker-qa.sh collect`
+reported `COLLECTED agent=cfa91552 rows=22` and its destroy leg reported a late failure
+because the agent was already gone, which its own output confirms
+("teardown recovered (destroy landed late)"). No residue from this run.
+
+### Not done on purpose (resumed delivery)
+
+- The three legs already verified above were **not** re-driven (no second ghost probe
+  battery, no second compare/report identity check, no second act/CI attempt).
+- No new install battery was spawned: at the same HEAD with unchanged install docs a
+  re-spawn measures the host, not the product.
+- No scheduler state touched; the foreman was not woken (read-only lane).
