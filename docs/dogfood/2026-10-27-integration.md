@@ -77,9 +77,32 @@ Browser-side (headless Chrome, cold `/stats`): **5 API calls** (`/games` ×2, `/
 3. The Games page's card field `players` disagrees with the store: cards for the 12 ghosts print `1 Players` while the store has **0 `players` rows** for every one of them (config says `numPlayers: 5`). Folded into finding 1 as evidence.
 4. Third-party noise: 3 unrelated bunker agents and many unrelated containers on the box; loadavg 23 during every measurement.
 
-## Install leg (fresh machine, `bunker-qa.sh`)
+## Install leg (fresh machine, `bunker-qa.sh`) — PASS for install/build/suite, two cells UNVERIFIED
 
-`bunker-qa.sh launch /home/kara/wojons/mafia-ai-benchmark` on `bunker-mvp` (bunkerd 0.2.1, ONLINE, 4/50 agents, disk 39%): fence-check `35 intended substitutions / 0 violations`, `agent=cfa91552`, `QA HEAD=1c3e8f7 (ff-only ok)`, evidence `/tmp/bunker-qa-evidence-20261027T214911Z-2065047.jsonl`, cells queued (`repo-head OK`, `launch OK`, `fresh-install` sync + `upgrade-prep` v1.0.0 tree started). Battery runs detached on the agent; this lane did not spawn a second leg and did not touch the designated-host SKIPPED case already filed as `DF-MAFIA-AI-BENCHMARK-44`.
+`bunker-qa.sh launch /home/kara/wojons/mafia-ai-benchmark` on `bunker-mvp` (bunkerd 0.2.1, ONLINE, disk 39%): fence-check `35 intended substitutions / 0 violations`, `agent=cfa91552`, `QA HEAD=1c3e8f7 (ff-only ok)`, `ttl 4h`, evidence `/tmp/bunker-qa-evidence-20261027T214911Z-2065047.jsonl`. Battery ran ~70 min detached; `collect` pulled **22 rows** and destroyed the agent.
+
+| cell | grade | evidence |
+|---|---|---|
+| toolchain-bootstrap | OK | node v22.22.3, go 1.27.3, gcc/g++ wrappers, make 4.3, jq 1.8.2, compose+buildx |
+| **fresh-install** | **OK** | `pnpm install --frozen-lockfile` rc=0, 579 packages in **14.2s**, supply-chain policy check on 649 lockfile entries passed, `better-sqlite3` prebuild OK |
+| **ci-pass (native suite)** | **OK** | "native suite PASS" — the suite itself is green on the fresh user |
+| **upgrade** | **OK** | previous release `v1.0.0` tree (via `git archive`) → HEAD reinstall clean |
+| ci-act | **UNVERIFIED** | `act` rc=1. Failure A is plainly harness (`ENOENT` copying node headers in the act toolcache during Setup Node.js); failure B is `MODULE_NOT_FOUND './packages/shared/src/agents/response-parser'` from the root `game-engine.js:698` in two server suites |
+| ui-probe | FAIL | `UI not serving (http=000, landed: http://127.0.0.1:3111/): For more information, try '--help'.` |
+| docker-deploy, chaos-shutdown | SKIPPED | safety gate: controller is the live Hermes host |
+| chaos-corruption | N/A | no db/state files in repo |
+| chaos-disconnect | INFO | passes with network cut |
+| chaos-resource | INFO | OOM under the 3 GiB cap (known Wasm/OOM shape, not a product signal) |
+| chaos-errorpath | INFO | no start command detected — unverified |
+
+**Failure B triaged, NOT filed as a product defect.** Control arm on a clone-equivalent tree (`git archive HEAD | tar -x` outside the repo, clean `pnpm install --frozen-lockfile` + `pnpm build`):
+`require('<fresh>/packages/shared/src/agents/response-parser')` → **REQUIRE-OK**; `require('<fresh>/game-engine.js')` → **ENGINE-REQUIRE-OK**; the two red suites → **28/28 PASS** in 4.5 s. The same file is present in the agent's synced tree (`response-parser.js`, 9301 B, `git status` clean). Inference (labelled): the four `act` matrix shards run **concurrently against one mounted tree** on a shared host, so a shard test step can observe a half-written tree — the same class the skill warns about for shared bunker agents. Evidence: `/tmp/dogfood-mab-01/qa-pull/ci.log`, `/tmp/dogfood-mab-01/fresh-tree.log`.
+
+**ui-probe FAIL left UNVERIFIED, not filed.** Two candidate causes this tick could not discriminate: (a) `bunker-mvp` shares the host loopback/port space with three other live agents, so `:3111` may have been bound elsewhere (the shared-net hazard), or (b) the documented dev-start defect already closed as `QA-MAFIA-AI-BENCHMARK-11-R2`, in which case this is a recurrence. The cell's detail is one line, no `ui*.log` was written, and the agent is destroyed — so the honest grade is UNVERIFIED, with the reproduce command for the QA lane: `bash ~/.hermes/scripts/bunker-qa.sh run <repo> --server bunker-mvp` with no other battery alive on that host.
+
+## Install verdict
+
+Installability is **proven** on a fresh Debian user at HEAD: install 14.2 s, build green, native suite green, upgrade-from-release green, teardown clean (agent `cfa91552` destroyed by `collect`; no agent of this run remains). The act-CI and UI-probe cells are explicitly **UNVERIFIED**, not converted to PASS.
 
 ## Not done on purpose
 
