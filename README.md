@@ -185,6 +185,7 @@ pnpm --filter @mafia/cli dev -- run-game --players 7 --model openai/gpt-4o --aut
 ### Persistent Config Commands
 
 The CLI stores configuration in `mafia.config.json` in the current directory.
+This file is gitignored; `init` (or `config set`) creates it.
 Initialize it non-interactively before using the config commands:
 
 ```bash
