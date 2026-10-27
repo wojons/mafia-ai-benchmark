@@ -1,6 +1,6 @@
 ---
 name: mafia-usage
-description: How to USE the Mafia AI Benchmark (mafia-ai-benchmark) for real — working HTTP API :3004, web :5174, CLI mafiactl, verified commands, benchmark/report caveats, current ghost-game traps, and where the real game loop lives. Load this before running or evaluating anything in this repo. Last verified: 2026-10-23 dogfood run.
+description: How to USE the Mafia AI Benchmark (mafia-ai-benchmark) for real — working HTTP API :3004, web :5174, CLI mafiactl, verified commands, benchmark/report caveats, current ghost-game traps, and where the real game loop lives. Load this before running or evaluating anything in this repo. Last verified: 2026-10-27 dogfood run.
 license: MIT
 compatibility: opencode
 metadata:
@@ -28,10 +28,12 @@ recording work on the current stack. The historical defects below are closed:
   documented nested `config.numPlayers` shape.
 
 Current operational caveats matter more than those old reports: persisted
-`IN_PROGRESS` rows can be corpses after a restart, report summary population
-needs an explicit mock-game census, and blended model win rates are dominated
-by seat and player-count assignment. The live board is in
-`.coding-hermes/board/tasks.jsonl`.
+`IN_PROGRESS` rows can be corpses after a restart (12 such rows were served as
+"Active" on 2026-10-27), and blended model win rates are dominated by seat and
+player-count assignment. At HEAD the report summary DOES declare its whole
+population (`mockGames` plus a `population` object whose buckets sum to
+`totalGames`), so the old "the report hides the mock count" note is retired.
+The live board is in `.coding-hermes/board/tasks.jsonl`.
 
 ## The truth in one paragraph
 
@@ -41,10 +43,11 @@ real 5–10-agent Mafia games with live LLM calls. The CLI built binary works
 end-to-end for `run-game`, `watch-game`, and pairwise `benchmark` runs. The
 web dashboard serves the game list, create flow, and `/watch/:gameId`
 spectator route; the watcher replays recorded events and can receive live
-frames. `/api/v1/benchmark/report` contains useful per-model results, but its
-summary does not state the full mock-game population; compare publishes that
-population separately. Never treat a blended win rate as model skill without
-splitting it by role and player count.
+frames. `/api/v1/benchmark/report` contains useful per-model results and its
+summary declares the whole population (`totalGames`, `completedGames`,
+`mockGames`, `inProgress`, `failedGames`, `cancelledGames`, plus a `population`
+object), which compare repeats as `mockGames`. Never treat a blended win rate
+as model skill without splitting it by role and player count.
 
 ## Entry points
 
@@ -130,10 +133,18 @@ statistics tables. Do not use those rows as model evidence.
   or `/api/v1/benchmark/report` by `rolePerformance` and `byNumPlayers`.
   A corpus dominated by five-player games or favorable seats can make a weak
   model look excellent.
-- **The report and compare population surfaces differ.** The report summary
-  publishes completed/failed totals but omits the mock-game count; compare
-  publishes `mockGames`. Account for both before claiming that totals explain
-  the database census.
+- **Both population surfaces declare the full census now.** The report summary
+  publishes `completedGames`/`failedGames` side by side with `mockGames` and a
+  `population` object; compare publishes `mockGames`. Check arithmetically
+  (`totalGames == completedGames + mockGames + inProgress + failedGames +
+  cancelledGames`) instead of assuming a surface hides a bucket.
+- **The seat caveat is not automatic.** The dashboard's "Headline win rate
+  reflects seat assignment" note renders only when a single player-count bucket
+  is at least 90% of that model's `gamesPlayed`, so a row whose buckets do not
+  sum to `gamesPlayed` (measured 2026-10-27: `openai/gpt-4o-mini` 3729 of 4382,
+  653 games uncovered) silently loses the caveat while its 5-player seats still
+  win 100%. Compute `byNumPlayers` yourself; read a missing note as "unknown",
+  never as "not seat-dominated".
 - **`IN_PROGRESS` is not proof that a game is running.** This is the ghost
   `IN_PROGRESS` trap: persisted rows can survive a container restart without
   a live owner, and `/watch/<id>` may render a LIVE badge over a frozen
@@ -141,7 +152,11 @@ statistics tables. Do not use those rows as model evidence.
   `GET /api/v1/games?status=IN_PROGRESS` reads persisted rows. Before calling
   a game live, poll `GET /api/v1/games/<id>/state` more than once and confirm
   that `turnNumber` advances and new events arrive. Reconciliation log counts
-  benchmark runs, not every persisted game row.
+  benchmark runs, not every persisted game row, and its per-start line
+  (`0 retired, 0 live, 12 recent, 12 inspected` on 2026-10-27) labels young
+  corpses "recent" rather than retiring or proving them live: 12 rows with zero
+  `players` rows, zero `token_usage`, no `benchmark_games` row and a frozen
+  `/state` (`turnNumber 8` twice, 20 s apart) were still served as Active.
 - **The documented nested create shape is supported.**
   `POST /api/v1/games` with `{"config":{"numPlayers":10}}` resolves and
   validates the nested value. MAF-REV-001 covers the documented request
@@ -190,7 +205,7 @@ Answer: the core game loop, API, CLI, web create flow, spectator history, live
 WS delivery, elimination events, and cost recording work end-to-end. The
 closed defects DF-MAFIA-AI-BENCHMARK-10, -11, -34, and -35 must not be
 reported as open. Qualify any broader verdict with the current caveats:
-mock-game contamination, ghost persisted `IN_PROGRESS` rows, incomplete
-report population disclosure, and seat/player-count confounding in blended
-win rates. Use `docs/dogfood/2026-10-23-integration.md` and the live board for
-current evidence; do not infer runtime truth from a stale skill copy.
+mock-game contamination, ghost persisted `IN_PROGRESS` rows (12 frozen rows
+were served as "12 Active" on 2026-10-27), and seat/player-count confounding in
+blended win rates. Use `docs/dogfood/2026-10-27-integration.md` and the live
+board for current evidence; do not infer runtime truth from a stale skill copy.
