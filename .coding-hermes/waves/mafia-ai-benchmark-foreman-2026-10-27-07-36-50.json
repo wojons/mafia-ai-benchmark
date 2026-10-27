@@ -1,0 +1,25 @@
+{
+  "wave_id": "wave-2026-10-27-07-36-50",
+  "tick": "mafia-ai-benchmark-foreman-2026-10-27-07-36-50",
+  "created_at": "2026-10-27T08:12:00Z",
+  "status": "complete",
+  "budget": 12,
+  "mode": "serial-fallback",
+  "block": "DOC-20",
+  "reason": "DOC-20 block had one ready row (README-1-R2); an existing worktree supplied the implementation, so no new worker was dispatched.",
+  "tasks": ["README-1-R2"],
+  "workers": [
+    {
+      "task_id": "README-1-R2",
+      "worktree": "/home/kara/worktrees/mafia-ai-benchmark-README-1-R2",
+      "branch": "wt/README-1-R2",
+      "base": "4fe6309b9997f66a46821fb71613986d74b51642",
+      "worker_commit": "4aa5083b03e4f8e0bdae66db4904c7571d51925e",
+      "merge_commit": "19e7a0834f0c0b347af5f44bea40539b622627f1",
+      "verdict": ".gitreins/history/2026-10-27/bd9151cc (tier2 PASS; tier1 standing sensitive-path baseline)",
+      "status": "merged"
+    }
+  ],
+  "off_by_one": "discover javascript-documentation-test-count-sync not_found; no non-trivial debug submission",
+  "finished_at": "2026-10-27T08:12:00Z"
+}
