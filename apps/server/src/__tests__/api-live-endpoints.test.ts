@@ -134,7 +134,9 @@ describe.skipIf(!LIVE_API_ENABLED)('Models catalog', () => {
     expect(body.data.providers.length).toBeGreaterThan(0);
     expect(Array.isArray(body.data.models)).toBe(true);
     expect(typeof body.data.totalCached).toBe('number');
-  });
+    // This live endpoint performs external metadata/provider work; keep the
+    // longer budget scoped to this network-backed test rather than the suite.
+  }, 15_000);
 });
 
 describe.skipIf(!LIVE_API_ENABLED)('Model pricing', () => {
