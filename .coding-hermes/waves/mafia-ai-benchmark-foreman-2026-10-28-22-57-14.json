@@ -1,0 +1,24 @@
+{
+  "tick": "mafia-ai-benchmark-foreman-2026-10-28-22-57-14",
+  "project": "mafia-ai-benchmark",
+  "base": "origin/main",
+  "base_sha": "1630a19",
+  "wave_budget": 12,
+  "wave_size": 0,
+  "mode": "serial-fallback",
+  "selection_reason": "Only one actionable implementation row: INT-CI-005; no wave composition.",
+  "considered_rows": ["INT-CI-005"],
+  "rows_dispatched": ["INT-CI-005"],
+  "workers": [
+    {
+      "task_id": "INT-CI-005",
+      "worktree": "/home/kara/worktrees/mafia-ai-benchmark-INT-CI-005",
+      "branch": "wt/INT-CI-005",
+      "base_sha": "1630a19",
+      "brief": "/tmp/mafia-int-ci-005-brief.txt",
+      "disposition": "dispatched"
+    }
+  ],
+  "off_by_one": "discover vitest-api-timeout not_found; corpus grep found related vitest timeout/load answers 1472, 2052, 1477; re-verify mechanism in worker",
+  "finished_at": null
+}
