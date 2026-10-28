@@ -1,4 +1,7 @@
-// ch:trace row=DF-MAFIA-AI-BENCHMARK-23-R3 spec=none:bugfix-reconciler wave=mafia-ai-benchmark-foreman-2026-10-28-10-22-22.json#DF-MAFIA-AI-BENCHMARK-23-R3 test=apps/server/src/__tests__/services/game-lifecycle-never-started.test.ts::retires a never-started IN_PROGRESS ghost with no live engine and no players evidence=commit commit=none:pending-foreman-trace
+// ch:trace row=DF-MAFIA-AI-BENCHMARK-23-R3 spec=none:bugfix-reconciler wave=mafia-ai-benchmark-foreman-2026-10-28-10-22-22.json#DF-MAFIA-AI-BENCHMARK-23-R3 test=apps/server/src/__tests__/services/game-lifecycle-never-started.test.ts::retires a never-started IN_PROGRESS ghost with no live engine and no players evidence=commit commit=1d828b6c74e1f090938c88fc02364ff4571df450
+// STATUS: complete
+// TIER: T2 — reconciler retires never-started IN_PROGRESS ghosts (started_at NULL + zero players + unowned) to CANCELLED with GAME_CANCELLED reason event; committed test suite 4/4 pass + full server suite 573 passed | 19 skipped on the implementation commit (vitest run exit 0, observed foreman-side post-merge).
+// EVIDENCE: commit 1d828b6c74e1f090938c88fc02364ff4571df450 (main, pushed 2026-10-28); tests game-lifecycle-never-started.test.ts x4 green; gitreins verdict 19ebd805 tier2 functional criteria all pass (trace-binding artifact only).
 import { describe, expect, it } from 'vitest';
 import express from 'express';
 import type { Server } from 'node:http';

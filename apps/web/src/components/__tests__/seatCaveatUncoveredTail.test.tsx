@@ -1,4 +1,7 @@
-// ch:trace row=DF-MAFIA-AI-BENCHMARK-39-R3 spec=none:leaderboard-seat-caveat wave=mafia-ai-benchmark-foreman-2026-10-28-10-22-22.json#DF-MAFIA-AI-BENCHMARK-39-R3 test=apps/web/src/components/__tests__/seatCaveatUncoveredTail.test.tsx::mini-shaped row with uncovered tail renders the seat caveat evidence=commit commit=none:pending-foreman-trace
+// ch:trace row=DF-MAFIA-AI-BENCHMARK-39-R3 spec=none:leaderboard-seat-caveat wave=mafia-ai-benchmark-foreman-2026-10-28-10-22-22.json#DF-MAFIA-AI-BENCHMARK-39-R3 test=apps/web/src/components/__tests__/seatCaveatUncoveredTail.test.tsx::mini-shaped row with uncovered tail renders the seat caveat evidence=commit commit=21387374a4b3cb7459ce76a206d99682578397ed
+// STATUS: complete
+// TIER: T2 — compare payload declares per-row gamesWithoutPlayerCount (usage-only tail, measured 3725 players-rows vs 4382 gamesPlayed); seatCaveatFor renders the note on dominant-share>=0.9 OR declared remainder>0, naming the model per row; apps/web vitest 100/100 + apps/server vitest 573 passed | 19 skipped on the implementation commit (observed foreman-side post-rebase).
+// EVIDENCE: commit 21387374a4b3cb7459ce76a206d99682578397ed (main, pushed 2026-10-28); seatCaveatUncoveredTail.test.tsx x6 green + benchmark-model-breakdown.test.ts x3 green.
 /**
  * DF-MAFIA-AI-BENCHMARK-39-R3 — the seat caveat was suppressed exactly on
  * the row that needed it.
