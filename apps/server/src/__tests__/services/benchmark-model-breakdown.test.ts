@@ -372,6 +372,152 @@ describe('DF-MAFIA-AI-BENCHMARK-39 — per-role + per-numPlayers breakdown on se
   });
 });
 
+// ======================================================================
+// 5. DF-39-R3 — reconcile-or-declare contract (the seat-assignment
+//    caveat was suppressed exactly on the row that needed it).
+//
+// Live store truth measured 2026-10-28 on GET /api/v1/benchmark/compare:
+// openai/gpt-4o-mini served gamesPlayed 4382 while its byNumPlayers
+// buckets summed to 3729 — 653 games (14.9%) counted but uncovered. The
+// cause is NOT a spelling/join bug: getModelComparison() merge-max keeps
+// the token_usage count (4382 ENDED games on the live store vs 3725
+// distinct players-rows games), while byNumPlayers can only split games
+// that have players rows (seat data). Legacy token_usage-only games are
+// therefore genuinely seat-unattributable, and the honest fix is to
+// DECLARE the remainder per row rather than pretend the buckets
+// reconcile.
+// ======================================================================
+
+describe('DF-39-R3 — compare/report declare gamesWithoutPlayerCount reconciling buckets with gamesPlayed', () => {
+  let repo: FakeRepo;
+  let server: Server;
+  let baseUrl: string;
+
+  beforeEach(async () => {
+    repo = createSqliteBackedRepository() as unknown as FakeRepo;
+    seedFivePlayerCorpus(repo);
+    // The tail that produced the live 653 gap: ENDED games with
+    // token_usage rows for gpt-4o-mini but NO players rows at all.
+    for (let i = 0; i < 4; i++) {
+      repo.seedGame({ id: `g39r3-${i}`, status: 'ENDED', numPlayers: 5, winner: 'TOWN' });
+      repo.insertTokenUsage({
+        gameId: `g39r3-${i}`, playerId: 'ALL', turnNumber: 1,
+        provider: 'openai', model: 'gpt-4o-mini',
+        promptTokens: 500, completionTokens: 500, totalTokens: 1000, cost: 0.01,
+      });
+    }
+
+    const statsCollector = new StatsCollector(repo as never);
+    const app = express();
+    app.use(express.json());
+    app.use(
+      '/',
+      createBenchmarkRouter({
+        benchmarkRunner: {} as never,
+        statsCollector,
+      } as never),
+    );
+
+    await new Promise<void>((resolve) => {
+      server = app.listen(0, '127.0.0.1', () => resolve());
+    });
+    const address = server.address() as { port: number };
+    baseUrl = `http://127.0.0.1:${address.port}`;
+  });
+
+  afterEach(async () => {
+    if (server) {
+      await new Promise<void>((resolve, reject) => {
+        server.close((err) => (err ? reject(err) : resolve()));
+      });
+    }
+    repo.db.close();
+  });
+
+  async function fetchData(path: string): Promise<any> {
+    const response = await fetch(`${baseUrl}${path}`);
+    expect(response.status).toBe(200);
+    const body = await response.json();
+    expect(body.success).toBe(true);
+    return body.data;
+  }
+
+  it('every served compare row declares buckets + remainder == gamesPlayed', async () => {
+    const data = await fetchData('/api/v1/benchmark/compare');
+    const rows = data.models as Array<
+      ModelRow & { gamesWithoutPlayerCount: number }
+    >;
+
+    expect(rows.length).toBeGreaterThan(0);
+    for (const row of rows) {
+      // The field itself must be present and well-formed — no silent
+      // absence on served rows (an unexplained null is junk).
+      expect(typeof row.gamesWithoutPlayerCount).toBe('number');
+      expect(row.gamesWithoutPlayerCount).toBeGreaterThanOrEqual(0);
+      const bucketSum = Object.values(row.byNumPlayers ?? {}).reduce(
+        (s, c) => s + c.gamesPlayed,
+        0,
+      );
+      expect(
+        bucketSum + row.gamesWithoutPlayerCount,
+        `${row.provider}/${row.model} bucket sum + remainder == gamesPlayed`,
+      ).toBe(row.gamesPlayed);
+    }
+  });
+
+  it('the usage-only tail is declared on the exact row it belongs to (mini-shaped)', async () => {
+    const data = await fetchData('/api/v1/benchmark/compare');
+    const rows = data.models as Array<
+      ModelRow & { gamesWithoutPlayerCount: number }
+    >;
+    const mini = rows.find((r) => r.provider === 'openai' && r.model === 'gpt-4o-mini');
+    expect(mini).toBeDefined();
+    // The usage-only tail is declared, not vanished into the blended
+    // count. Seeded: 3 players-backed games (g39-1/2/3) + 4 usage-only
+    // games -> merge-max gamesPlayed 4 (usage source), seat buckets
+    // cover the 3 players games, remainder names the uncovered 1.
+    // (Live-store analogue: 3729 players games + usage-only tail ->
+    // gamesPlayed 4382, remainder 653.)
+    expect(mini!.gamesPlayed).toBe(4);
+    expect(mini!.gamesWithoutPlayerCount).toBe(1);
+    // And the seat-covered part still reconciles with its own claim.
+    const bucketSum = Object.values(mini!.byNumPlayers).reduce(
+      (s, c) => s + c.gamesPlayed,
+      0,
+    );
+    expect(bucketSum).toBe(mini!.gamesPlayed - mini!.gamesWithoutPlayerCount);
+  });
+
+  it('report.modelPerformance carries the SAME declared remainder (shape parity)', async () => {
+    const [report, compare] = await Promise.all([
+      fetchData('/api/v1/benchmark/report'),
+      fetchData('/api/v1/benchmark/compare'),
+    ]);
+    const reportRows = report.modelPerformance as Array<
+      ModelRow & { gamesWithoutPlayerCount: number }
+    >;
+    const compareRows = compare.models as Array<
+      ModelRow & { gamesWithoutPlayerCount: number }
+    >;
+
+    const miniReport = reportRows.find((r) => r.model === 'gpt-4o-mini');
+    const miniCompare = compareRows.find((r) => r.model === 'gpt-4o-mini');
+    expect(miniReport).toBeDefined();
+    expect(miniCompare).toBeDefined();
+    expect(miniReport!.gamesWithoutPlayerCount).toBe(
+      miniCompare!.gamesWithoutPlayerCount,
+    );
+    // And the same reconcile identity holds on the report surface.
+    const bucketSum = Object.values(miniReport!.byNumPlayers).reduce(
+      (s, c) => s + c.gamesPlayed,
+      0,
+    );
+    expect(
+      bucketSum + miniReport!.gamesWithoutPlayerCount,
+    ).toBe(miniReport!.gamesPlayed);
+  });
+});
+
 /**
  * Seed a 5-player corpus mirroring the live-store shape the row was
  * filed against: mafia-side losses in 5p games (the 3.7% side) plus

@@ -26,6 +26,7 @@ import {
   getModelComparison,
   getCompareReport,
   getModelPerformanceBreakdown,
+  countGamesWithoutPlayerRow,
   generateRecommendations,
   partitionModelRows,
 } from './models.js';
@@ -1102,6 +1103,13 @@ export class StatsCollector {
         const breakdown = breakdownMap.get(`${row.provider}/${row.model}`);
         return {
           ...row,
+          // DF-39-R3: declare how many served games the seat split cannot
+          // describe (same helper compare uses) so both benchmark
+          // endpoints stay shape-parity on the remainder.
+          gamesWithoutPlayerCount: countGamesWithoutPlayerRow(
+            row.gamesPlayed,
+            breakdown?.byNumPlayers,
+          ),
           rolePerformance: breakdown?.rolePerformance ?? {},
           byNumPlayers: breakdown?.byNumPlayers ?? {},
         };

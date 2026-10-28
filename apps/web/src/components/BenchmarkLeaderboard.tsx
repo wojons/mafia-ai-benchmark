@@ -15,6 +15,14 @@ export interface CompareModelRow {
   avgTokensPerGame?: number;
   avgCostPerGame?: number;
   avgLatency?: number;
+  /**
+   * DF-39-R3: games the server counted in gamesPlayed but which carry no
+   * seat data (no players rows — e.g. legacy token_usage-only games), so
+   * they cannot appear in any byNumPlayers bucket. Sum(buckets) +
+   * gamesWithoutPlayerCount reconciles with gamesPlayed. Optional so a
+   * payload from an older backend still renders.
+   */
+  gamesWithoutPlayerCount?: number;
   rolePerformance?: Record<string, CompareBreakdownEntry>;
   byNumPlayers?: Record<string, CompareBreakdownEntry>;
 }
@@ -95,24 +103,71 @@ function formatPlayerCountLabel(playerCount: string): string {
   return playerCount === 'unknown' ? 'unknown player count' : `${playerCount}-player`;
 }
 
-function dominantPlayerCount(
-  byNumPlayers: Record<string, CompareBreakdownEntry>,
-  gamesPlayed: number,
-): { label: string; share: number } | undefined {
-  if (gamesPlayed <= 0) return undefined;
+/**
+ * DF-39-R3: the seat caveat gate. The caveat renders whenever the blended
+ * win rate could mislead a reader into hearing per-seat skill:
+ *   - the dominant bucket covers >= 0.9 of gamesPlayed (the original arm),
+ *   - OR an explicit uncovered remainder exists (games the server counted
+ *     in gamesPlayed but which carry no seat data at all — the mini
+ *     4382/3729 case), i.e. the split is seat-INCOMPLETE even when no
+ *     single bucket dominates,
+ *   - OR the share is unknown (no gamesWithoutPlayerCount declared by an
+ *     older backend) while a dominant bucket exists.
+ * A row with buckets reconciling fully and no dominant bucket stays
+ * silent — a mixed seat profile needs no caveat.
+ */
+function seatCaveatFor(
+  m: Pick<CompareModelRow, 'byNumPlayers' | 'gamesPlayed' | 'gamesWithoutPlayerCount'>,
+): { label: string; share: number; unattributed: number } | undefined {
+  if (m.gamesPlayed <= 0) return undefined;
 
-  const dominant = Object.entries(byNumPlayers).reduce<
+  const dominant = Object.entries(m.byNumPlayers ?? {}).reduce<
     [string, CompareBreakdownEntry] | undefined
   >((current, entry) => {
     if (!current || entry[1].gamesPlayed > current[1].gamesPlayed) return entry;
     return current;
   }, undefined);
 
-  if (!dominant) return undefined;
-  const share = dominant[1].gamesPlayed / gamesPlayed;
-  return share >= 0.9
-    ? { label: formatPlayerCountLabel(dominant[0]), share }
-    : undefined;
+  // Explicit remainder declared by the server (absent = older backend).
+  const unattributed =
+    typeof m.gamesWithoutPlayerCount === 'number' &&
+    Number.isFinite(m.gamesWithoutPlayerCount) &&
+    m.gamesWithoutPlayerCount > 0
+      ? m.gamesWithoutPlayerCount
+      : 0;
+
+  if (!dominant) return unattributed > 0 ? { label: '', share: 0, unattributed } : undefined;
+
+  const share = dominant[1].gamesPlayed / m.gamesPlayed;
+  // Render when the dominant seat dominates OR the tail is unexplained —
+  // both make the blended rate unreliable as a skill read.
+  if (share < 0.9 && unattributed === 0) return undefined;
+  return { label: formatPlayerCountLabel(dominant[0]), share, unattributed };
+}
+
+/**
+ * DF-39-R3: wording for the seat caveat. The share clause renders only
+ * when a dominant bucket exists (share > 0); the unattributed clause
+ * renders only when the server declared a positive remainder — so the
+ * sentence always explains exactly why the blended rate can mislead.
+ */
+function seatCaveatText(caveat: {
+  label: string;
+  share: number;
+  unattributed: number;
+}): string {
+  const parts: string[] = [];
+  if (caveat.share > 0) {
+    parts.push(
+      `Headline win rate reflects seat assignment: ${(caveat.share * 100).toFixed(1)}% of games used ${caveat.label} seats.`,
+    );
+  }
+  if (caveat.unattributed > 0) {
+    parts.push(
+      `${caveat.unattributed} games without seat data are excluded from the player-count split.`,
+    );
+  }
+  return parts.join(' ');
 }
 
 interface BenchmarkLeaderboardProps {
@@ -185,7 +240,10 @@ const BenchmarkLeaderboard: React.FC<BenchmarkLeaderboardProps> = ({ payload, lo
           {rows.map((m) => {
             const roleEntries = Object.entries(m.rolePerformance ?? {});
             const playerCountEntries = Object.entries(m.byNumPlayers ?? {});
-            const dominant = dominantPlayerCount(m.byNumPlayers ?? {}, m.gamesPlayed);
+            // DF-39-R3: gate on seat-domination OR an explicit uncovered
+            // remainder (the live openai/gpt-4o-mini shape: dominant share
+            // 0.828 but 653 of 4382 games carry no seat data).
+            const dominant = seatCaveatFor(m);
             const hasBreakdown = roleEntries.length > 0 || playerCountEntries.length > 0;
 
             return (
@@ -212,7 +270,11 @@ const BenchmarkLeaderboard: React.FC<BenchmarkLeaderboardProps> = ({ payload, lo
                     {m.avgCostPerGame !== undefined ? `$${m.avgCostPerGame.toFixed(4)}` : '—'}
                   </td>
                 </tr>
-                {hasBreakdown ? (
+                {/* DF-39-R3: the breakdown row also carries the seat caveat
+                    for usage-only rows (empty maps but a declared
+                    gamesWithoutPlayerCount) — caveat presence no longer
+                    rides on breakdown richness. */}
+                {hasBreakdown || dominant ? (
                   <tr className="border-b border-[var(--color-border)]">
                     <td
                       className="py-2 px-2 text-[var(--color-text-secondary)] text-xs"
@@ -240,10 +302,14 @@ const BenchmarkLeaderboard: React.FC<BenchmarkLeaderboardProps> = ({ payload, lo
                             ))}
                           </div>
                         ) : null}
+                        {/* DF-39-R3: the note NAMES the model it qualifies
+                            (row-level caveat, not a page-level banner), and
+                            names the seat-incomplete remainder when the
+                            server declared one. */}
                         {dominant ? (
-                          <p className="md:col-span-2" data-testid="seat-assignment-note">
-                            Headline win rate reflects seat assignment: {(dominant.share * 100).toFixed(1)}% of games
-                            used {dominant.label} seats.
+                          <p className="md:col-span-2" data-testid={`seat-assignment-note-${m.provider}-${m.model}`}>
+                            <strong>{m.provider}/{m.model}</strong>{' '}
+                            {seatCaveatText(dominant)}
                           </p>
                         ) : null}
                       </div>

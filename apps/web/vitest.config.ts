@@ -14,7 +14,13 @@ export default defineConfig({
   },
   test: {
     environment: 'happy-dom',
-    include: ['src/__tests__/**/*.{test,spec}.{ts,tsx}'],
+    // DF-39-R3: component-adjacent tests live in
+    // src/components/__tests__ too (the trace contract pins the new
+    // seat-caveat test there); both roots run.
+    include: [
+      'src/__tests__/**/*.{test,spec}.{ts,tsx}',
+      'src/components/__tests__/**/*.{test,spec}.{ts,tsx}',
+    ],
   },
   resolve: {
     alias: {

@@ -852,6 +852,16 @@ type CompareModelRow = {
   avgLatency: number;
   avgRolePerformance: number;
   /**
+   * DF-39-R3: count of the row's served games with NO seat data —
+   * gamesPlayed minus the sum of every byNumPlayers seat bucket,
+   * floored at 0. On the live store this is real, not a join bug:
+   * legacy games carry token_usage rows but no players rows, so the
+   * merge-max aggregate counts them while the per-seat split cannot.
+   * Zero stays zero (an explicit, explained zero); a positive value is
+   * the reason the blended win rate must be read as seat-incomplete.
+   */
+  gamesWithoutPlayerCount: number;
+  /**
    * DF-MAFIA-AI-BENCHMARK-39: per-role breakdown for the roles the model
    * actually played — never an empty map when the model has real
    * players rows (a blended winRate cannot be read as a skill score).
@@ -923,6 +933,24 @@ export type BenchmarkBreakdownEntry = {
   wins: number;
   winRate: number;
 };
+
+/**
+ * DF-39-R3: how many of a row's served games the seat split cannot
+ * describe — gamesPlayed minus the sum of every byNumPlayers bucket,
+ * floored at 0. Shared by BOTH benchmark endpoints (compare.models and
+ * report.modelPerformance) so the two surfaces declare the same
+ * remainder and stay key-set/shape parity (pinned by test).
+ */
+export function countGamesWithoutPlayerRow(
+  gamesPlayed: number,
+  byNumPlayers: Record<string, BenchmarkBreakdownEntry> | undefined,
+): number {
+  const covered = Object.values(byNumPlayers ?? {}).reduce(
+    (sum, cell) => sum + cell.gamesPlayed,
+    0,
+  );
+  return Math.max(0, (gamesPlayed || 0) - covered);
+}
 
 /**
  * DF-MAFIA-AI-BENCHMARK-39: the full breakdown published with every
@@ -1302,6 +1330,15 @@ export function getCompareReport(
       avgLatency: Math.round(latencyMap.get(key) || m.avgLatency || 0),
       avgRolePerformance:
         Math.round(((roleAvgMap.get(key) || 0) as number) * 100) / 100,
+      // DF-39-R3: the seat split cannot describe games it has no players
+      // rows for — declare the uncovered remainder explicitly (see the
+      // CompareModelRow contract above for why it is real, not a join
+      // bug). Floored at 0: a malformed store must not serve negative
+      // counts. Sums equal only when the bucket grain matches.
+      gamesWithoutPlayerCount: countGamesWithoutPlayerRow(
+        m.gamesPlayed,
+        breakdown?.byNumPlayers,
+      ),
       // DF-MAFIA-AI-BENCHMARK-39: per-role + per-numPlayers breakdowns
       // from the real players rows — never a fabricated cell, absent
       // roles/configurations are simply not in the maps.
