@@ -1,0 +1,33 @@
+{
+  "tick": "mafia-ai-benchmark-foreman-2026-10-28-10-22-22",
+  "project": "mafia-ai-benchmark",
+  "composed_at": "2026-10-28T10:30:00-05:00",
+  "wave_budget": 2,
+  "base": "origin/main",
+  "base_sha": "1b6e2bc",
+  "workers": [
+    {
+      "task_id": "DF-MAFIA-AI-BENCHMARK-23-R3",
+      "brief_file": "/tmp/df23-r3-brief.txt",
+      "worktree": "/home/kara/worktrees/mafia-ai-benchmark-DF-MAFIA-AI-BENCHMARK-23-R3",
+      "branch": "wt/DF-MAFIA-AI-BENCHMARK-23-R3",
+      "model": "glm-5.3-flash",
+      "provider": "ollama-cloud",
+      "scope": "apps/server (game lifecycle reconciler)",
+      "gitreins_task": "DF-MAFIA-AI-BENCHMARK-23-R3"
+    },
+    {
+      "task_id": "DF-MAFIA-AI-BENCHMARK-39-R3",
+      "brief_file": "/tmp/df39-r3-brief.txt",
+      "worktree": "/home/kara/worktrees/mafia-ai-benchmark-DF-MAFIA-AI-BENCHMARK-39-R3",
+      "branch": "wt/DF-MAFIA-AI-BENCHMARK-39-R3",
+      "model": "glm-5.3-flash",
+      "provider": "ollama-cloud",
+      "scope": "apps/web (BenchmarkLeaderboard gate) + apps/server (compare payload)",
+      "gitreins_task": "DF-MAFIA-AI-BENCHMARK-39-R3"
+    }
+  ],
+  "independence_check": "23-R3 touches the lifecycle reconciler + its server test; 39-R3 touches BenchmarkLeaderboard.tsx + compare payload builder + web test. Overlap risk limited to apps/server stats/compare surfaces; reconciler and compare builder are disjoint modules. Board rows have no depends_on edges. Merge serially with gates.",
+  "dispatched": true,
+  "dispatched_at": null
+}
