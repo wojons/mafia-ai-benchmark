@@ -819,3 +819,4 @@
 {"id": 775, "timestamp": "2026-10-28 10:27:32.13025", "event_type": "task_updated", "task_id": "DF-MAFIA-AI-BENCHMARK-39-R3", "actor": "foreman", "detail": "{\"status\":\"pending\"}"}
 {"id": 776, "timestamp": "2026-10-28 10:45:18.173378", "event_type": "task_completed", "task_id": "DF-MAFIA-AI-BENCHMARK-23-R3", "actor": "foreman", "detail": "{\"status\":\"complete\"}"}
 {"id": 777, "timestamp": "2026-10-28 10:45:21.986048", "event_type": "task_completed", "task_id": "DF-MAFIA-AI-BENCHMARK-39-R3", "actor": "foreman", "detail": "{\"status\":\"complete\"}"}
+{"id": 778, "timestamp": "2026-10-28 17:08:00.322144", "event_type": "task_created", "task_id": "INT-CI-005", "actor": "foreman", "detail": "{\"id\":\"INT-CI-005\",\"status\":\"pending\"}"}
