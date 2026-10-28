@@ -7,8 +7,12 @@
   "wave_size": 0,
   "mode": "serial-fallback",
   "selection_reason": "Only one actionable implementation row: INT-CI-005; no wave composition.",
-  "considered_rows": ["INT-CI-005"],
-  "rows_dispatched": ["INT-CI-005"],
+  "considered_rows": [
+    "INT-CI-005"
+  ],
+  "rows_dispatched": [
+    "INT-CI-005"
+  ],
   "workers": [
     {
       "task_id": "INT-CI-005",
@@ -16,9 +20,13 @@
       "branch": "wt/INT-CI-005",
       "base_sha": "1630a19",
       "brief": "/tmp/mafia-int-ci-005-brief.txt",
-      "disposition": "dispatched"
+      "disposition": "merged",
+      "commit": "7865c91382d7c62fd0aa6c409eaa86f6502f049f",
+      "merge_commit": "1f2a35f",
+      "judge": "046a0e6f",
+      "ci": "pending"
     }
   ],
   "off_by_one": "discover vitest-api-timeout not_found; corpus grep found related vitest timeout/load answers 1472, 2052, 1477; re-verify mechanism in worker",
-  "finished_at": null
+  "finished_at": "2026-10-28T23:55:00-05:00"
 }
