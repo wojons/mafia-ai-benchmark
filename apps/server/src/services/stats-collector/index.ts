@@ -115,11 +115,11 @@ function computeReportWatermark(repo: GameRepository): string | null {
         (SELECT COALESCE(SUM(is_mafia), 0) FROM players) AS playersMafiaSum,
         (SELECT COALESCE(SUM(COALESCE(won, -1)), 0) FROM players) AS playersWonSum,
         (SELECT COALESCE(SUM(tokens_used), 0) FROM players) AS playersTokensSum,
-        (SELECT COUNT(*) FROM events e JOIN games g ON g.id = e.game_id WHERE g.status = 'ENDED') AS eventsCount,
-        (SELECT COALESCE(SUM(LENGTH(COALESCE(e.type, ''))), 0) FROM events e JOIN games g ON g.id = e.game_id WHERE g.status = 'ENDED') AS eventsTypeLen,
-        (SELECT COALESCE(SUM(LENGTH(COALESCE(e.phase, ''))), 0) FROM events e JOIN games g ON g.id = e.game_id WHERE g.status = 'ENDED') AS eventsPhaseLen,
-        (SELECT COALESCE(SUM(COALESCE(e.turn_number, -1)), 0) FROM events e JOIN games g ON g.id = e.game_id WHERE g.status = 'ENDED') AS eventsTurnSum,
-        (SELECT COALESCE(SUM(COALESCE(e.day_number, -1)), 0) FROM events e JOIN games g ON g.id = e.game_id WHERE g.status = 'ENDED') AS eventsDaySum,
+        (SELECT COUNT(*) FROM events) AS eventsCount,
+        (SELECT COALESCE(SUM(LENGTH(COALESCE(type, ''))), 0) FROM events) AS eventsTypeLen,
+        (SELECT COALESCE(SUM(LENGTH(COALESCE(phase, ''))), 0) FROM events) AS eventsPhaseLen,
+        (SELECT COALESCE(SUM(COALESCE(turn_number, -1)), 0) FROM events) AS eventsTurnSum,
+        (SELECT COALESCE(SUM(COALESCE(day_number, -1)), 0) FROM events) AS eventsDaySum,
         (SELECT COUNT(*) FROM token_usage) AS tuCount,
         (SELECT COALESCE(MAX(rowid), 0) FROM token_usage) AS tuMaxRowid,
         (SELECT COALESCE(MAX(timestamp), 0) FROM token_usage) AS tuMaxTs,
@@ -213,6 +213,39 @@ const compareCacheByRepo = new WeakMap<
 >();
 
 /**
+ * Fingerprint only completed-game inputs for the compare report. In-progress
+ * games append events and usage rows continuously, but those rows are not
+ * included by the compare aggregates. Their eventual games.status = ENDED
+ * transition moves all of their rows into this fingerprint and invalidates
+ * the cache exactly once for the completed result.
+ */
+function computeCompletedCompareBaseWatermark(repo: GameRepository): string | null {
+  try {
+    const db = repo.getDatabase();
+    const row = db.prepare(`
+      SELECT
+        (SELECT COUNT(*) FROM games WHERE status = 'ENDED') AS gamesCount,
+        (SELECT COALESCE(SUM(LENGTH(COALESCE(config, '')) + LENGTH(COALESCE(status, '')) + LENGTH(COALESCE(winner, '')) + COALESCE(duration, 0) + COALESCE(ended_at, 0)), 0) FROM games WHERE status = 'ENDED') AS gamesFp,
+        (SELECT COUNT(*) FROM players p JOIN games g ON g.id = p.game_id WHERE g.status = 'ENDED') AS playersCount,
+        (SELECT COALESCE(SUM(LENGTH(COALESCE(p.provider, '')) + LENGTH(COALESCE(p.model, '')) + LENGTH(COALESCE(p.role, '')) + COALESCE(p.won, -1) + COALESCE(p.tokens_used, 0) + COALESCE(p.role_performance, 0)), 0) FROM players p JOIN games g ON g.id = p.game_id WHERE g.status = 'ENDED') AS playersFp,
+        (SELECT COUNT(*) FROM events e JOIN games g ON g.id = e.game_id WHERE g.status = 'ENDED') AS eventsCount,
+        (SELECT COALESCE(SUM(LENGTH(COALESCE(e.type, '')) + LENGTH(COALESCE(e.phase, '')) + COALESCE(e.turn_number, -1) + COALESCE(e.day_number, -1)), 0) FROM events e JOIN games g ON g.id = e.game_id WHERE g.status = 'ENDED') AS eventsFp,
+        (SELECT COUNT(*) FROM token_usage tu JOIN games g ON g.id = tu.game_id WHERE g.status = 'ENDED') AS tuCount,
+        (SELECT COALESCE(SUM(tu.total_tokens + COALESCE(tu.cost, 0) + COALESCE(tu.timestamp, 0) + LENGTH(COALESCE(tu.provider, '')) + LENGTH(COALESCE(tu.model, ''))), 0) FROM token_usage tu JOIN games g ON g.id = tu.game_id WHERE g.status = 'ENDED') AS tuFp,
+        (SELECT COUNT(*) FROM api_calls ac JOIN games g ON g.id = ac.game_id WHERE g.status = 'ENDED') AS acCount,
+        (SELECT COALESCE(SUM(ac.latency + COALESCE(ac.timestamp, 0) + LENGTH(COALESCE(ac.provider, '')) + LENGTH(COALESCE(ac.model, ''))), 0) FROM api_calls ac JOIN games g ON g.id = ac.game_id WHERE g.status = 'ENDED') AS acFp,
+        (SELECT COUNT(*) FROM agent_sessions s JOIN games g ON g.id = s.game_id WHERE g.status = 'ENDED') AS sessCount,
+        (SELECT COALESCE(SUM(COALESCE(s.tokens_used, 0) + COALESCE(s.cost, 0) + COALESCE(s.latency, 0) + COALESCE(s.timestamp, 0)), 0) FROM agent_sessions s JOIN games g ON g.id = s.game_id WHERE g.status = 'ENDED') AS sessFp,
+        (SELECT COUNT(*) FROM player_model_assignments pma JOIN games g ON g.id = pma.game_id WHERE g.status = 'ENDED') AS pmaCount,
+        (SELECT COALESCE(SUM(LENGTH(COALESCE(pma.provider, '')) + LENGTH(COALESCE(pma.model, '')) + LENGTH(COALESCE(pma.role, '')) + COALESCE(pma.created_at, 0)), 0) FROM player_model_assignments pma JOIN games g ON g.id = pma.game_id WHERE g.status = 'ENDED') AS pmaFp
+    `).get() as Record<string, unknown> | undefined;
+    return row ? JSON.stringify(row) : null;
+  } catch {
+    return null;
+  }
+}
+
+/**
  * The compare fingerprint: the COMPLETE report watermark (every
  * games/players/events/token_usage/api_calls/agent_sessions/
  * player_model_assignments input is covered by computeReportWatermark) PLUS
@@ -237,7 +270,7 @@ const compareCacheByRepo = new WeakMap<
  * broken fingerprint).
  */
 function computeCompareWatermark(repo: GameRepository): string | null {
-  const base = computeReportWatermark(repo, { completedOnly: true });
+  const base = computeCompletedCompareBaseWatermark(repo);
   if (base === null) return null;
   try {
     const db = repo.getDatabase();
