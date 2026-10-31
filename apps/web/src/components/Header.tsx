@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useEffect } from 'react';
 import { Link, useLocation } from 'react-router-dom';
 import { useUIStore } from '../stores/uiStore';
 import { useGameStore } from '../stores/gameStore';
@@ -6,7 +6,18 @@ import { useGameStore } from '../stores/gameStore';
 const Header: React.FC = () => {
   const location = useLocation();
   const { darkMode, toggleDarkMode, sidebarOpen, toggleSidebar } = useUIStore();
-  const { connected, stats } = useGameStore();
+  // DF-MAFIA-AI-BENCHMARK-32-R2: the chrome counters read the authoritative
+  // /stats headline totals (the same source the Games tab and the Stats tab
+  // already use), not the old never-populated `stats` slice that was deleted.
+  const { connected, headlineStats, fetchHeadlineStats } = useGameStore();
+
+  // The Header is persistent chrome on EVERY route, so unlike GameList it
+  // cannot rely on a sibling tab having fetched the totals: it fetches them
+  // itself on mount. Fail-soft — fetchHeadlineStats keeps the previous
+  // value (placeholders) on error.
+  useEffect(() => {
+    fetchHeadlineStats();
+  }, [fetchHeadlineStats]);
   
   const navItems = [
     { path: '/', label: 'Games', icon: '🎮' },
@@ -47,11 +58,14 @@ const Header: React.FC = () => {
         </div>
         
         <div className="stats-summary">
+          {/* DF-MAFIA-AI-BENCHMARK-32-R2: live totals from GET /api/v1/stats
+              (via gameStore.headlineStats). '—' = no /stats data yet, never
+              an invented 0. */}
           <span className="stat" title="Active Games">
-            🎮 {stats.activeGames}
+            🎮 {headlineStats ? headlineStats.activeGames : '—'}
           </span>
           <span className="stat" title="Total Games">
-            📈 {stats.totalGames}
+            📈 {headlineStats ? headlineStats.totalGames : '—'}
           </span>
         </div>
         

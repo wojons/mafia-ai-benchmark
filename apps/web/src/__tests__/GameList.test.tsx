@@ -199,7 +199,6 @@ describe('GameList headline counts from /stats (DF-MAFIA-AI-BENCHMARK-32)', () =
     useGameStore.setState({
       games: [],
       headlineStats: null,
-      stats: { totalGames: 0, activeGames: 0, mafiaWins: 0, townWins: 0 },
     });
     vi.spyOn(console, 'error').mockImplementation(() => {});
   });

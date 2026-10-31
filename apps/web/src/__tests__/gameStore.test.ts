@@ -59,12 +59,7 @@ const stateInitial = {
   players: [],
   events: [],
   playerStats: new Map(),
-  stats: {
-    totalGames: 0,
-    activeGames: 0,
-    mafiaWins: 0,
-    townWins: 0,
-  },
+  headlineStats: null,
 };
 
 describe('GameStore', () => {
@@ -81,7 +76,7 @@ describe('GameStore', () => {
     expect(state.gameState).toBeNull();
     expect(state.players).toEqual([]);
     expect(state.events).toEqual([]);
-    expect(state.stats).toEqual({ totalGames: 0, activeGames: 0, mafiaWins: 0, townWins: 0 });
+    expect(state.headlineStats).toBeNull();
   });
 
   it('updateGameState sets gameState on the store', () => {
@@ -178,11 +173,31 @@ describe('GameStore', () => {
     expect(state.selectedGameId).toBeNull();
   });
 
-  it('updateStats sets stats on the store', () => {
-    const stats = { totalGames: 5, activeGames: 2, mafiaWins: 3, townWins: 2 };
+  // DF-MAFIA-AI-BENCHMARK-32-R2: the vacuous updateStats test is gone with
+  // the dead `stats` slice it exercised (zero production callers). The
+  // store-level coverage for the header's source lives here instead.
+  it('fetchHeadlineStats stores GET /api/v1/stats totals in headlineStats', async () => {
+    (api.stats.getGameStats as ReturnType<typeof vi.fn>).mockResolvedValue({
+      totalGames: 7,
+      activeGames: 3,
+      completedGames: 4,
+    });
 
-    useGameStore.getState().updateStats(stats);
-    expect(useGameStore.getState().stats).toEqual(stats);
+    await useGameStore.getState().fetchHeadlineStats();
+    expect(useGameStore.getState().headlineStats).toEqual({
+      totalGames: 7,
+      activeGames: 3,
+      completedGames: 4,
+    });
+  });
+
+  it('fetchHeadlineStats fails soft — rejection keeps the previous value', async () => {
+    (api.stats.getGameStats as ReturnType<typeof vi.fn>).mockRejectedValue(
+      new Error('HTTP 500')
+    );
+
+    await useGameStore.getState().fetchHeadlineStats();
+    expect(useGameStore.getState().headlineStats).toBeNull();
   });
 
   describe('createGame payload normalization (DF-MAFIA-AI-BENCHMARK-10)', () => {

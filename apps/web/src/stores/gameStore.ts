@@ -78,20 +78,17 @@ interface GameStoreState {
   
   // Player stats
   playerStats: Map<string, PlayerStats>;
-  
-  // Statistics
-  stats: {
-    totalGames: number;
-    activeGames: number;
-    mafiaWins: number;
-    townWins: number;
-  };
 
   /**
    * DF-MAFIA-AI-BENCHMARK-32: authoritative headline totals for the Games
    * tab, fetched from GET /api/v1/stats (the same source the Stats tab
    * uses). The games page only holds a page window, so its length / tallies
    * must never be rendered as totals. null = no /stats data yet.
+   *
+   * DF-MAFIA-AI-BENCHMARK-32-R2: this is ALSO the source the persistent
+   * Header chrome renders; the separate `stats` slice it used to read was
+   * removed — it had no production writer (updateStats had zero callers)
+   * and the header printed 0/0 for the life of the session.
    */
   headlineStats: {
     totalGames: number;
@@ -116,7 +113,8 @@ interface GameStoreState {
   updateGameState: (state: GameState) => void;
   updatePlayers: (players: Player[]) => void;
   addEvent: (event: GameEvent) => void;
-  updateStats: (stats: GameStoreState['stats']) => void;
+  // DF-MAFIA-AI-BENCHMARK-32-R2: the vacuous updateStats action (zero
+  // production callers) was removed together with the dead `stats` slice.
   
   // Night actions
   submitNightAction: (gameId: string, playerId: string, action: string, targetId: string) => Promise<void>;
@@ -146,12 +144,6 @@ export const useGameStore = create<GameStoreState>()(
     players: [],
     events: [],
     playerStats: new Map(),
-    stats: {
-      totalGames: 0,
-      activeGames: 0,
-      mafiaWins: 0,
-      townWins: 0,
-    },
     headlineStats: null,
     
     // Initialize
@@ -343,11 +335,6 @@ export const useGameStore = create<GameStoreState>()(
       }
       
       set({ events: newEvents });
-    },
-    
-    // Update stats
-    updateStats: (stats) => {
-      set({ stats });
     },
     
     // Submit night action
