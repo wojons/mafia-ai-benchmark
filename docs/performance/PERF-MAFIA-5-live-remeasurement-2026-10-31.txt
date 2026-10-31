@@ -1,0 +1,30 @@
+PERF-MAFIA-5 live acceptance remeasurement
+
+Environment: running mafia-ai-benchmark stack at http://127.0.0.1:3004; source tree HEAD before this evidence-only commit was c54b1098caa0bf33215baad74812bd02fdca7ab8. A fresh 5-player game was created and observed IN_PROGRESS before the live measurements.
+
+Live game witness:
+game_id=c3cab0a3-a520-4efb-a62f-40c1cac1daf0
+status_at_measurement=IN_PROGRESS
+
+Live compare measurements (seconds):
+compare[1]=0.196752
+compare[2]=0.881843
+compare[3]=0.195417
+live_max=0.881843
+live_p95_upper_bound=0.881843
+
+Concurrent live probe (compare and games?limit=50 started together):
+compare_concurrent=0.921266
+games_concurrent=0.926573
+
+The live game's compare calls stayed below 1.0s; however, the concurrent games call was 0.926573s, above the row's <100ms acceptance. This row remains pending; this artifact is a partial live result, not a closeout.
+
+Quiescent follow-up (the witness game had ended):
+quiescent_compare[1]=4.206931 (cold rebuild)
+quiescent_compare[2]=0.205982
+quiescent_compare[3]=0.204848
+quiescent_games=0.005187
+
+The warm quiescent compare calls were below 0.5s, but the first cold rebuild was 4.206931s. The evidence does not support closing PERF-MAFIA-5.
+
+ch:trace row=PERF-MAFIA-5 spec=none:perf-methodology wave=none:serial test=apps/server/src/__tests__/services/compare-cache.test.ts::compare-cache doc=docs/performance/PERF-MAFIA-5-live-remeasurement-2026-10-31.txt prompt=none:foreman-owned-evidence evidence=docs/performance/PERF-MAFIA-5-live-remeasurement-2026-10-31.txt witness=live:http://127.0.0.1:3004/api/v1/benchmark/compare verdict=none:acceptance-unmet commit=none:pending-evidence-commit memory=none:duckbrain-unavailable
