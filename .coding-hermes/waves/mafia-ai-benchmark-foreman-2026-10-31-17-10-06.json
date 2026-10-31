@@ -1,0 +1,19 @@
+{
+  "tick": "mafia-ai-benchmark-foreman-2026-10-31-17-10-06",
+  "project": "mafia-ai-benchmark",
+  "mode": "wave-budget-1",
+  "wave_budget": 1,
+  "base": "origin/main@7cf8e09",
+  "created_at": "2026-10-31T17:10:06-05:00",
+  "tasks": [
+    {
+      "id": "DF-MAFIA-AI-BENCHMARK-32-R2",
+      "title": "P3 - persistent app header prints 0/0 on every page (orphaned gameStore.stats slice; updateStats has zero production callers)",
+      "worktree": "/home/kara/worktrees/mafia-ai-benchmark-DF-MAFIA-AI-BENCHMARK-32-R2",
+      "branch": "wt/DF-MAFIA-AI-BENCHMARK-32-R2",
+      "brief": "/tmp/mafia-df32r2-brief-20261031-171006.txt",
+      "worker_model": "glm-5.3-flash",
+      "worker_provider": "ollama-cloud"
+    }
+  ]
+}
