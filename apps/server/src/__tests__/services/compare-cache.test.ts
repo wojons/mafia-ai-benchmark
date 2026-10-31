@@ -66,6 +66,72 @@ describe('StatsCollector compare memoization (PERF-MAFIA-3)', () => {
   });
 
   describe('watermark mutation busts the cache', () => {
+    it('ignores events appended to an in-progress game', () => {
+      // Live games append events on every turn. Those rows are not part of
+      // completed benchmark aggregates, so they must not evict the completed
+      // compare report while the game is still running.
+      repo.seedGame({
+        id: 'live-game',
+        status: 'IN_PROGRESS',
+        players: [{
+          id: 'live-player', name: 'Live Player', role: 'VILLAGER',
+          joinOrder: 0, provider: 'openai', model: 'gpt-4o-mini',
+        }],
+      });
+      repo.seedGame({
+        id: 'ended-game',
+        status: 'ENDED',
+        winner: 'TOWN',
+        players: [{
+          id: 'ended-player', name: 'Ended Player', role: 'VILLAGER',
+          joinOrder: 0, provider: 'openai', model: 'gpt-4o-mini', won: 1,
+        }],
+      });
+
+      const first = stats.getCompareReport();
+      repo.db.prepare(`
+        INSERT INTO events
+          (id, game_id, type, timestamp, visibility, actor_id, target_id,
+           data, turn_number, day_number, phase, sequence)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      `).run(
+        'live-event-1', 'live-game', 'AGENT_SAYS_BROADCASTED', Date.now(),
+        'PUBLIC', 'live-player', null, JSON.stringify({ says: 'still playing' }),
+        1, 1, 'DAY_DISCUSSION', 1,
+      );
+
+      expect(stats.getCompareReport()).toBe(first);
+    });
+
+    it('still invalidates when a terminal event changes completed statistics', () => {
+      repo.seedGame({
+        id: 'terminal-game',
+        status: 'ENDED',
+        players: [{
+          id: 'terminal-player', name: 'Terminal Player', role: 'MAFIA',
+          joinOrder: 0, isMafia: true, provider: 'openai', model: 'gpt-4o-mini',
+        }],
+      });
+
+      const first = stats.getCompareReport();
+      expect(first.models[0].wins).toBe(0);
+
+      repo.db.prepare(`
+        INSERT INTO events
+          (id, game_id, type, timestamp, visibility, actor_id, target_id,
+           data, turn_number, day_number, phase, sequence)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      `).run(
+        'terminal-event-1', 'terminal-game', 'GAME_ENDED', Date.now(),
+        'PUBLIC', null, null, JSON.stringify({ winner: 'MAFIA' }),
+        1, 1, 'GAME_OVER', 1,
+      );
+
+      const second = stats.getCompareReport();
+      expect(second).not.toBe(first);
+      expect(second.models[0].wins).toBe(1);
+    });
+
     it('INSERTing a new game changes gamesPlayed on the next call', () => {
       repo.seedGame({
         id: 'g1', status: 'ENDED',

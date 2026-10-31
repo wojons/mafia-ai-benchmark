@@ -115,11 +115,11 @@ function computeReportWatermark(repo: GameRepository): string | null {
         (SELECT COALESCE(SUM(is_mafia), 0) FROM players) AS playersMafiaSum,
         (SELECT COALESCE(SUM(COALESCE(won, -1)), 0) FROM players) AS playersWonSum,
         (SELECT COALESCE(SUM(tokens_used), 0) FROM players) AS playersTokensSum,
-        (SELECT COUNT(*) FROM events) AS eventsCount,
-        (SELECT COALESCE(SUM(LENGTH(COALESCE(type, ''))), 0) FROM events) AS eventsTypeLen,
-        (SELECT COALESCE(SUM(LENGTH(COALESCE(phase, ''))), 0) FROM events) AS eventsPhaseLen,
-        (SELECT COALESCE(SUM(COALESCE(turn_number, -1)), 0) FROM events) AS eventsTurnSum,
-        (SELECT COALESCE(SUM(COALESCE(day_number, -1)), 0) FROM events) AS eventsDaySum,
+        (SELECT COUNT(*) FROM events e JOIN games g ON g.id = e.game_id WHERE g.status = 'ENDED') AS eventsCount,
+        (SELECT COALESCE(SUM(LENGTH(COALESCE(e.type, ''))), 0) FROM events e JOIN games g ON g.id = e.game_id WHERE g.status = 'ENDED') AS eventsTypeLen,
+        (SELECT COALESCE(SUM(LENGTH(COALESCE(e.phase, ''))), 0) FROM events e JOIN games g ON g.id = e.game_id WHERE g.status = 'ENDED') AS eventsPhaseLen,
+        (SELECT COALESCE(SUM(COALESCE(e.turn_number, -1)), 0) FROM events e JOIN games g ON g.id = e.game_id WHERE g.status = 'ENDED') AS eventsTurnSum,
+        (SELECT COALESCE(SUM(COALESCE(e.day_number, -1)), 0) FROM events e JOIN games g ON g.id = e.game_id WHERE g.status = 'ENDED') AS eventsDaySum,
         (SELECT COUNT(*) FROM token_usage) AS tuCount,
         (SELECT COALESCE(MAX(rowid), 0) FROM token_usage) AS tuMaxRowid,
         (SELECT COALESCE(MAX(timestamp), 0) FROM token_usage) AS tuMaxTs,
@@ -237,19 +237,31 @@ const compareCacheByRepo = new WeakMap<
  * broken fingerprint).
  */
 function computeCompareWatermark(repo: GameRepository): string | null {
-  const base = computeReportWatermark(repo);
+  const base = computeReportWatermark(repo, { completedOnly: true });
   if (base === null) return null;
   try {
     const db = repo.getDatabase();
     const row = db.prepare(`
       SELECT
-        (SELECT COUNT(*) FROM benchmark_games) AS bgCount,
-        (SELECT COALESCE(SUM(LENGTH(COALESCE(winner, '')) + LENGTH(COALESCE(team_winner, '')) + LENGTH(COALESCE(error, '')) + LENGTH(COALESCE(model_a, '')) + LENGTH(COALESCE(model_b, '')) + valid + COALESCE(completed_at, 0)), 0) FROM benchmark_games) AS bgFp,
+        (SELECT COUNT(*) FROM benchmark_games bg
+          JOIN games g ON g.id = bg.game_id
+         WHERE g.status = 'ENDED') AS bgCount,
+        (SELECT COALESCE(SUM(LENGTH(COALESCE(bg.winner, '')) + LENGTH(COALESCE(bg.team_winner, '')) + LENGTH(COALESCE(bg.error, '')) + LENGTH(COALESCE(bg.model_a, '')) + LENGTH(COALESCE(bg.model_b, '')) + bg.valid + COALESCE(bg.completed_at, 0)), 0)
+           FROM benchmark_games bg
+           JOIN games g ON g.id = bg.game_id
+          WHERE g.status = 'ENDED') AS bgFp,
         (SELECT COUNT(*) FROM model_matchups) AS mmCount,
         (SELECT COALESCE(SUM(games_played + model_a_wins + model_b_wins + ties + LENGTH(COALESCE(model_a, '')) + LENGTH(COALESCE(model_b, ''))), 0) FROM model_matchups) AS mmFp,
-        (SELECT COALESCE(SUM(LENGTH(COALESCE(role, ''))), 0) FROM players) AS playersRoleLen,
-        (SELECT COALESCE(MAX(rowid), 0) FROM player_model_assignments) AS pmaMaxRowid,
-        (SELECT COALESCE(SUM(LENGTH(COALESCE(provider, '')) + LENGTH(COALESCE(model, '')) + LENGTH(COALESCE(role, '')) + LENGTH(COALESCE(game_id, ''))), 0) FROM player_model_assignments) AS pmaTextLen
+        (SELECT COALESCE(SUM(LENGTH(COALESCE(p.role, ''))), 0) FROM players p
+          JOIN games g ON g.id = p.game_id
+         WHERE g.status = 'ENDED') AS playersRoleLen,
+        (SELECT COALESCE(MAX(pma.rowid), 0) FROM player_model_assignments pma
+          JOIN games g ON g.id = pma.game_id
+         WHERE g.status = 'ENDED') AS pmaMaxRowid,
+        (SELECT COALESCE(SUM(LENGTH(COALESCE(pma.provider, '')) + LENGTH(COALESCE(pma.model, '')) + LENGTH(COALESCE(pma.role, '')) + LENGTH(COALESCE(pma.game_id, ''))), 0)
+           FROM player_model_assignments pma
+           JOIN games g ON g.id = pma.game_id
+          WHERE g.status = 'ENDED') AS pmaTextLen
     `).get() as Record<string, unknown> | undefined;
     if (!row) return null;
     return JSON.stringify([base, row]);
