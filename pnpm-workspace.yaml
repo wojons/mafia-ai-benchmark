@@ -6,7 +6,7 @@ overrides:
   path-to-regexp: ">=0.1.12 <0.2.0"
   socket.io-parser: ">=4.2.6"
   ws: ">=8.22.0"
-  qs: ">=6.16.0"
+  qs: ">=6.16.1"
   uuid: ">=14.0.3"
   body-parser: ">=2.4.0"
   fflate: ">=0.6.11"
