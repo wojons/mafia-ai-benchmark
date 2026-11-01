@@ -50,6 +50,10 @@ the consumer path is tag-pinned docs. Previous release remains the fallback.
 
 ## History
 
+- v1.2.0 — 2026-11-01 — third release; compare-cache preservation under live
+  games (PERF-MAFIA-5), live header counters, ghost-game retirement, deps
+  overrides (`qs >=6.16.1`, `body-parser >=2.4.0`) and test-infra repairs
+  (cut from RELEASE-007).
 - v1.1.0 — 2026-10-23 — second release; 225 commits since v1.0.0 (5 feat /
   34 fix / 2 perf, no breaking), trust repairs on win-rate, matchups and
   stale-game surfaces (cut from RELEASE-005).

@@ -10,6 +10,70 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ---
 
+## [1.2.0] — 2026-11-01
+
+Third release. The delta since v1.1.0 is dominated by verification and board
+traffic; the user-facing changes are reliability and trust repairs: the
+`/benchmark/compare` cache now survives live games, header counters reflect
+the live `/stats` totals, never-started ghost games are retired at the
+lifecycle reconciler, and the leaderboard's seat caveat / population summary
+close the remaining attribution gaps. Dependency overrides move to
+`qs >=6.16.1` and `body-parser >=2.4.0`. Nothing in this release publishes to
+npm — the release surface remains the annotated tag, the GitHub Release
+object and the compose stack.
+
+### Added
+
+- Web leaderboard renders the per-role / per-player-count breakdown table
+  (DF-MAFIA-AI-BENCHMARK-39-R2) — the dashboard surface for the report
+  fields v1.1.0 added to `/api/v1/benchmark/report`.
+
+### Fixed
+
+- Header chrome counters render the live `/stats` totals instead of
+  page-local counts (DF-MAFIA-AI-BENCHMARK-32-R2).
+- Lifecycle reconciler retires never-started `IN_PROGRESS` ghost games
+  (DF-MAFIA-AI-BENCHMARK-23-R3).
+- `/benchmark/compare` payload declares unattributed games and uncovered-tail
+  leaderboard rows carry the seat caveat (DF-MAFIA-AI-BENCHMARK-39-R3); the
+  benchmark population summary is published on the report
+  (DF-MAFIA-AI-BENCHMARK-41-R2).
+- CLI: `mafiactl config` round-trips reliably (README-9); stale `1.0.0`
+  version fallback dropped (RELENG-MAFIA-20261023-05).
+- Test infrastructure: the server API integration suite is hermetic — no
+  reachable server required, `TEST_BASE_URL` documented (README-7);
+  `@mafia/shared/agents` / `@mafia/shared/fsm` subpath imports resolve in
+  test environments without a prior build (RELEASE-007); the models-catalog
+  test no longer times out at 5 s (INT-CI-005).
+
+### Performance
+
+- `/benchmark/compare` cache is preserved while games are live
+  (PERF-MAFIA-5) — compare no longer falls back to a cold ~5 s recomputation
+  mid-run.
+
+### Security
+
+- `qs` override raised to `>=6.16.1` (GHSA-6pq8-jhm2-2vcw, `arrayFormat:
+  'comma'` DoS) (RELEASE-007); `body-parser` override raised to `>=2.4.0`
+  (GHSA-27r3-jxmh-p828) (RELEASE-006). `pnpm audit --prod` reports zero
+  known vulnerabilities at the release stamp.
+
+### CI / Docs
+
+- Release script is repeatable after a cut (RELENG-MAFIA-20261023-03);
+  the gitreins guard enforces full tests on dependency/lockfile diffs
+  (RELENG-MAFIA-20261023-04).
+- Docs: README counts and setup guidance refreshed (README-1-R2/5/6),
+  `mafiactl init` documented (README-8), sudo-less Node.js bootstrap recipe
+  in QUICK_START (DF-MAFIA-AI-BENCHMARK-44), web UI port probe clarified
+  (QA-MAFIA-AI-BENCHMARK-11-R2), benchmark export CLI corrected (DOC-20),
+  canonical mafia usage caveats (DF-MAFIA-AI-BENCHMARK-48).
+- Dependency maintenance: compatible updates reviewed and applied
+  (SUP-DEPS-20261018-MAB).
+
+---
+
 ## [1.1.0] — 2026-10-23
 
 Second release. The delta since v1.0.0 is dominated by trust repairs: the
@@ -152,5 +216,6 @@ REST + WebSocket API, a React dashboard, and a CLI (`mafiactl`).
   is intentionally closed; the release surface is the Docker stack +
   GitHub Release objects).
 
+[1.2.0]: https://github.com/wojons/mafia-ai-benchmark/releases/tag/v1.2.0
 [1.1.0]: https://github.com/wojons/mafia-ai-benchmark/releases/tag/v1.1.0
 [1.0.0]: https://github.com/wojons/mafia-ai-benchmark/releases/tag/v1.0.0
