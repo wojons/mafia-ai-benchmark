@@ -11,6 +11,17 @@ guards:
   - ts-lsp
   static_analysis: false
   allow_skips: true
+  # gitreins >= 0.17 builtin secrets cross-check flags these two TRACKED files
+  # by PATH class alone ("credential-store path class"), regardless of content.
+  # Both are pre-existing at HEAD and contain no secrets: .npmrc holds only
+  # pnpm onlyBuiltDependencies pins, .env.sample is a documented template whose
+  # values are all placeholders ("???" / "xxxx"). Allow-listed explicitly so the
+  # gate stays meaningful for every other path; gitreins prints this suppression
+  # loudly on pass. Tracked by OBS-001 tick 2026-11-04.
+  sensitive_paths:
+    allow:
+    - .npmrc
+    - .env.sample
 evaluator:
   max_iterations: 200
   max_time: 30m
