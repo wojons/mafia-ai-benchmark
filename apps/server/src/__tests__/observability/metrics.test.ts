@@ -69,6 +69,15 @@ describe('OBS-001 Tier-0 metrics', () => {
     }
   });
 
+  it('pre-registers a sample line for every family so a fresh process is scrapable (OBS-001 AC1)', async () => {
+    const out = await render();
+    const samples = out.split('\n').filter((line) => line.startsWith('mafia_'));
+    for (const family of FAMILIES) {
+      expect(samples.some((line) => line.startsWith(family))).toBe(true);
+    }
+    expect(samples.length).toBeGreaterThanOrEqual(5);
+  });
+
   it('reports mafia_server_up = 1 with a version label from the single constant', async () => {
     const out = await render();
     expect(SERVER_VERSION.length).toBeGreaterThan(0);

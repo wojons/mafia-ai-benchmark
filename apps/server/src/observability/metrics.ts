@@ -98,6 +98,36 @@ const gameDurationHistogram: Histogram<string> = new client.Histogram({
   registers: [registry],
 });
 
+const GAME_PROVIDER_LABELS: readonly GameProvider[] = [
+  'openai',
+  'anthropic',
+  'google',
+  'openrouter',
+  'custom',
+  'unknown',
+];
+
+/**
+ * Instantiate every closed-label series at ZERO at module load.
+ *
+ * prom-client emits no sample line for a counter or histogram that has never
+ * been observed, so a freshly booted server would expose only
+ * mafia_server_up and mafia_game_active and the OBS-001 acceptance scrape
+ * (`curl .../metrics | grep -c '^mafia_' >= 5`) plus every dashboard built on
+ * these families would read "no data" instead of "zero games ended". The label
+ * sets are closed and tiny (4 outcomes x 6 provider prefixes, 6 reasons), so
+ * pre-registering them costs a fixed 30 series and leaks no identifiers.
+ */
+for (const provider of GAME_PROVIDER_LABELS) {
+  for (const outcome of GAME_OUTCOMES) {
+    gameEndedCounter.inc({ outcome, provider }, 0);
+  }
+  gameDurationHistogram.zero({ provider });
+}
+for (const reason of FAILURE_REASONS) {
+  gameFailedCounter.inc({ reason }, 0);
+}
+
 /** Live count backing mafia_game_active; clamped so the gauge never dips below zero. */
 let activeGameCount = 0;
 
