@@ -219,6 +219,26 @@ Buckets for `mafia_game_duration_seconds`: `60, 120, 300, 600, 900, 1800, 3600, 
 Buckets for `mafia_llm_request_duration_seconds`: `0.25, 0.5, 1, 2, 5, 10, 30, 60, 120`.
 (A live sample shows 848 ms average and a 65 s max — buckets must reach past 60 s.)
 
+**Closed label value sets used by the implementation** (values the spec did not
+enumerate are fixed here so no free-form string can ever become a label):
+
+| Metric | Label | Values |
+|---|---|---|
+| `mafia_benchmark_run_total` | `status` | `RUNNING`, `COMPLETED`, `CANCELLED`, `FAILED` — only `COMPLETED`/`CANCELLED`/`FAILED` increment (a counter of an in-flight state is meaningless); all four are pre-registered at 0 |
+| `mafia_llm_request_total` | `outcome` | `completed`, `failed` — sourced from adapter child-exit / bridge-event evidence, never from `api_calls.status_code` (§2.3) |
+| `mafia_llm_tokens_total` | `direction` | `prompt`, `completion` |
+| `mafia_llm_retry_total` | `reason` | `response_format`, `network_error`, `parse_error`, `unknown` (`game-engine.js:5030`/`:5138`/`:5183`) |
+| all `mafia_llm_*` | `model` | the `METRICS_MODEL_ALLOWLIST` allow-list (documented default in `apps/server/src/observability/metrics.ts`) plus `other`; provider prefixes are stripped before matching, so `openai/gpt-4o-mini` and `gpt-4o-mini` are one series |
+| all `mafia_llm_*` | `provider` | the §3 prefix set (`openai`, `anthropic`, `google`, `openrouter`, `custom`) plus `unknown` |
+
+Buckets for `mafia_benchmark_run_duration_seconds`: `300, 900, 1800, 3600,
+7200, 14400, 43200, 86400` (5 min to 24 h).
+
+Identifier cardinality is bounded by construction: the `mafia_llm_request_total`
+closed set is providers (6) × models (allow-list + `other`) × outcomes (2) =
+108 series with the default allow-list, well under the 200-series acceptance
+bound.
+
 ### 3.3 Tier 2 — storage, HTTP, and credential health (board row `OBS-003`)
 
 | Name | Type | Unit | Labels | The one question it answers |

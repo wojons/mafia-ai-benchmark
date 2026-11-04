@@ -22,10 +22,20 @@ import { fileURLToPath } from 'url';
 // recordGameTerminal (per-game single-count guard); gameActive is the
 // spawn/terminal gauge; providerFromUsageRows resolves the closed-set
 // {provider} label from the bridge's done usage rows.
+// OBS-002: Tier-1 metrics. recordLlmUsage turns the bridge's 'done' usage
+// rows into per-model request/token/cost/latency series;
+// recordFailedGameRequests turns child-exit evidence (never api_calls, which
+// is hard-coded 200) into the failed-request series; ChildLogObserver parses
+// the child's stderr for the engine's budget-stop and retry signatures.
 import {
+  ChildLogObserver,
   gameActive,
+  llmBudgetExhausted,
+  llmRetry,
   providerFromUsageRows,
+  recordFailedGameRequests,
   recordGameTerminal,
+  recordLlmUsage,
   type TerminalRecord,
 } from '../observability/metrics.js';
 
@@ -146,6 +156,8 @@ export class LegacyGameAdapter extends EventEmitter {
    * started with (MAF-GAP-043B). Same lifetime as activeGames entries.
    */
   private gameConfigs: Map<string, LegacyGameConfig>;
+  /** OBS-002: line-buffered stderr reader for the budget/retry signatures. */
+  private childLogs: ChildLogObserver;
   
   private static instance: LegacyGameAdapter | null = null;
   
@@ -155,6 +167,7 @@ export class LegacyGameAdapter extends EventEmitter {
     this.gameRepository = gameRepository;
     this.activeGames = new Map();
     this.gameConfigs = new Map();
+    this.childLogs = new ChildLogObserver();
     this.bridgeScriptPath = path.resolve(__dirname, 'legacy-bridge.js');
   }
   
@@ -315,42 +328,18 @@ export class LegacyGameAdapter extends EventEmitter {
     
     // Handle stderr
     childProcess.stderr.on('data', (data: Buffer) => {
-      console.error(`[LegacyAdapter:${gameId}] stderr:`, data.toString().trim());
+      const text = data.toString();
+      console.error(`[LegacyAdapter:${gameId}] stderr:`, text.trim());
+      // OBS-002: the engine's budget stop and retry warnings are only ever
+      // written to stderr (legacy-bridge.js:42-43 keeps stdout a clean JSON
+      // stream), so they are parsed here and counted through the closed-set
+      // helpers.
+      this.observeChildLog(gameId, text);
     });
     
     // Handle process exit
     childProcess.on('close', (code) => {
-      const state = this.activeGames.get(gameId);
-      if (state) {
-        state.endedAt = new Date();
-        if (code !== 0 && state.status !== 'COMPLETED') {
-          state.status = 'ERROR';
-          state.error = `Process exited with code ${code}`;
-        }
-        // Update database status
-        try {
-          // eslint-disable-next-line @typescript-eslint/no-explicit-any
-          const db = (this.gameRepository as any).db;
-          if (db && state.status === 'COMPLETED') {
-            db.prepare(`UPDATE games SET status = 'ENDED', ended_at = ? WHERE id = ?`)
-              .run(Date.now(), gameId);
-          } else if (db && state.status === 'ERROR') {
-            db.prepare(`UPDATE games SET status = 'CANCELLED', ended_at = ? WHERE id = ?`)
-              .run(Date.now(), gameId);
-          }
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        } catch (e: any) {
-          console.error(`[LegacyAdapter] Failed to update game status: ${e?.message || e}`);
-        }
-        // OBS-001: terminal metrics for every exit that reaches 'close'
-        // unrecorded (crash, bridge-reported upstream error, cancellation).
-        // The 'done' path records completed games BEFORE the child exits,
-        // and recordGameTerminal's per-game guard makes this call a no-op
-        // for them — one game, one increment, one active decrement.
-        recordGameTerminal(state, classifyTerminalClose(state, code));
-      }
-      console.log(`[LegacyAdapter] Game ${gameId} process ended (code ${code}), ${gameState.eventCount} events`);
-      this.emit('gameEnded', gameId);
+      this.handleChildClose(gameId, code);
     });
     
     childProcess.on('error', (error) => {
@@ -362,8 +351,12 @@ export class LegacyGameAdapter extends EventEmitter {
         // OBS-001: spawn failure — the child never started, so there is no
         // duration to observe. The per-game guard keeps this single-count
         // even when the failed spawn also fires the 'close' event.
-        recordGameTerminal(state, { outcome: 'failed', reason: 'bridge_spawn' });
+        const recorded = recordGameTerminal(state, { outcome: 'failed', reason: 'bridge_spawn' });
+        // OBS-002: the request stream died with the spawn — one failed
+        // request per participating model (see recordFailedGameRequests).
+        if (recorded) recordFailedGameRequests(this.configuredModels(gameId));
       }
+      this.childLogs.forget(gameId);
       console.error(`[LegacyAdapter] Game ${gameId} process error:`, error.message);
       this.emit('gameError', gameId, error);
     });
@@ -590,6 +583,14 @@ export class LegacyGameAdapter extends EventEmitter {
           message.usage as UsageAggregate[] | undefined,
           message.usageByPlayer as PlayerUsageAggregate[] | undefined,
         );
+
+        // OBS-002: Tier-1 LLM metrics from the SAME rows persistUsage just
+        // wrote — per-model completed requests, latency, tokens and cost. The
+        // outcome label here is the success side only; failures are recorded
+        // from child-exit evidence, because api_calls.status_code is
+        // hard-coded 200 (spec 2.3) and the engine never reports a failed
+        // call in the 'done' message.
+        recordLlmUsage(message.usage, message.usageByPlayer);
         
         // Publish game ended event
         this.publishEvent({
@@ -636,6 +637,120 @@ export class LegacyGameAdapter extends EventEmitter {
       default:
         console.log(`[LegacyAdapter:${gameId}] Unknown message type:`, message.type);
     }
+  }
+
+  /**
+   * OBS-001/OBS-002 terminal handling for one child-process exit: persist the
+   * games row status, record the single terminal metric transition, and — when
+   * that transition is a FAILURE — record the failed-request evidence.
+   *
+   * Extracted verbatim from the 'close' listener so a test can drive a real
+   * failed exit without spawning a bridge child.
+   */
+  private handleChildClose(gameId: string, code: number | null): void {
+    const state = this.activeGames.get(gameId);
+    if (state) {
+      state.endedAt = new Date();
+      if (code !== 0 && state.status !== 'COMPLETED') {
+        state.status = 'ERROR';
+        state.error = `Process exited with code ${code}`;
+      }
+      // Update database status
+      try {
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        const db = (this.gameRepository as any).db;
+        if (db && state.status === 'COMPLETED') {
+          db.prepare(`UPDATE games SET status = 'ENDED', ended_at = ? WHERE id = ?`)
+            .run(Date.now(), gameId);
+        } else if (db && state.status === 'ERROR') {
+          db.prepare(`UPDATE games SET status = 'CANCELLED', ended_at = ? WHERE id = ?`)
+            .run(Date.now(), gameId);
+        }
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      } catch (e: any) {
+        console.error(`[LegacyAdapter] Failed to update game status: ${e?.message || e}`);
+      }
+      // OBS-001: terminal metrics for every exit that reaches 'close'
+      // unrecorded (crash, bridge-reported upstream error, cancellation).
+      // The 'done' path records completed games BEFORE the child exits,
+      // and recordGameTerminal's per-game guard makes this call a no-op
+      // for them — one game, one increment, one active decrement.
+      const terminal = classifyTerminalClose(state, code);
+      const recorded = recordGameTerminal(state, terminal);
+      // OBS-002: a failed exit is the ONLY trustworthy failure evidence this
+      // stack has (api_calls.status_code is hard-coded 200 at :774), so the
+      // failed-request series is driven from here, once per terminal
+      // transition.
+      if (recorded && terminal.outcome === 'failed') {
+        recordFailedGameRequests(this.configuredModels(gameId));
+      }
+    }
+    // No terminal record (already-completed game): the buffered stderr tail
+    // is dead weight either way.
+    this.childLogs.forget(gameId);
+    console.log(
+      `[LegacyAdapter] Game ${gameId} process ended (code ${code}), ${state?.eventCount ?? 0} events`,
+    );
+    this.emit('gameEnded', gameId);
+  }
+
+  /**
+   * OBS-002: turn one stderr chunk into closed-set budget/retry counters.
+   * The engine's log line names the PLAYER, not the model, so the provider is
+   * the game's configured prefix when every configured model agrees on one
+   * (else 'unknown' — never a guess).
+   */
+  private observeChildLog(gameId: string, text: string): void {
+    try {
+      const signals = this.childLogs.push(gameId, text);
+      if (signals.length === 0) return;
+      const provider = this.providerHintFor(gameId);
+      for (const signal of signals) {
+        if (signal.kind === 'budget') {
+          llmBudgetExhausted(provider);
+        } else {
+          llmRetry(provider, signal.reason);
+        }
+      }
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    } catch (e: any) {
+      console.error(`[LegacyAdapter] Failed to record child log signal: ${e?.message || e}`);
+    }
+  }
+
+  /**
+   * OBS-002: the distinct 'provider/model' pairs this game was started with
+   * (from config.roleModels — the same config that becomes the child's env).
+   * Used for the failed-game request floor and the provider label of
+   * stderr-derived signals. Object-typed specs (DF-43 UI shape) and bare
+   * names are handled the same way startGame resolves them.
+   */
+  private configuredModels(gameId: string): Array<{ provider: string; model: string }> {
+    const config = this.gameConfigs.get(gameId);
+    const specs = config?.roleModels ? Object.values(config.roleModels) : [];
+    const seen = new Set<string>();
+    const models: Array<{ provider: string; model: string }> = [];
+    for (const spec of specs) {
+      if (typeof spec !== 'string' || !spec.trim()) continue;
+      const value = spec.trim();
+      const slash = value.indexOf('/');
+      const provider = slash > 0 ? value.slice(0, slash) : value;
+      const model = slash > 0 ? value.slice(slash + 1) : value;
+      if (!provider || !model) continue;
+      const key = `${provider}/${model}`;
+      if (seen.has(key)) continue;
+      seen.add(key);
+      models.push({ provider, model });
+    }
+    return models;
+  }
+
+  /** OBS-002: closed-set provider hint for child-log signals (see observeChildLog). */
+  private providerHintFor(gameId: string): string {
+    const providers = new Set(
+      this.configuredModels(gameId).map((entry) => entry.provider.split('/')[0].toLowerCase()),
+    );
+    return providers.size === 1 ? [...providers][0] : 'unknown';
   }
 
   /**

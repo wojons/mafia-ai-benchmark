@@ -250,6 +250,7 @@ changing them requires a new game, not a server restart.
 | `COST_WARNING_THRESHOLD` | engine child | `game-engine.js:2310` (budget warning fires at this fraction of the per-game limit, 0–1) | `0.80` |
 | `PORT` | server | `apps/server/src/index.ts:28` (container port pinned to 3000 by compose) | 3000 (`DEFAULT_PORT`) |
 | `DB_PATH` | server | `apps/server/src/index.ts:43` (SQLite database path) | `./data/mafia.db` |
+| `METRICS_MODEL_ALLOWLIST` | server | `apps/server/src/observability/metrics.ts` (comma-separated model allow-list for the `mafia_llm_*` `{model}` label; any other model rolls up to `other`) | built-in default list in `metrics.ts` |
 | `NODE_ENV` | server | `apps/server/src/index.ts:128` (`production` hides internal error details in API error responses) | — |
 | `ENABLE_DATABASE` | engine child | `game-engine.js:1750` (legacy engine: `"true"` enables SQLite persistence of legacy-engine games) | `false` |
 | `TEST_BASE_URL` | test-only | `apps/server/src/__tests__/helpers/mafia-server.ts:10` (base URL the server integration suite targets; CI pins it per `.github/workflows/ci.yml`) | `http://localhost:3004` |

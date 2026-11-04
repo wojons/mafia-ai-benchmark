@@ -122,6 +122,15 @@ async function main(): Promise<void> {
       `${reconcileSummary.inspected} inspected`,
   );
 
+  // OBS-002: prime mafia_benchmark_run_stranded / mafia_benchmark_games_queued
+  // from the just-reconciled state, then keep them fresh on a timer. Games can
+  // start and finish between run transitions (the run stays RUNNING), so a
+  // scrape-only or transition-only refresh would report a stale backlog. The
+  // timer is unref'd: it never holds the process open on shutdown.
+  benchmarkRunner.refreshRunGauges();
+  const benchmarkGaugeTimer = setInterval(() => benchmarkRunner.refreshRunGauges(), 30_000);
+  benchmarkGaugeTimer.unref();
+
   const app = express();
   const httpServer = createServer(app);
 

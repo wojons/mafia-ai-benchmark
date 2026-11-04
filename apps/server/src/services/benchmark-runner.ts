@@ -15,6 +15,11 @@ import type { StatsCollector } from './stats-collector.js';
 import type { GameRepository } from '../db/repository.js';
 import { GameRepository as GameRepositoryClass } from '../db/repository.js';
 import type { LegacyGameAdapter } from './legacy-game-adapter.js';
+import {
+  benchmarkRunTerminal,
+  refreshBenchmarkGauges,
+  type MetricsGaugeDatabase,
+} from '../observability/metrics.js';
 
 /**
  * Configuration accepted by POST /api/v1/benchmark.
@@ -251,6 +256,13 @@ export class BenchmarkRunner {
   private gameRepository: GameRepository;
   private legacyAdapter: LegacyGameAdapter | null;
   private db: Database.Database;
+  /**
+   * OBS-002 single-count guard: a run id enters this set when its terminal
+   * metric transition is recorded, so a second terminal writer for the same
+   * run (cancel after complete, a repeat reconcile pass) cannot double-count
+   * mafia_benchmark_run_total or re-observe its duration.
+   */
+  private readonly recordedTerminalRuns = new Set<string>();
 
   constructor(deps: {
     gameEngine: GameEngine;
@@ -302,6 +314,8 @@ export class BenchmarkRunner {
 
       // Mark the run as RUNNING now that games have been created.
       this.updateRunStatus(runId, 'RUNNING', now);
+      // OBS-002: the run now owns pending games — refresh the backlog gauge.
+      this.refreshRunGauges();
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
       this.failRun(runId, message, now);
@@ -759,7 +773,10 @@ export class BenchmarkRunner {
     if (existing.status === 'COMPLETED' || existing.status === 'CANCELLED') {
       return false;
     }
-    this.updateRunStatus(runId, 'CANCELLED', Date.now());
+    const now = Date.now();
+    this.updateRunStatus(runId, 'CANCELLED', now);
+    // OBS-002: terminal metric transition (guarded by recordRunTerminal).
+    this.recordRunTerminal(runId, 'CANCELLED', now);
     console.log(`[BenchmarkRunner] Cancelled run ${runId}`);
     return true;
   }
@@ -871,6 +888,8 @@ export class BenchmarkRunner {
             row.id,
           );
         summary.staleFailed++;
+        // OBS-002: the sweep just terminalised the run — count it once.
+        this.recordRunTerminal(row.id, 'FAILED', now);
         console.log(
           `[BenchmarkRunner] Run ${row.id} marked FAILED: no terminal game evidence after ` +
             `${Math.floor(STALE_RUN_MAX_MS / 86_400_000)} days (stale-run sweep)`,
@@ -887,6 +906,10 @@ export class BenchmarkRunner {
           `${summary.inspected} inspected)`,
       );
     }
+
+    // OBS-002: the sweep may have changed both gauges (stranded -> 0 for the
+    // runs it just failed, and the pending-game backlog of what remains).
+    this.refreshRunGauges();
 
     return summary;
   }
@@ -938,6 +961,9 @@ export class BenchmarkRunner {
         )
         .run('COMPLETED', now, summaryPayload, now, runId);
     }
+
+    // OBS-002: a recovered run IS a terminal transition — count it once.
+    this.recordRunTerminal(runId, errored ? 'FAILED' : 'COMPLETED', now);
 
     const parsed = (() => {
       try {
@@ -1354,6 +1380,53 @@ export class BenchmarkRunner {
     return `${provider}/${model}`;
   }
 
+  /**
+   * OBS-002: record one run's TERMINAL metric transition exactly once.
+   *
+   * The guard is per-run and in-process (the registry is per-process too), so
+   * the several writers that can terminalise a run — maybeCompleteRun,
+   * cancel, failRun, startup reconciliation, the stale sweep — can all call
+   * this without double-counting. `completedAt` is the transition timestamp;
+   * the duration is measured from the run's persisted created_at, the same
+   * clock the stale sweep uses.
+   */
+  private recordRunTerminal(
+    runId: string,
+    status: BenchmarkRunStatusValue,
+    completedAt: number,
+  ): void {
+    if (status !== 'COMPLETED' && status !== 'CANCELLED' && status !== 'FAILED') return;
+    if (this.recordedTerminalRuns.has(runId)) return;
+    this.recordedTerminalRuns.add(runId);
+    let durationSeconds: number | undefined;
+    try {
+      const row = this.db
+        .prepare('SELECT created_at FROM benchmark_runs WHERE id = ?')
+        .get(runId) as { created_at: number } | undefined;
+      if (row && Number.isFinite(row.created_at)) {
+        durationSeconds = (completedAt - row.created_at) / 1000;
+      }
+    } catch (e) {
+      console.error(
+        `[BenchmarkRunner] Run ${runId}: could not read created_at for metrics: ` +
+          (e instanceof Error ? e.message : String(e)),
+      );
+    }
+    benchmarkRunTerminal(status, durationSeconds);
+    this.refreshRunGauges();
+  }
+
+  /**
+   * OBS-002: refresh mafia_benchmark_run_stranded and
+   * mafia_benchmark_games_queued from durable rows. Called at startup (after
+   * reconciliation), on every run transition, and on a timer wired in
+   * index.ts so the gauges track games that finish between transitions.
+   * Never throws (see refreshBenchmarkGauges).
+   */
+  refreshRunGauges(): void {
+    refreshBenchmarkGauges(this.db as unknown as MetricsGaugeDatabase, STALE_RUN_MAX_MS);
+  }
+
   private persistRun(
     runId: string,
     config: Required<BenchmarkConfig>,
@@ -1384,6 +1457,8 @@ export class BenchmarkRunner {
         'UPDATE benchmark_runs SET status = ?, error = ?, completed_at = ?, updated_at = ? WHERE id = ?',
       )
       .run('FAILED', error, now, now, runId);
+    // OBS-002: terminal metric transition (guarded by recordRunTerminal).
+    this.recordRunTerminal(runId, 'FAILED', now);
   }
 
   /** Check if all games in the run have completed, and if so, mark COMPLETED. */
@@ -1406,6 +1481,9 @@ export class BenchmarkRunner {
         'UPDATE benchmark_runs SET status = ?, completed_at = ?, summary = ?, updated_at = ? WHERE id = ?',
       )
       .run(errored ? 'FAILED' : 'COMPLETED', now, this.buildRunSummary(runId), now, runId);
+
+    // OBS-002: terminal metric transition (guarded by recordRunTerminal).
+    this.recordRunTerminal(runId, errored ? 'FAILED' : 'COMPLETED', now);
 
     console.log(`[BenchmarkRunner] Run ${runId} ${errored ? 'failed' : 'completed'}`);
   }
