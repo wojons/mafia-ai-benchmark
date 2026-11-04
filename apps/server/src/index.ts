@@ -24,6 +24,7 @@ import { bodyParseErrorHandler } from './middleware/body-parse-error.js';
 import { adminAuthMiddleware } from './middleware/auth.js';
 import { DEFAULT_PORT } from './config.js';
 import { GameLifecycleReconciler } from './services/game-lifecycle-reconciler.js';
+import { registry } from './observability/metrics.js';
 
 dotenv.config();
 
@@ -129,6 +130,23 @@ async function main(): Promise<void> {
   app.use(compression());
   app.use(express.json());
   app.use(express.urlencoded({ extended: true }));
+
+  // OBS-001: unauthenticated Prometheus scrape endpoint (spec section 4).
+  // Mounted BEFORE the admin auth middleware — the fleet collector cannot
+  // send a bearer token in this stack — and before setupRoutes and the 404
+  // catch-all. Collection never touches the database, and the try/catch
+  // keeps a wedged collector from 500ing the whole scrape: an unhealthy
+  // collector still answers, it just answers with a scrape error.
+  app.get('/metrics', async (_req, res) => {
+    try {
+      const body = await registry.metrics();
+      res.set('Content-Type', registry.contentType);
+      res.end(body);
+    } catch (e) {
+      console.error('[metrics] registry collection failed:', (e as Error).message);
+      res.status(500).set('Content-Type', 'text/plain; charset=utf-8').end('# mafia metrics collection failed\n');
+    }
+  });
 
   // MAF-REV-004: optional admin token auth. Passthrough (disabled) while
   // ADMIN_AUTH_TOKEN is unset; enforces admin credentials for ADMIN-visibility

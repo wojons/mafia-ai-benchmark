@@ -18,6 +18,16 @@ import { GameEvent, EventVisibility, GamePhase, EventType } from '@mafia/shared/
 import { v4 as uuidv4 } from 'uuid';
 import path from 'path';
 import { fileURLToPath } from 'url';
+// OBS-001: Tier-0 metrics. All terminal recording goes through
+// recordGameTerminal (per-game single-count guard); gameActive is the
+// spawn/terminal gauge; providerFromUsageRows resolves the closed-set
+// {provider} label from the bridge's done usage rows.
+import {
+  gameActive,
+  providerFromUsageRows,
+  recordGameTerminal,
+  type TerminalRecord,
+} from '../observability/metrics.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -53,6 +63,40 @@ export interface LegacyGameState {
   startedAt: Date;
   endedAt?: Date;
   error?: string;
+  /**
+   * OBS-001 single-count guard: set by the FIRST terminal metrics recording
+   * for this game ('done' message, child 'close', or child 'error'), so a
+   * game increments mafia_game_ended_total exactly once even though several
+   * terminal signals fire for one child process.
+   */
+  metricsRecorded?: boolean;
+  /** OBS-001: DF-18 degenerate-game flag observed at completion. */
+  degenerate?: boolean;
+  /** OBS-001: closed-set provider prefix for the {provider} metric label. */
+  provider?: string;
+}
+
+/**
+ * OBS-001: classify a terminal child-process exit into the closed outcome/
+ * reason label sets. Called from the child 'close' handler, which fires for
+ * EVERY game exit (completed or not) — games already recorded by the 'done'
+ * path are dropped by recordGameTerminal's guard, so this classifier only
+ * needs to describe the exit, not decide whether it counts.
+ *
+ *   - non-zero exit            -> failed / bridge_crash
+ *   - bridge-reported error
+ *     with a zero/null exit    -> failed / upstream_error
+ *   - terminal exit with no
+ *     completion and no error  -> cancelled / unknown
+ */
+export function classifyTerminalClose(state: LegacyGameState, code: number | null): TerminalRecord {
+  if (code !== null && code !== 0) {
+    return { outcome: 'failed', reason: 'bridge_crash', provider: state.provider };
+  }
+  if (state.status === 'ERROR' && state.error) {
+    return { outcome: 'failed', reason: 'upstream_error', provider: state.provider };
+  }
+  return { outcome: 'cancelled', reason: 'unknown', provider: state.provider };
 }
 
 /**
@@ -246,7 +290,9 @@ export class LegacyGameAdapter extends EventEmitter {
     };
     
     this.activeGames.set(gameId, gameState);
-    
+    // OBS-001: spawn accepted -> one active game.
+    gameActive(1);
+
     // Handle stdout - JSON events
     let buffer = '';
     childProcess.stdout.on('data', (data: Buffer) => {
@@ -296,6 +342,12 @@ export class LegacyGameAdapter extends EventEmitter {
         } catch (e: any) {
           console.error(`[LegacyAdapter] Failed to update game status: ${e?.message || e}`);
         }
+        // OBS-001: terminal metrics for every exit that reaches 'close'
+        // unrecorded (crash, bridge-reported upstream error, cancellation).
+        // The 'done' path records completed games BEFORE the child exits,
+        // and recordGameTerminal's per-game guard makes this call a no-op
+        // for them — one game, one increment, one active decrement.
+        recordGameTerminal(state, classifyTerminalClose(state, code));
       }
       console.log(`[LegacyAdapter] Game ${gameId} process ended (code ${code}), ${gameState.eventCount} events`);
       this.emit('gameEnded', gameId);
@@ -307,6 +359,10 @@ export class LegacyGameAdapter extends EventEmitter {
         state.status = 'ERROR';
         state.error = error.message;
         state.endedAt = new Date();
+        // OBS-001: spawn failure — the child never started, so there is no
+        // duration to observe. The per-game guard keeps this single-count
+        // even when the failed spawn also fires the 'close' event.
+        recordGameTerminal(state, { outcome: 'failed', reason: 'bridge_spawn' });
       }
       console.error(`[LegacyAdapter] Game ${gameId} process error:`, error.message);
       this.emit('gameError', gameId, error);
@@ -408,6 +464,7 @@ export class LegacyGameAdapter extends EventEmitter {
               const total = saysRows?.total ?? 0;
               const isDegenerate = total >= 3 && nonEmpty === 0 && duration < 120_000;
               if (isDegenerate) {
+                state.degenerate = true;
                 db.prepare(
                   `UPDATE games SET config = json_set(config, '$.degenerate', 1) WHERE id = ?`,
                 ).run(gameId);
@@ -555,6 +612,18 @@ export class LegacyGameAdapter extends EventEmitter {
             phase: 'GAME_OVER' as GamePhase,
             sequence: state.eventCount + 1,
           },
+        });
+
+        // OBS-001: Tier-0 completion metrics, recorded exactly once via the
+        // per-game guard — the child 'close' event that always follows is a
+        // no-op for this game. Degenerate games (DF-18 flag above) land on
+        // their own closed-set outcome instead of 'completed'.
+        state.endedAt = new Date();
+        state.provider = providerFromUsageRows(message.usage);
+        recordGameTerminal(state, {
+          outcome: state.degenerate ? 'degenerate' : 'completed',
+          provider: state.provider,
+          durationSeconds: (state.endedAt.getTime() - state.startedAt.getTime()) / 1000,
         });
         break;
         
