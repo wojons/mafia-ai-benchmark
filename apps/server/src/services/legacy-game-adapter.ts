@@ -30,6 +30,7 @@ import { fileURLToPath } from 'url';
 import {
   ChildLogObserver,
   gameActive,
+  healthcheckFailed,
   llmBudgetExhausted,
   llmRetry,
   providerFromUsageRows,
@@ -344,6 +345,10 @@ export class LegacyGameAdapter extends EventEmitter {
     
     childProcess.on('error', (error) => {
       const state = this.activeGames.get(gameId);
+      // OBS-003: the host could not give us a child (EAGAIN/ENOMEM/spawn
+      // ENOENT). /health still answers 200; this is the only signal that the
+      // server cannot play games at all.
+      healthcheckFailed('spawn_capacity');
       if (state) {
         state.status = 'ERROR';
         state.error = error.message;
@@ -943,6 +948,9 @@ export class LegacyGameAdapter extends EventEmitter {
         );
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       } catch (e: any) {
+        // OBS-003: a best-effort write that failed is exactly what /health
+        // cannot see — the game keeps "working" while its rows vanish.
+        healthcheckFailed('db_write');
         console.error(`[LegacyAdapter] Failed to persist token usage: ${e?.message || e}`);
       }
 
@@ -960,6 +968,7 @@ export class LegacyGameAdapter extends EventEmitter {
         );
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       } catch (e: any) {
+        healthcheckFailed('db_write');
         console.error(`[LegacyAdapter] Failed to persist api call: ${e?.message || e}`);
       }
 
@@ -978,6 +987,7 @@ export class LegacyGameAdapter extends EventEmitter {
         );
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       } catch (e: any) {
+        healthcheckFailed('db_write');
         console.error(`[LegacyAdapter] Failed to persist player game stats: ${e?.message || e}`);
       }
     }
@@ -1013,6 +1023,7 @@ export class LegacyGameAdapter extends EventEmitter {
           );
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
         } catch (e: any) {
+          healthcheckFailed('db_write');
           console.error(`[LegacyAdapter] Failed to persist per-player token usage: ${e?.message || e}`);
         }
 
@@ -1030,6 +1041,7 @@ export class LegacyGameAdapter extends EventEmitter {
           );
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
         } catch (e: any) {
+          healthcheckFailed('db_write');
           console.error(`[LegacyAdapter] Failed to persist per-player api call: ${e?.message || e}`);
         }
       }

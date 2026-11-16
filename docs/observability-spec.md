@@ -250,6 +250,30 @@ bound.
 | `mafia_game_in_progress` | gauge | games | — | Orphan detector: `IN_PROGRESS` rows with no live owner (bug 2 in §2.4). Alert when > 0 for 15 m. |
 | `mafia_healthcheck_failed_total` | counter | checks | `check` (`db_write`, `legacy_adapter`, `spawn_capacity`) | What is broken while the process still says "healthy"? |
 
+Implementation notes for `OBS-003` (proven in
+`apps/server/src/__tests__/observability/metrics-tier2.test.ts`):
+
+- **"Live owner"** (the `mafia_game_in_progress` predicate) has exactly one
+  definition, shared with `GameLifecycleReconciler`: an `IN_PROGRESS` game is
+  owned by this process while its id is in the server's live set (a
+  `GameEngine` game, or a legacy adapter game whose bridge child is still
+  `RUNNING`), or while its newest activity evidence (`created_at`,
+  `started_at`, newest `events.timestamp`) is younger than
+  `ORPHAN_GAME_STALE_MS` (5 minutes). A never-started ghost
+  (`started_at IS NULL` with zero player rows) counts immediately, because no
+  engine can ever own it. Killing a bridge child drops the id from the live
+  set, so the row is counted once its evidence ages past the window — that is
+  the §6.3 `> 0` check.
+- `mafia_storage_bytes` / `mafia_storage_rows` are refreshed at boot and then
+  on `STORAGE_GAUGE_REFRESH_MS` (30 s) **only** — never on scrape and never on
+  a request path: `events` holds ~200k rows, so a per-scrape `COUNT(*)` would
+  block the event loop on the same order as the measured
+  `/api/v1/benchmark/compare` regression.
+- `route` is `req.baseUrl + req.route.path` (the matched Express pattern).
+  Unmatched requests collapse to `route="unmatched"`, and the
+  (route, method) cardinality is capped by `MAX_HTTP_ROUTE_METHOD_PAIRS`
+  (overflow → `route="other"`), so a game id can never become a series.
+
 ---
 
 ## 4. Exposure mechanism

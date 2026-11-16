@@ -1,6 +1,7 @@
 import { randomUUID } from 'node:crypto';
 import type { GameRepository } from '../db/repository.js';
 import type { GameEvent } from '@mafia/shared/events';
+import { healthcheckFailed } from '../observability/metrics.js';
 
 /**
  * A persisted IN_PROGRESS row is only trustworthy while its owner is present
@@ -184,6 +185,7 @@ export class GameLifecycleReconciler {
     } catch {
       // The status transition is the durable part of the retirement; the
       // reason event is evidence of the WHY and must never undo it.
+      healthcheckFailed('db_write');
     }
     return 1;
   }

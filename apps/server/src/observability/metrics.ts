@@ -28,6 +28,9 @@
  * recording helpers that coerce/drop bad input instead of throwing.
  */
 
+import fs from 'node:fs';
+
+import type { NextFunction, Request, Response } from 'express';
 import client, { type Counter, type Gauge, type Histogram, type Registry } from 'prom-client';
 
 /** Single source of truth for the mafia_server_up version label. */
@@ -784,6 +787,470 @@ export class ChildLogObserver {
 
   forget(gameId: string): void {
     this.buffers.delete(gameId);
+  }
+}
+
+// ===========================================================================
+// OBS-003 — Tier 2: storage, HTTP and orphan liveness (spec section 3.3)
+// ===========================================================================
+
+/**
+ * The six — and only six — tables mafia_storage_rows may ever label.
+ *
+ * The allow-list is closed at the module, and the label value is interpolated
+ * from THIS array (never from a caller or a request): an unknown table can
+ * neither create a series nor reach the SQL. A missing table on a legacy
+ * schema keeps its last-good value instead of throwing.
+ */
+export const STORAGE_TABLES = [
+  'games',
+  'players',
+  'events',
+  'api_calls',
+  'token_usage',
+  'benchmark_runs',
+] as const;
+export type StorageTable = (typeof STORAGE_TABLES)[number];
+
+/**
+ * How often the storage snapshot is recomputed. Counting `events` (~200k rows
+ * on the live DB) is a real table scan, so it happens on THIS interval ONLY —
+ * never on scrape and never on a request path. 30 s matches the benchmark
+ * gauge refresh the server already runs.
+ */
+export const STORAGE_GAUGE_REFRESH_MS = 30_000;
+
+/**
+ * Orphan window for mafia_game_in_progress.
+ *
+ * "Live owner" is defined once, here, and shared with the retirement seam:
+ * an IN_PROGRESS game is OWNED by this process iff its id is in the live set
+ * the server passes in (the union of GameEngine's active games and the legacy
+ * adapter's RUNNING games — i.e. a bridge child that is still alive), OR its
+ * persisted activity evidence (created_at / started_at / newest event
+ * timestamp) is younger than this window. A row with no owner and no
+ * heartbeat inside the window is ORPHANED — nobody can ever advance it, and
+ * /health still says healthy. Retiring those rows is
+ * GameLifecycleReconciler's job (24 h window, read-path safe); this gauge is
+ * the fast alarm in front of it, which is why its window is minutes, not a
+ * day. Killing a bridge child removes it from the live set immediately, so
+ * the row is counted as an orphan once its last event ages past this window.
+ */
+export const ORPHAN_GAME_STALE_MS = 5 * 60 * 1000;
+
+/** Closed {check} set for mafia_healthcheck_failed_total (spec 3.3). */
+export const HEALTHCHECK_NAMES = ['db_write', 'legacy_adapter', 'spawn_capacity'] as const;
+export type HealthcheckName = (typeof HEALTHCHECK_NAMES)[number];
+const HEALTHCHECK_NAME_SET: ReadonlySet<string> = new Set(HEALTHCHECK_NAMES);
+
+/**
+ * Closed {method} set for the HTTP families. Anything else (a custom verb, a
+ * lowercase spelling) collapses to HTTP_METHOD_OTHER rather than minting a
+ * series per spelling.
+ */
+export const HTTP_METHODS = ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'HEAD', 'OPTIONS'] as const;
+export type HttpMethodLabel = (typeof HTTP_METHODS)[number];
+export const HTTP_METHOD_OTHER = 'OTHER';
+const HTTP_METHOD_SET: ReadonlySet<string> = new Set(HTTP_METHODS);
+const HTTP_METHOD_LABELS: readonly string[] = [...HTTP_METHODS, HTTP_METHOD_OTHER];
+
+/** Closed {status_class} set (spec 3.3). */
+export const HTTP_STATUS_CLASSES = ['2xx', '3xx', '4xx', '5xx'] as const;
+export type HttpStatusClass = (typeof HTTP_STATUS_CLASSES)[number];
+
+/** Requests that matched no route collapse onto this single series. */
+export const UNMATCHED_ROUTE_LABEL = 'unmatched';
+/** Overflow bucket: a new route pattern past the pair cap lands here. */
+export const OTHER_ROUTE_LABEL = 'other';
+
+/**
+ * Hard cap on distinct (route, method) pairs the HTTP families may create.
+ *
+ * This is what makes the label set BOUNDED rather than "bounded in practice":
+ * the route label is the Express pattern (never the concrete path), so the
+ * only unbounded axis left is "how many routes does this app have". Past the
+ * cap, a new pair is recorded under route="other", which costs at most one
+ * series per method. Arithmetic (see the OBS-003 commit message):
+ *   40 tracked pairs + 1 overflow pair per method (8) = 48 pairs
+ *   counter:   48 x 4 status classes          = 192 series
+ *   histogram: 48 (one instrument per pair)   =  48 series
+ *   storage: 1 + 6, orphan: 1, healthcheck: 3 =  11 series
+ *                                           total 251 < 300
+ */
+export const MAX_HTTP_ROUTE_METHOD_PAIRS = 40;
+
+const storageBytesGauge: Gauge<string> = new client.Gauge({
+  name: 'mafia_storage_bytes',
+  help: 'Bytes of the SQLite file this server is actually using.',
+  registers: [registry],
+});
+
+const storageRowsGauge: Gauge<string> = new client.Gauge({
+  name: 'mafia_storage_rows',
+  help: 'Rows per allow-listed table, so growth is attributable.',
+  labelNames: ['table'],
+  registers: [registry],
+});
+
+const httpRequestsCounter: Counter<string> = new client.Counter({
+  name: 'mafia_http_requests_total',
+  help: 'Requests by matched route pattern, method and status class.',
+  labelNames: ['route', 'method', 'status_class'],
+  registers: [registry],
+});
+
+const httpDurationHistogram: Histogram<string> = new client.Histogram({
+  name: 'mafia_http_request_duration_seconds',
+  help: 'Request latency by matched route pattern and method.',
+  labelNames: ['route', 'method'],
+  buckets: [0.005, 0.01, 0.025, 0.05, 0.1, 0.25, 0.5, 1, 2.5, 5, 10, 30],
+  registers: [registry],
+});
+
+const gameInProgressGauge: Gauge<string> = new client.Gauge({
+  name: 'mafia_game_in_progress',
+  help: 'IN_PROGRESS game rows with no live owner (orphans; must stay 0).',
+  registers: [registry],
+});
+
+const healthcheckFailedCounter: Counter<string> = new client.Counter({
+  name: 'mafia_healthcheck_failed_total',
+  help: 'Real failure sites that /health does not report, by check.',
+  labelNames: ['check'],
+  registers: [registry],
+});
+
+/**
+ * Pre-register every closed OBS-003 series at zero (module load), so a fresh
+ * process is scrapable before the first request and before the first storage
+ * refresh. The HTTP families pre-register their one truly closed label value,
+ * `route="unmatched"`: the routed values are the app's own static route
+ * table (bounded by MAX_HTTP_ROUTE_METHOD_PAIRS), not request data.
+ */
+storageBytesGauge.set(0);
+for (const table of STORAGE_TABLES) {
+  storageRowsGauge.set({ table }, 0);
+}
+gameInProgressGauge.set(0);
+for (const check of HEALTHCHECK_NAMES) {
+  healthcheckFailedCounter.inc({ check }, 0);
+}
+for (const method of HTTP_METHOD_LABELS) {
+  httpDurationHistogram.zero({ route: UNMATCHED_ROUTE_LABEL, method });
+  for (const statusClass of HTTP_STATUS_CLASSES) {
+    httpRequestsCounter.inc(
+      { route: UNMATCHED_ROUTE_LABEL, method, status_class: statusClass },
+      0,
+    );
+  }
+}
+
+/** Count one failure at a real site that /health does not reflect. Unknown checks are dropped. */
+export function healthcheckFailed(check: HealthcheckName): void {
+  if (!HEALTHCHECK_NAME_SET.has(check)) return;
+  healthcheckFailedCounter.inc({ check }, 1);
+}
+
+/** Coerce an HTTP method into the closed {method} set. */
+export function normalizeHttpMethod(method: unknown): string {
+  if (typeof method !== 'string') return HTTP_METHOD_OTHER;
+  const upper = method.trim().toUpperCase();
+  return HTTP_METHOD_SET.has(upper) ? upper : HTTP_METHOD_OTHER;
+}
+
+/**
+ * Map a real terminal status code onto the closed {status_class} set.
+ *
+ * res.statusCode at 'finish' is always a final 2xx-5xx code; the fallback
+ * (a 1xx/0/NaN that should be impossible) counts as 5xx so an anomalous
+ * terminal status raises an alert instead of hiding in 2xx.
+ */
+export function statusClassOf(statusCode: unknown): HttpStatusClass {
+  const code = typeof statusCode === 'number' ? statusCode : Number(statusCode);
+  if (!Number.isFinite(code)) return '5xx';
+  if (code >= 500) return '5xx';
+  if (code >= 400) return '4xx';
+  if (code >= 300) return '3xx';
+  if (code >= 200) return '2xx';
+  return '5xx';
+}
+
+/** The slice of an Express request the route label needs (kept structural for tests). */
+export interface HttpRouteCarrier {
+  baseUrl?: unknown;
+  path?: unknown;
+  route?: { path?: unknown } | undefined;
+}
+
+/**
+ * Resolve the {route} label from the MATCHED Express route.
+ *
+ * Express populates `req.route` only when a route pattern matched, and its
+ * `path` is the pattern as declared (`/api/v1/games/:gameId`) — never the
+ * concrete URL. The mount prefix lives on `req.baseUrl`. Anything that cannot
+ * be resolved (the 404 catch-all, an auth rejection before routing, a RegExp
+ * route) becomes the single `unmatched` series, so a game id can never become
+ * a label.
+ */
+export function routeLabelFor(req: HttpRouteCarrier): string {
+  const declared = req?.route?.path;
+  const path = Array.isArray(declared) ? declared[0] : declared;
+  if (typeof path !== 'string' || !path) return UNMATCHED_ROUTE_LABEL;
+  const base = typeof req.baseUrl === 'string' ? req.baseUrl : '';
+  const prefix = base.endsWith('/') ? base.slice(0, -1) : base;
+  const pattern = `${prefix}${path.startsWith('/') ? path : `/${path}`}`;
+  return pattern.startsWith('/') ? pattern : `/${pattern}`;
+}
+
+/** (route, method) pairs already minted, for the MAX_HTTP_ROUTE_METHOD_PAIRS bound. */
+const instrumentedHttpPairs = new Set<string>();
+
+/** Bound a route+method pair, collapsing overflow onto route="other". */
+function boundedRouteLabel(route: string, method: string): string {
+  const key = `${route}\u0000${method}`;
+  if (instrumentedHttpPairs.has(key)) return route;
+  if (instrumentedHttpPairs.size >= MAX_HTTP_ROUTE_METHOD_PAIRS) return OTHER_ROUTE_LABEL;
+  instrumentedHttpPairs.add(key);
+  return route;
+}
+
+/**
+ * Record one finished HTTP request. Never throws: instrumentation must not be
+ * able to fail a request that already succeeded.
+ */
+export function recordHttpRequest(
+  route: unknown,
+  method: unknown,
+  statusCode: unknown,
+  durationSeconds: unknown,
+): void {
+  try {
+    const safeRoute = typeof route === 'string' && route ? route : UNMATCHED_ROUTE_LABEL;
+    const safeMethod = normalizeHttpMethod(method);
+    const labels = { route: boundedRouteLabel(safeRoute, safeMethod), method: safeMethod };
+    httpRequestsCounter.inc({ ...labels, status_class: statusClassOf(statusCode) }, 1);
+    const seconds = numberOf(durationSeconds);
+    if (seconds !== undefined && seconds >= 0) httpDurationHistogram.observe(labels, seconds);
+  } catch (error) {
+    console.error(
+      `[metrics] http recording failed: ${error instanceof Error ? error.message : String(error)}`,
+    );
+  }
+}
+
+/** True for the scrape endpoint itself, which must never be instrumented. */
+export function isMetricsPath(path: unknown): boolean {
+  if (typeof path !== 'string') return false;
+  const normalized = path.length > 1 && path.endsWith('/') ? path.slice(0, -1) : path;
+  return normalized === '/metrics';
+}
+
+/**
+ * Express middleware behind the two HTTP families (spec 3.3).
+ *
+ * Mounted AFTER the /metrics route (so the scrape is never counted) and after
+ * auth (an auth rejection is not an endpoint error), BEFORE the routers so
+ * `req.route` is populated by the time 'finish' fires. `status_class` comes
+ * from the real `res.statusCode` at finish — the response status, not the
+ * handler's intent.
+ */
+export function httpMetricsMiddleware() {
+  return (req: Request, res: Response, next: NextFunction): void => {
+    const startedAt = process.hrtime.bigint();
+    res.on('finish', () => {
+      if (isMetricsPath(req.path)) return;
+      recordHttpRequest(
+        routeLabelFor(req),
+        req.method,
+        res.statusCode,
+        Number(process.hrtime.bigint() - startedAt) / 1e9,
+      );
+    });
+    next();
+  };
+}
+
+/** The slice of better-sqlite3 the storage/OBS-003 gauges need. */
+export interface MetricsStorageDatabase {
+  prepare(sql: string): {
+    get(...params: unknown[]): unknown;
+    all(...params: unknown[]): unknown;
+  };
+}
+
+/** One IN_PROGRESS row plus the activity evidence the orphan rule needs. */
+interface InProgressGameRow {
+  id?: unknown;
+  created_at?: unknown;
+  started_at?: unknown;
+  last_event_at?: unknown;
+  player_count?: unknown;
+}
+
+/** What one storage refresh observed. */
+export interface StorageGaugeSnapshot {
+  /** Size in bytes of the SQLite file the server resolved (last good value on error). */
+  bytes: number;
+  /** Row count per allow-listed table. */
+  rows: Record<StorageTable, number>;
+  /** IN_PROGRESS rows with no live owner (see ORPHAN_GAME_STALE_MS). */
+  inProgressOrphans: number;
+}
+
+export interface StorageGaugesOptions {
+  db: MetricsStorageDatabase;
+  /** The DB file the server resolved (same DB_PATH resolution); enables the exact stat. */
+  dbPath?: string;
+  /** Injectable clock for tests. */
+  now?: number;
+  /** Override the orphan window (defaults to ORPHAN_GAME_STALE_MS). */
+  orphanStaleMs?: number;
+  /** The process's live-owner set — the SAME callback GameLifecycleReconciler uses. */
+  liveGameIds?: () => ReadonlySet<string>;
+}
+
+/** Last good values, retained when a refresh fails (a wedged DB must not zero the gauges). */
+const lastStorageRows = new Map<StorageTable, number>();
+let lastOrphanCount = 0;
+let lastKnownBytes = 0;
+
+/**
+ * Measure the SQLite file size.
+ *
+ * Preferred: statSync of the resolved DB path — byte-identical to
+ * `stat -c %s`, which is what the acceptance command compares against (a WAL
+ * file is not part of that number, so it is not added here either).
+ * Fallback (no path, or the file is not created yet): page_count * page_size
+ * from the live connection.
+ */
+function measureStorageBytes(db: MetricsStorageDatabase, dbPath?: string): number | null {
+  if (typeof dbPath === 'string' && dbPath && dbPath !== ':memory:') {
+    try {
+      const stat = fs.statSync(dbPath);
+      if (stat.isFile()) return stat.size;
+    } catch {
+      // File not created yet / path unreadable: fall back to the pragmas.
+    }
+  }
+  try {
+    const pageCount = numberOf(
+      (db.prepare('PRAGMA page_count').get() as { page_count?: unknown } | undefined)?.page_count,
+    );
+    const pageSize = numberOf(
+      (db.prepare('PRAGMA page_size').get() as { page_size?: unknown } | undefined)?.page_size,
+    );
+    if (pageCount !== undefined && pageSize !== undefined) return pageCount * pageSize;
+  } catch {
+    // Fall through: no measurement is better than an invented one.
+  }
+  return null;
+}
+
+/** True for a finite number (the timestamp shape the orphan rule needs). */
+function isTimestamp(value: unknown): value is number {
+  return typeof value === 'number' && Number.isFinite(value);
+}
+
+/**
+ * Count IN_PROGRESS games with no live owner (see ORPHAN_GAME_STALE_MS).
+ *
+ * Mirrors GameLifecycleReconciler's evidence policy exactly: a never-started
+ * ghost (started_at NULL, zero player rows) is orphaned immediately because no
+ * engine can ever own it, a row with no timestamp evidence at all is NOT
+ * called orphaned (unknown is not proof), and every other row is orphaned once
+ * its newest evidence is older than the window.
+ */
+function countOrphanedGames(db: MetricsStorageDatabase, options: StorageGaugesOptions): number {
+  const staleMs =
+    typeof options.orphanStaleMs === 'number' && Number.isFinite(options.orphanStaleMs) &&
+    options.orphanStaleMs > 0
+      ? options.orphanStaleMs
+      : ORPHAN_GAME_STALE_MS;
+  const now = typeof options.now === 'number' && Number.isFinite(options.now) ? options.now : Date.now();
+  let live: ReadonlySet<string> = new Set<string>();
+  try {
+    live = options.liveGameIds ? options.liveGameIds() : new Set<string>();
+  } catch {
+    // A dying registry is not evidence of an orphan; treat as "no owner info"
+    // by keeping the empty set (the age rule still applies).
+  }
+
+  const rows = db
+    .prepare(
+      `SELECT
+         g.id,
+         g.created_at,
+         g.started_at,
+         MAX(e.timestamp) AS last_event_at,
+         (SELECT COUNT(*) FROM players p WHERE p.game_id = g.id) AS player_count
+       FROM games g
+       LEFT JOIN events e ON e.game_id = g.id
+       WHERE g.status = 'IN_PROGRESS'
+       GROUP BY g.id, g.created_at, g.started_at`,
+    )
+    .all() as InProgressGameRow[];
+
+  let orphans = 0;
+  for (const row of Array.isArray(rows) ? rows : []) {
+    if (live.has(String(row.id))) continue; // a live bridge child owns it
+    const neverStarted =
+      (row.started_at === null || row.started_at === undefined) && countOf(row.player_count) === 0;
+    if (neverStarted) {
+      orphans += 1;
+      continue;
+    }
+    const evidence = [row.created_at, row.started_at, row.last_event_at].filter(isTimestamp);
+    if (evidence.length === 0) continue; // no evidence is not proof of staleness
+    if (now - Math.max(...evidence) > staleMs) orphans += 1;
+  }
+  return orphans;
+}
+
+/**
+ * Refresh mafia_storage_bytes / mafia_storage_rows / mafia_game_in_progress
+ * (spec 3.3). Called by the server on STORAGE_GAUGE_REFRESH_MS and at boot —
+ * never per scrape, because the row counts are real table scans.
+ *
+ * Never throws (spec section 4: /metrics must answer even when the DB is
+ * wedged) and retains last-good values per series on failure, so a transient
+ * DB error cannot make the gauges lie in the other direction either.
+ */
+export function refreshStorageGauges(options: StorageGaugesOptions): StorageGaugeSnapshot | null {
+  try {
+    const { db } = options;
+    const bytes = measureStorageBytes(db, options.dbPath);
+    if (bytes !== null) lastKnownBytes = bytes;
+    storageBytesGauge.set(lastKnownBytes);
+
+    const rows = {} as Record<StorageTable, number>;
+    for (const table of STORAGE_TABLES) {
+      try {
+        // `table` comes from STORAGE_TABLES (a module constant), never from input.
+        const row = db.prepare(`SELECT COUNT(*) AS count FROM ${table}`).get() as
+          | { count?: unknown }
+          | undefined;
+        lastStorageRows.set(table, countOf(row?.count));
+      } catch {
+        // Missing table / locked DB: keep the last good value for this table.
+      }
+      const value = lastStorageRows.get(table) ?? 0;
+      rows[table] = value;
+      storageRowsGauge.set({ table }, value);
+    }
+
+    try {
+      lastOrphanCount = countOrphanedGames(db, options);
+    } catch {
+      // Keep the last good orphan count rather than reporting a fake 0.
+    }
+    gameInProgressGauge.set(lastOrphanCount);
+
+    return { bytes: lastKnownBytes, rows, inProgressOrphans: lastOrphanCount };
+  } catch (error) {
+    console.error(
+      `[metrics] storage gauge refresh failed: ${error instanceof Error ? error.message : String(error)}`,
+    );
+    return null;
   }
 }
 

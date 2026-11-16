@@ -24,7 +24,14 @@ import { bodyParseErrorHandler } from './middleware/body-parse-error.js';
 import { adminAuthMiddleware } from './middleware/auth.js';
 import { DEFAULT_PORT } from './config.js';
 import { GameLifecycleReconciler } from './services/game-lifecycle-reconciler.js';
-import { registry } from './observability/metrics.js';
+import {
+  STORAGE_GAUGE_REFRESH_MS,
+  healthcheckFailed,
+  httpMetricsMiddleware,
+  refreshStorageGauges,
+  registry,
+  type MetricsStorageDatabase,
+} from './observability/metrics.js';
 
 dotenv.config();
 
@@ -56,16 +63,19 @@ async function main(): Promise<void> {
   // heartbeat/event evidence is recent.
   let gameEngine: GameEngine | undefined;
   let legacyAdapter: LegacyGameAdapter | null = null;
-  const gameLifecycle = new GameLifecycleReconciler(gameRepository, {
-    liveGameIds: () => {
-      const liveIds = new Set<string>();
-      for (const gameId of gameEngine?.getActiveGames() ?? []) liveIds.add(gameId);
-      for (const gameId of legacyAdapter?.getActiveGames() ?? []) {
-        if (legacyAdapter?.getGameState(gameId)?.status === 'RUNNING') liveIds.add(gameId);
-      }
-      return liveIds;
-    },
-  });
+  // OBS-003: ONE definition of "live owner" for the whole process. The
+  // reconciler (retirement, 24 h window) and the mafia_game_in_progress
+  // orphan gauge (alarm, ORPHAN_GAME_STALE_MS window) both read this same
+  // set, so "a game this process is playing" cannot mean two things.
+  const liveGameIds = (): Set<string> => {
+    const liveIds = new Set<string>();
+    for (const gameId of gameEngine?.getActiveGames() ?? []) liveIds.add(gameId);
+    for (const gameId of legacyAdapter?.getActiveGames() ?? []) {
+      if (legacyAdapter?.getGameState(gameId)?.status === 'RUNNING') liveIds.add(gameId);
+    }
+    return liveIds;
+  };
+  const gameLifecycle = new GameLifecycleReconciler(gameRepository, { liveGameIds });
 
   const statsCollector = new StatsCollector(gameRepository, gameLifecycle);
   const agentCoordinator = new AgentCoordinator(eventBus, statsCollector);
@@ -79,6 +89,9 @@ async function main(): Promise<void> {
     legacyAdapter = LegacyGameAdapter.getInstance(eventBus, gameRepository);
     console.log('✅ Legacy game adapter initialized');
   } catch (e) {
+    // OBS-003: /health is unconditional, so a server that cannot play a single
+    // game still reports healthy. This is the boot site where that happens.
+    healthcheckFailed('legacy_adapter');
     console.warn('⚠️ Legacy game adapter not available:', (e as Error).message);
   }
 
@@ -131,6 +144,18 @@ async function main(): Promise<void> {
   const benchmarkGaugeTimer = setInterval(() => benchmarkRunner.refreshRunGauges(), 30_000);
   benchmarkGaugeTimer.unref();
 
+  // OBS-003: storage + orphan gauges (spec 3.3). Refreshed at boot and then on
+  // an interval ONLY — the row counts are real table counts (events holds
+  // ~200k rows), so this must never run on the scrape or request path. Uses
+  // the same resolved DB_PATH the migrator opened, and the same live-owner
+  // set as the reconciler. Both timers are unref'd.
+  const metricsDb = (migrator as unknown as { db: MetricsStorageDatabase }).db;
+  refreshStorageGauges({ db: metricsDb, dbPath, liveGameIds });
+  const storageGaugeTimer = setInterval(() => {
+    refreshStorageGauges({ db: metricsDb, dbPath, liveGameIds });
+  }, STORAGE_GAUGE_REFRESH_MS);
+  storageGaugeTimer.unref();
+
   const app = express();
   const httpServer = createServer(app);
 
@@ -161,6 +186,13 @@ async function main(): Promise<void> {
   // ADMIN_AUTH_TOKEN is unset; enforces admin credentials for ADMIN-visibility
   // event reads and game creation once it is set.
   app.use(adminAuthMiddleware());
+
+  // OBS-003: request counter + latency histogram (spec 3.3). Mounted after the
+  // /metrics route (the scrape is never counted) and after auth (a rejected
+  // credential is not an endpoint error), before the routers so req.route
+  // carries the matched Express PATTERN by the time 'finish' fires — never the
+  // concrete path, so game ids can never become series.
+  app.use(httpMetricsMiddleware());
 
   app.use((req, res, next) => {
     const start = Date.now();
