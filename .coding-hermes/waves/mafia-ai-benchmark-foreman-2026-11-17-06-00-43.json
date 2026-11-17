@@ -1,0 +1,27 @@
+{
+  "wave_id": "mafia-ai-benchmark-foreman-2026-11-17-06-00-43",
+  "created_at": "2026-11-17T06:10:00-05:00",
+  "base_sha": "527e911",
+  "budget": 2,
+  "workers": [
+    {
+      "task_id": "DOC-021",
+      "priority": "P3",
+      "worktree": "/home/kara/worktrees/mafia-ai-benchmark-DOC-021",
+      "branch": "wt/DOC-021",
+      "model": "openai/gpt-6.1-terra@xkiro",
+      "brief": "/tmp/mf-wave-20261117-0600/brief-DOC-021.txt"
+    },
+    {
+      "task_id": "README-11",
+      "priority": "P5",
+      "worktree": "/home/kara/worktrees/mafia-ai-benchmark-README-11",
+      "branch": "wt/README-11",
+      "model": "openai/gpt-6.1-terra@xkiro",
+      "brief": "/tmp/mf-wave-20261117-0600/brief-README-11.txt",
+      "companion_rows": ["README-10", "README-12"]
+    }
+  ],
+  "independence": "DOC-021 touches only docs/observability-spec.md + docs/api-reference.md; README-11 (plus same-file companions README-10/README-12) touches only README.md. No depends_on edges between the rows, disjoint file sets, neither touches apps/ source. One worker per file family so no intra-file conflict.",
+  "excluded": "OBS-002 (P1): file family overlaps the unlanded OBS-005 stranded work (apps/server/src/observability, index.ts, legacy-game-adapter.ts) and its failure-ratio arm presumes OBS-005's truthful status_code — dispatch after OBS-005 lands. OBS-004 (P2): write target /root/fleet-monitoring is another project's git repo, outside this lane's ownership (ops tick recipe already filed). DF-MAFIA-AI-BENCHMARK-49 (P5): skills-doc verifier, lower value than the two dispatched, left pending. PERF-MAFIA-5 + OBS-005 + OBS-006: recovery/closeout of already-landed or stranded work, handled serially by the foreman this tick (not wave slots)."
+}
