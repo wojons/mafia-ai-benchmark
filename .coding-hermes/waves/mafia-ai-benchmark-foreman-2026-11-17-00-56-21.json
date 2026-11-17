@@ -1,0 +1,42 @@
+{
+  "wave_id": "mafia-ai-benchmark-foreman-2026-11-17-00-56-21",
+  "created_at": "2026-11-17T01:10:00-05:00",
+  "base_sha": "50b44e3",
+  "budget": 5,
+  "workers": [
+    {
+      "task_id": "OBS-005",
+      "priority": "P3",
+      "worktree": "/home/kara/worktrees/mafia-ai-benchmark-OBS-005",
+      "branch": "wt/OBS-005",
+      "model": "openai/gpt-6.1-terra@xkiro",
+      "brief": "/tmp/maf-wave-20261117-0056/brief-OBS-005.txt"
+    },
+    {
+      "task_id": "OBS-006",
+      "priority": "P2",
+      "worktree": "/home/kara/worktrees/mafia-ai-benchmark-OBS-006",
+      "branch": "wt/OBS-006",
+      "model": "openai/gpt-6.1-terra@xkiro",
+      "brief": "/tmp/maf-wave-20261117-0056/brief-OBS-006.txt"
+    },
+    {
+      "task_id": "QA-MAFIA-AI-BENCHMARK-15-R2",
+      "priority": "P3",
+      "worktree": "/home/kara/worktrees/mafia-ai-benchmark-QA-MAFIA-AI-BENCHMARK-15-R2",
+      "branch": "wt/QA-MAFIA-AI-BENCHMARK-15-R2",
+      "model": "openai/gpt-6.1-terra@xkiro",
+      "brief": "/tmp/maf-wave-20261117-0056/brief-QA-15-R2.txt"
+    },
+    {
+      "task_id": "PERF-MAFIA-5",
+      "priority": "P3",
+      "worktree": "/home/kara/worktrees/mafia-ai-benchmark-PERF-MAFIA-5",
+      "branch": "wt/PERF-MAFIA-5",
+      "model": "openai/gpt-6.1-terra@xkiro",
+      "brief": "/tmp/maf-wave-20261117-0056/brief-PERF-MAFIA-5.txt"
+    }
+  ],
+  "independence": "OBS-005 (legacy-game-adapter.ts insertApiCall region, game-engine.js failure branch, index.ts /health, new logger) vs OBS-006 (observability/metrics.ts orphan-query region, game-lifecycle-reconciler.ts, observability tests, spec doc) vs QA-15-R2 (.gitignore + 6 tracked .js modules + guard test) vs PERF-MAFIA-5 (services/stats-collector/index.ts + tests): no depends_on edges between any rows (all depend only on OBS-001/OBS-003, both complete) and disjoint file sets per the rows' own file evidence.",
+  "excluded": "OBS-002 (P1): file family overlaps OBS-006 (observability/metrics.ts) and OBS-005 (legacy-game-adapter.ts token-cost region) — not wave-eligible per disjoint-file-set rule; its failure-ratio arm also presumes OBS-005's truthful status_code. Dispatch next tick after merges. OBS-004 (P2): write target /root/fleet-monitoring is another project's dirty git repo, outside this lane's ownership (ops tick mafia-ai-benchmark-ops-2026-11-16-22-07-52 documented the paste-ready recipe; no action here). DOC-021 (P3): single-file observability-spec.md fix, folded into OBS-002's brief so one worker owns that doc. README-10/11/12 + DF-MAFIA-AI-BENCHMARK-49 (P5): deferred, lower priority than the four dispatched."
+}
