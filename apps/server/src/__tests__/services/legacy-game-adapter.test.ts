@@ -1073,6 +1073,118 @@ describe('LegacyGameAdapter', () => {
       expect(sqliteRepo.db.prepare('SELECT COUNT(*) as c FROM player_game_stats WHERE game_id = ?').get('g-nousage')).toEqual({ c: 0 });
     });
 
+    // OBS-005: the write path used to stamp every api_calls row status 200
+    // regardless of what the engine saw, so upstream failures were destroyed
+    // before any chart could read them.
+    it('persists a failed upstream call with its real status code and error (OBS-005)', () => {
+      const sqliteRepo = createSqliteBackedRepository();
+      sqliteRepo.seedGame({ id: 'g-failed', status: 'IN_PROGRESS' });
+      const sqliteAdapter = new LegacyGameAdapter(eventBus, sqliteRepo as any);
+
+      // No usage aggregate at all: a game whose every call failed reports
+      // nothing but the failures, and they must still be written.
+      (sqliteAdapter as any).persistUsage('g-failed', [], undefined, {
+        failures: [
+          {
+            playerId: 'p1',
+            provider: 'openai',
+            model: 'gpt-4o-mini',
+            endpoint: 'https://api.example.test/v1/chat/completions',
+            latencyMs: 1234,
+            statusCode: 401,
+            error: 'Incorrect API key provided',
+            retryCount: 0,
+          },
+          {
+            playerId: null,
+            provider: null,
+            model: null,
+            endpoint: '',
+            latencyMs: 0,
+            statusCode: 0,
+            error: 'fetch failed: connect ECONNREFUSED',
+          },
+        ],
+        omitted: 3,
+      });
+
+      const rows = sqliteRepo.db
+        .prepare('SELECT player_id, provider, model, endpoint, latency, status_code, error FROM api_calls WHERE game_id = ? ORDER BY status_code DESC')
+        .all('g-failed') as Array<Record<string, unknown>>;
+
+      expect(rows).toHaveLength(2);
+      // Real values survive verbatim.
+      expect(rows[0]).toMatchObject({
+        player_id: 'p1',
+        provider: 'openai',
+        model: 'gpt-4o-mini',
+        endpoint: 'https://api.example.test/v1/chat/completions',
+        latency: 1234,
+        status_code: 401,
+        error: 'Incorrect API key provided',
+      });
+      // A transport failure has no HTTP response: status 0, not 200.
+      expect(rows[1]).toMatchObject({
+        player_id: 'ALL',
+        provider: 'unknown',
+        model: 'unknown',
+        endpoint: 'legacy-engine',
+        status_code: 0,
+        error: 'fetch failed: connect ECONNREFUSED',
+      });
+
+      // The acceptance query: failures are visible in the table.
+      expect(
+        sqliteRepo.db
+          .prepare('SELECT COUNT(*) as c FROM api_calls WHERE game_id = ? AND (status_code <> 200 OR error IS NOT NULL)')
+          .get('g-failed'),
+      ).toEqual({ c: 2 });
+    });
+
+    it('does not stamp a usage aggregate that contains failures as 200 (OBS-005)', () => {
+      const sqliteRepo = createSqliteBackedRepository();
+      sqliteRepo.seedGame({ id: 'g-mixed', status: 'IN_PROGRESS' });
+      const sqliteAdapter = new LegacyGameAdapter(eventBus, sqliteRepo as any);
+
+      (sqliteAdapter as any).persistUsage(
+        'g-mixed',
+        [
+          {
+            provider: 'openai',
+            model: 'gpt-4o-mini',
+            promptTokens: 10,
+            completionTokens: 5,
+            totalTokens: 15,
+            cost: 0.0001,
+            apiCalls: 4,
+            latencyMs: 900,
+            failedCalls: 2,
+          },
+          {
+            provider: 'anthropic',
+            model: 'claude-x',
+            promptTokens: 10,
+            completionTokens: 5,
+            totalTokens: 15,
+            cost: 0.0002,
+            apiCalls: 3,
+            latencyMs: 700,
+          },
+        ],
+      );
+
+      const rows = sqliteRepo.db
+        .prepare('SELECT model, status_code, error FROM api_calls WHERE game_id = ? ORDER BY model')
+        .all('g-mixed') as Array<Record<string, unknown>>;
+
+      expect(rows).toHaveLength(2);
+      // Mixed outcome: NULL status (not a fabricated 200) + the count as text.
+      expect(rows[0]).toMatchObject({ model: 'claude-x', status_code: 200, error: null });
+      expect(rows[1].model).toBe('gpt-4o-mini');
+      expect(rows[1].status_code).toBeNull();
+      expect(String(rows[1].error)).toContain('2 of 4 calls failed');
+    });
+
     it('attributes role from player_model_assignments when present', () => {
       const sqliteRepo = createSqliteBackedRepository();
       sqliteRepo.seedGame({ id: 'g-role', status: 'IN_PROGRESS' });

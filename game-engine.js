@@ -4898,9 +4898,18 @@ class MafiaGame {
     const startTime = Date.now();
     let responseTextSize = 0;
     let success = true;
-    let statusCode = 200;
+    // OBS-005: 0 means "no HTTP response was observed". Initialising to 200
+    // recorded a transport failure (fetch threw: DNS, timeout, connection
+    // refused) as a status-200 call, so the failure was invisible downstream.
+    let statusCode = 0;
     let tokenUsage = { promptTokens: 0, completionTokens: 0, totalTokens: 0 };
     let responseFormatUsed = false;
+    // OBS-005: the resolved model identity is assigned inside the try (before
+    // the request is sent) and hoisted here so the catch branch can stamp the
+    // REAL provider/model instead of the openrouter / openai/gpt-4o-mini
+    // placeholders that made every upstream failure look like the same model.
+    let resolvedProvider = null;
+    let resolvedModel = null;
 
     try {
       // Get evidence summary for this player (only during discussion/voting phases)
@@ -4931,6 +4940,11 @@ class MafiaGame {
         Array.isArray(player.roles) ? player.roles[0] : player.role,
         this.players.length,
       );
+
+      // OBS-005: real identity for the per-call outcome record (the catch
+      // branch below reads these instead of hard-coded placeholders).
+      resolvedProvider = modelConfig.provider;
+      resolvedModel = modelConfig.model;
 
       // Add JSON schema to prompt for models that don't support structured outputs
       const jsonSchemaText = getJSONSchemaText(gameState.phase);
@@ -5022,6 +5036,21 @@ class MafiaGame {
 
       const parsed = this.parseJSONResponse(text);
 
+      // OBS-005: keep the provider's own failure text for rejected requests
+      // (401/402/429/5xx). The body still parses, so without this the only
+      // evidence of the failure downstream was a non-200 status with a null
+      // error, and a 200 whose body was not an action looked like a success.
+      let apiError = null;
+      if (!response.ok) {
+        const detail = data && data.error;
+        apiError =
+          typeof detail === "string"
+            ? detail
+            : (detail && detail.message) || `HTTP ${statusCode}`;
+      } else if (!parsed.valid) {
+        apiError = "response body was not the expected JSON action";
+      }
+
       // If the endpoint rejected response_format (e.g. a generic
       // completions-style endpoint that errors on structured output), retry
       // WITHOUT it instead of burning retries on the same rejected request.
@@ -5047,6 +5076,8 @@ class MafiaGame {
             provider: modelConfig.provider,
             model: modelConfig.model,
             assignmentType: modelConfig.assignmentType || "default",
+            // OBS-005: real failure text (null when the call genuinely worked).
+            error: apiError,
           });
         } catch (statsError) {
           console.error(
@@ -5172,8 +5203,12 @@ class MafiaGame {
           retryCount: retryCount,
           payloadSize: 0,
           responseSize: 0,
-          provider: "openrouter",
-          model: "openai/gpt-4o-mini",
+          // OBS-005: stamp the model that actually failed. These were
+          // "openrouter" / "openai/gpt-4o-mini" placeholders, which attributed
+          // every transport failure to a model that was never called.
+          provider: resolvedProvider || "unknown",
+          model: resolvedModel || "unknown",
+          error: error && error.message ? String(error.message) : "unknown error",
         });
       }
 

@@ -250,11 +250,16 @@ async function collectUsage(game, gameIdOverride) {
   //    new rows — a model with latency data but no token usage did not
   //    measurably play and must not appear.
   const latencyByModel = collectLatencyByModel(game);
+  // OBS-005: how many of each model's calls actually failed. Merged onto the
+  // rows so nothing downstream has to treat an aggregate row as a success.
+  const failuresByModel = collectFailureCountsByModel(game);
   for (const row of usage) {
     const entry = latencyByModel.get(`${row.provider}:${row.model}`);
     if (entry && entry.calls > 0) {
       row.latencyMs = Math.round(entry.totalMs / entry.calls);
     }
+    const failed = failuresByModel.get(`${row.provider}:${row.model}`) || 0;
+    if (failed > 0) row.failedCalls = failed;
     delete row._costTracked; // internal marker, never emitted
   }
 
@@ -351,10 +356,97 @@ async function collectUsageByPlayer(game) {
         const totalMs = calls.reduce((sum, call) => sum + (call.duration || 0), 0);
         row.latencyMs = Math.round(totalMs / calls.length);
       }
+      // OBS-005: a player whose calls failed must not look like a clean run.
+      const failed = calls.filter((call) => call && call.success === false).length;
+      if (failed > 0) row.failedCalls = (row.failedCalls || 0) + failed;
     }
   }
 
   return Array.from(rows.values());
 }
 
-module.exports = { collectUsage, collectLatencyByModel, collectUsageByPlayer };
+/**
+ * OBS-005: count failed calls per `${provider}:${model}` from the APITracker.
+ * Only used to annotate rows that already exist, so a model that never played
+ * cannot appear here.
+ */
+function collectFailureCountsByModel(game) {
+  const counts = new Map();
+  const tracker = game && game.apiTracker;
+  if (!tracker || !(tracker.metrics instanceof Map)) return counts;
+
+  for (const metric of tracker.metrics.values()) {
+    if (!metric || metric.gameId !== game.gameId) continue;
+    for (const call of metric.calls || []) {
+      if (!call || call.success !== false) continue;
+      // Prefer the identity stamped on the call itself (OBS-005): a failed
+      // call knows which model was being called even when the metric has not
+      // been updated yet.
+      const callKey = `${call.provider || metric.provider || 'unknown'}:${
+        call.model || metric.model || 'unknown'
+      }`;
+      counts.set(callKey, (counts.get(callKey) || 0) + 1);
+    }
+  }
+  return counts;
+}
+
+/**
+ * OBS-005: real per-call failures, as the engine observed them.
+ *
+ * The per-model and per-player aggregates collapse every call of a model into
+ * one row, so an upstream 401 used to be persisted as a status-200 success.
+ * The tracker records each call with the status it actually saw (0 = the
+ * request never got a response), whether it succeeded, the provider/model that
+ * was called, and the provider's error text; this returns the failures
+ * individually so the server can write them with their real values.
+ *
+ * Bounded: at most MAX_OUTCOME_RECORDS failures are returned so a game where
+ * every call fails cannot emit an unbounded bridge payload. `omitted` keeps the
+ * truncation visible instead of hiding it.
+ *
+ * Returns { failures: [...], omitted: number }.
+ */
+const MAX_OUTCOME_RECORDS = 200;
+
+function collectCallOutcomes(game) {
+  const failures = [];
+  let omitted = 0;
+  const tracker = game && game.apiTracker;
+  if (!tracker || !(tracker.metrics instanceof Map)) return { failures, omitted };
+
+  for (const metric of tracker.metrics.values()) {
+    if (!metric || metric.gameId !== game.gameId) continue;
+    for (const call of metric.calls || []) {
+      if (!call || call.success !== false) continue;
+      if (failures.length >= MAX_OUTCOME_RECORDS) {
+        omitted += 1;
+        continue;
+      }
+      const statusCode = typeof call.statusCode === 'number' ? call.statusCode : 0;
+      failures.push({
+        playerId: metric.playerId || null,
+        provider: call.provider || metric.provider || null,
+        model: call.model || metric.model || null,
+        endpoint: call.endpoint || 'legacy-engine',
+        latencyMs: call.duration || 0,
+        statusCode,
+        error: call.error
+          ? String(call.error).slice(0, 500)
+          : statusCode > 0
+            ? `upstream call failed with HTTP ${statusCode}`
+            : 'upstream call failed with no HTTP response',
+        retryCount: call.retryCount || 0,
+      });
+    }
+  }
+  return { failures, omitted };
+}
+
+module.exports = {
+  collectUsage,
+  collectLatencyByModel,
+  collectUsageByPlayer,
+  collectFailureCountsByModel,
+  collectCallOutcomes,
+};

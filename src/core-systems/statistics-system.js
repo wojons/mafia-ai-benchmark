@@ -244,6 +244,13 @@ class APITracker {
       retryCount: call.retryCount || 0,
       payloadSize: call.payloadSize || 0,
       responseSize: call.responseSize || 0,
+      // OBS-005: per-call identity + failure text. The metric below is keyed by
+      // (gameId, playerId) and previously kept only the LAST provider/model
+      // seen, so a call that failed could not be attributed to the model that
+      // failed. Null (not a placeholder) when the caller does not know.
+      provider: call.provider || null,
+      model: call.model || null,
+      error: call.error ? String(call.error) : null,
     };
 
     if (!metric) {
@@ -375,8 +382,11 @@ class APITracker {
       [
         gameId,
         playerId,
-        "unknown",
-        "unknown",
+        // OBS-005: stamp the identity the engine actually called. These were the
+        // literal string "unknown", so every persisted api_metrics row was
+        // unattributable even when the tracker knew the provider and model.
+        callRecord.provider || "unknown",
+        callRecord.model || "unknown",
         callRecord.endpoint,
         callRecord.duration,
         callRecord.statusCode,

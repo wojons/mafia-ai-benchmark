@@ -50,7 +50,7 @@ const { MafiaGame } = require(gameEnginePath);
 // Real per-model usage collection (tokens/cost/latency) from the engine's
 // in-memory trackers — extracted to its own module so it is unit-testable
 // (MAF-GAP-012 / MAF-GAP-018).
-const { collectUsage, collectUsageByPlayer } = require('./legacy-usage-collector.js');
+const { collectUsage, collectUsageByPlayer, collectCallOutcomes } = require('./legacy-usage-collector.js');
 
 function emit(type, data) {
   process.stdout.write(JSON.stringify({ type, ...data }) + '\n');
@@ -184,6 +184,16 @@ async function main() {
           console.error('collectUsageByPlayer failed: ' + (usageByPlayerError && usageByPlayerError.message));
         }
 
+        // OBS-005: real per-call failures (status code + provider error text)
+        // so the server persists what actually happened instead of a blanket
+        // status 200. Best-effort, same as the aggregates above.
+        let callOutcomes = { failures: [], omitted: 0 };
+        try {
+          callOutcomes = collectCallOutcomes(game);
+        } catch (callOutcomeError) {
+          console.error('collectCallOutcomes failed: ' + (callOutcomeError && callOutcomeError.message));
+        }
+
         emit('done', {
           gameId: game.gameId,
           totalEvents: game.gameEvents ? game.gameEvents.length : 0,
@@ -200,6 +210,8 @@ async function main() {
           // MAF-GAP-029: real per-player usage aggregates (same trackers,
           // per-player dimension kept).
           usageByPlayer,
+          // OBS-005: per-call failures the engine actually saw.
+          callOutcomes,
         });
         
         return result;

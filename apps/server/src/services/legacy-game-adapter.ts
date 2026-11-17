@@ -122,6 +122,8 @@ export interface UsageAggregate {
   cost: number;
   apiCalls: number;
   latencyMs: number;
+  /** OBS-005: calls of this model the engine saw fail (absent = none). */
+  failedCalls?: number;
 }
 
 /**
@@ -141,6 +143,31 @@ export interface PlayerUsageAggregate {
   cost: number;
   apiCalls: number;
   latencyMs: number;
+  /** OBS-005: calls of this player the engine saw fail (absent = none). */
+  failedCalls?: number;
+}
+
+/**
+ * OBS-005: one failed wire call, exactly as the engine's APITracker observed
+ * it. Emitted on the bridge 'done' message so api_calls can carry the real
+ * status code and the provider's error text instead of a blanket 200.
+ */
+export interface ApiCallOutcome {
+  playerId: string | null;
+  provider: string | null;
+  model: string | null;
+  endpoint: string;
+  latencyMs: number;
+  /** 0 means the request never produced an HTTP response (DNS/timeout/refused). */
+  statusCode: number;
+  error: string;
+  retryCount?: number;
+}
+
+export interface CallOutcomes {
+  failures: ApiCallOutcome[];
+  /** Failures dropped by the collector's bound; >0 means the list is partial. */
+  omitted?: number;
 }
 
 export class LegacyGameAdapter extends EventEmitter {
@@ -584,14 +611,14 @@ export class LegacyGameAdapter extends EventEmitter {
           gameId,
           message.usage as UsageAggregate[] | undefined,
           message.usageByPlayer as PlayerUsageAggregate[] | undefined,
+          message.callOutcomes as CallOutcomes | undefined,
         );
 
         // OBS-002: Tier-1 LLM metrics from the SAME rows persistUsage just
         // wrote — per-model completed requests, latency, tokens and cost. The
-        // outcome label here is the success side only; failures are recorded
-        // from child-exit evidence, because api_calls.status_code is
-        // hard-coded 200 (spec 2.3) and the engine never reports a failed
-        // call in the 'done' message.
+        // outcome label here is the success side only; OBS-005 carries real
+        // failures separately (message.callOutcomes) so api_calls now records
+        // the status code and error the engine actually saw.
         recordLlmUsage(message.usage, message.usageByPlayer);
         
         // Publish game ended event
@@ -875,10 +902,15 @@ export class LegacyGameAdapter extends EventEmitter {
     gameId: string,
     usage: UsageAggregate[] | undefined,
     usageByPlayer?: PlayerUsageAggregate[] | undefined,
+    callOutcomes?: CallOutcomes | undefined,
   ): void {
     const hasUsage = !!usage && Array.isArray(usage) && usage.length > 0;
     const hasPlayerUsage = !!usageByPlayer && Array.isArray(usageByPlayer) && usageByPlayer.length > 0;
-    if (!hasUsage && !hasPlayerUsage) return;
+    const hasFailedOutcomes =
+      !!callOutcomes && Array.isArray(callOutcomes.failures) && callOutcomes.failures.length > 0;
+    // OBS-005: a game whose every call failed may report no usage at all — the
+    // failure rows are the only evidence, so they must not be gated behind it.
+    if (!hasUsage && !hasPlayerUsage && !hasFailedOutcomes) return;
 
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const db = (this.gameRepository as any).db;
@@ -907,8 +939,8 @@ export class LegacyGameAdapter extends EventEmitter {
     `);
     const insertApiCall = db.prepare(`
       INSERT INTO api_calls
-        (id, game_id, player_id, provider, model, endpoint, latency, status_code, timestamp)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+        (id, game_id, player_id, provider, model, endpoint, latency, status_code, error, timestamp)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `);
     const insertPlayerGameStats = db.prepare(`
       INSERT INTO player_game_stats
@@ -952,6 +984,12 @@ export class LegacyGameAdapter extends EventEmitter {
       }
 
       try {
+        // OBS-005: the row used to hard-code status 200, so every upstream
+        // failure was recorded as a success. An aggregate row is only a
+        // success when none of the calls behind it failed; otherwise
+        // status_code is NULL (mixed outcome — the per-call rows below carry
+        // the real codes) and error names the count.
+        const failedCalls = typeof u.failedCalls === 'number' ? u.failedCalls : 0;
         insertApiCall.run(
           uuidv4(),
           gameId,
@@ -960,7 +998,10 @@ export class LegacyGameAdapter extends EventEmitter {
           model,
           'legacy-engine',
           u.latencyMs || 0,
-          200,
+          failedCalls > 0 ? null : 200,
+          failedCalls > 0
+            ? `${failedCalls} of ${u.apiCalls || 'an unknown number of'} calls failed; per-call rows carry the status codes`
+            : null,
           now,
         );
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -1025,6 +1066,10 @@ export class LegacyGameAdapter extends EventEmitter {
         }
 
         try {
+          // OBS-005: same rule as the per-model row above — a per-player
+          // aggregate that contains failures is not a 200.
+          const playerFailedCalls =
+            typeof u.failedCalls === 'number' ? u.failedCalls : 0;
           insertApiCall.run(
             uuidv4(),
             gameId,
@@ -1033,7 +1078,10 @@ export class LegacyGameAdapter extends EventEmitter {
             model,
             'legacy-engine',
             u.latencyMs || 0,
-            200,
+            playerFailedCalls > 0 ? null : 200,
+            playerFailedCalls > 0
+              ? `${playerFailedCalls} of ${u.apiCalls || 'an unknown number of'} calls failed; per-call rows carry the status codes`
+              : null,
             now,
           );
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -1044,6 +1092,59 @@ export class LegacyGameAdapter extends EventEmitter {
       }
     }
 
+    // OBS-005: persist each failed wire call with the status code and the
+    // provider error text the engine actually observed. Without these rows the
+    // only record of a failed upstream is the aggregate above, and a game where
+    // every call 401'd still reads as a clean run.
+    const failedOutcomes =
+      callOutcomes && Array.isArray(callOutcomes.failures) ? callOutcomes.failures : [];
+    let persistedFailures = 0;
+    for (const outcome of failedOutcomes) {
+      if (!outcome || typeof outcome !== 'object') continue;
+      const outcomeProvider =
+        typeof outcome.provider === 'string' && outcome.provider.trim()
+          ? outcome.provider.trim()
+          : 'unknown';
+      const outcomeModel =
+        typeof outcome.model === 'string' && outcome.model.trim()
+          ? outcome.model.trim()
+          : 'unknown';
+      const outcomeEndpoint =
+        typeof outcome.endpoint === 'string' && outcome.endpoint.trim()
+          ? outcome.endpoint.trim()
+          : 'legacy-engine';
+      const outcomeStatus = typeof outcome.statusCode === 'number' ? outcome.statusCode : 0;
+      try {
+        insertApiCall.run(
+          uuidv4(),
+          gameId,
+          typeof outcome.playerId === 'string' && outcome.playerId.trim()
+            ? outcome.playerId.trim()
+            : 'ALL',
+          outcomeProvider,
+          outcomeModel,
+          outcomeEndpoint,
+          typeof outcome.latencyMs === 'number' ? outcome.latencyMs : 0,
+          outcomeStatus,
+          outcome.error
+            ? String(outcome.error).slice(0, 500)
+            : `upstream call failed with status ${outcomeStatus}`,
+          now,
+        );
+        persistedFailures += 1;
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      } catch (e: any) {
+        healthcheckFailed('db_write');
+        console.error(`[LegacyAdapter] Failed to persist failed api call: ${e?.message || e}`);
+      }
+    }
+    if (callOutcomes && typeof callOutcomes.omitted === 'number' && callOutcomes.omitted > 0) {
+      // Never silent: the bridge bounds the list, so say how many were dropped.
+      console.warn(
+        `[LegacyAdapter:${gameId}] ${callOutcomes.omitted} failed api call(s) were not persisted (bridge limit); aggregates above still record them`,
+      );
+    }
+
     const persistedUsage = usage && Array.isArray(usage) ? usage : [];
     const persistedPlayerUsage = usageByPlayer && Array.isArray(usageByPlayer) ? usageByPlayer : [];
     console.log(
@@ -1052,7 +1153,8 @@ export class LegacyGameAdapter extends EventEmitter {
         `cost=${persistedUsage.reduce((s, u) => s + (u.cost || 0), 0).toFixed(6)})` +
         (persistedPlayerUsage.length > 0
           ? ` + ${persistedPlayerUsage.length} per-player usage row(s)`
-          : ''),
+          : '') +
+        (persistedFailures > 0 ? ` + ${persistedFailures} failed api call row(s)` : ''),
     );
   }
 
