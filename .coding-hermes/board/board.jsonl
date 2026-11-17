@@ -2,7 +2,7 @@
   "project": "Mafia AI Benchmark",
   "namespace": "mafia-benchmark",
   "version": 2,
-  "last_tick": "2026-11-17T16:51:59Z",
+  "last_tick": "2026-11-17T16:55:46Z",
   "ticks_total": 294,
   "ticks_idle": 0,
   "cooldown_s": 3600,
@@ -11,6 +11,6 @@
   "health_endpoint": null,
   "git_branch": "main",
   "git_remote": "origin",
-  "updated_at": "2026-11-17 16:51:59",
-  "last_commit": "922a0d4bfcce44b7b53249c3216add0441502dc9"
+  "updated_at": "2026-11-17 16:55:46",
+  "last_commit": "95c1291798760bca7207fee748f19033aa98aa1d"
 }
