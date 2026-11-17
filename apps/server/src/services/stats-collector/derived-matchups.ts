@@ -80,6 +80,15 @@ function asSideName(value: unknown): 'MAFIA' | 'TOWN' | null {
  */
 export function deriveMatchupsFromBenchmarkGames(
   gameRepository: GameRepository,
+  /**
+   * PERF-MAFIA-6: the compare build's materialized included-game id set (see
+   * getIncludedCompareGameIds in models.ts). When provided, the degenerate/mock
+   * projection probes that set (json_each) instead of re-evaluating the two
+   * correlated `events` counts for every benchmark_games row. Omitted or null
+   * keeps the correlated fallback — the /stats/matchups surface passes nothing
+   * and must keep working unchanged.
+   */
+  includedIds?: string[] | null,
 ): MatchupRow[] {
   let db;
   try {
@@ -95,8 +104,7 @@ export function deriveMatchupsFromBenchmarkGames(
     model_b: string;
     winner: string | null;
     team_winner: string | null;
-    degenerate: number;
-    mock: number;
+    gate_excluded: number;
   }>;
   let playerRows: Array<{
     game_id: string;
@@ -109,8 +117,14 @@ export function deriveMatchupsFromBenchmarkGames(
   try {
     // Completed, valid games only; the LEFT JOIN keeps a benchmark_games
     // row readable even when its parent games row is gone, and the shared
-    // degenerate/mock predicates (g-aliased, the same SQL the aggregates
-    // AND isUsableRunGame use) gate win attribution below.
+    // degenerate/mock classification gate win attribution below.
+    // PERF-MAFIA-6: the classification is a PROJECTION, not a WHERE filter —
+    // a degenerate/mock game still counts toward gamesPlayed (it lands in the
+    // honest `ties` remainder), it just cannot contribute a win. The compare
+    // build therefore passes its materialized id set in and the projection
+    // probes it once per row (json_each) instead of running the correlated
+    // degenerate/mock scans per benchmark_games row.
+    const gate = GameRepositoryClass.includedGameProjection('g', includedIds);
     gameRows = db
       .prepare(
         `SELECT bg.game_id AS game_id,
@@ -118,15 +132,14 @@ export function deriveMatchupsFromBenchmarkGames(
                 bg.model_b AS model_b,
                 bg.winner AS winner,
                 bg.team_winner AS team_winner,
-                COALESCE((${GameRepositoryClass.DEGENERATE_GAME_SQL}), 0) AS degenerate,
-                COALESCE((${GameRepositoryClass.MOCK_GAME_SQL}), 0) AS mock
+                ${gate.sql} AS gate_excluded
            FROM benchmark_games bg
            LEFT JOIN games g ON g.id = bg.game_id
           WHERE bg.valid = 1
             AND bg.error IS NULL
             AND bg.completed_at IS NOT NULL`,
       )
-      .all() as typeof gameRows;
+      .all(...gate.params) as typeof gameRows;
     if (gameRows.length === 0) return [];
 
     // One pass over the players rows: per (game, raw provider/model) the
@@ -239,8 +252,10 @@ export function deriveMatchupsFromBenchmarkGames(
     if (!winnerKey) continue;
 
     // Degenerate (DF-18) / mock (DF-12) games are not real win evidence —
-    // the same usable-game gate the run report's per-pairing wins apply.
-    if (g.degenerate !== 0 || g.mock !== 0) continue;
+    // the same usable-game gate the run report's per-pairing wins apply. The
+    // union is projected by the gate expression above (correlated fallback or
+    // materialized id set, whichever this caller supplied).
+    if (g.gate_excluded !== 0) continue;
 
     const winnerLower = winnerKey.toLowerCase();
     if (winnerLower === agg.aKey.toLowerCase()) agg.aWins += 1;
