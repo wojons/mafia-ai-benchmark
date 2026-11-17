@@ -26,7 +26,7 @@ An advanced AI-powered Mafia game simulation that benchmarks different AI models
 - **☀️ Day Phase**: Discussion, voting, lynching
 - **📊 Event Sourcing**: Complete game audit trail with visibility levels
 - **💰 Cost Tracking**: Track API costs per game and player
-- **🧪 1210 Tests**: Comprehensive test coverage (418 shared, 585 server, 113 CLI, 94 web)
+- **🧪 1286 Tests**: Comprehensive test coverage (420 shared, 646 server, 116 CLI, 104 web)
 
 ## 🚀 Quick Start
 
@@ -270,16 +270,17 @@ See **[specs/correct-night-flow.md](specs/correct-night-flow.md)** for complete 
 | Command | Purpose | When to Use |
 | --- | --- | --- |
 | `pnpm --filter @mafia/server dev` | **Start server** | Run REST API + WebSocket |
-| `pnpm --filter @mafia/server test:run` | **Run tests** | Verify server tests (585) |
+| `pnpm --filter @mafia/server test:run` | **Run tests** | Verify server tests (646) |
 
 ### Root Commands
 
 ```bash
 pnpm install              # Install all dependencies
 pnpm build                # Build all packages (4/4)
-pnpm --filter @mafia/server test:run    # Server tests (585)
-pnpm --filter @mafia/shared test:run    # Shared tests (418)
-pnpm --filter @mafia/web test:run       # Web tests (94)
+pnpm --filter @mafia/server test:run    # Server tests (646)
+pnpm --filter @mafia/shared test:run    # Shared tests (420)
+pnpm --filter @mafia/cli test:run       # CLI tests (116)
+pnpm --filter @mafia/web test:run       # Web tests (104)
 ```
 
 ## 🎭 Roles
@@ -309,7 +310,7 @@ mafia-ai-benchmark/
 │   │   ├── events/              ✅ Event definitions
 │   │   ├── providers/           ✅ AI provider configs
 │   │   └── persona/             ✅ Persona generation
-│   └── __tests__/               ✅ 418 tests
+│   └── __tests__/               ✅ 420 tests
 ├── specs/                       ✅ Technical specifications
 ├── pnpm-workspace.yaml          ✅ Monorepo workspace config
 ├── turbo.json                   ✅ Build pipeline config
@@ -320,9 +321,10 @@ mafia-ai-benchmark/
 
 ```bash
 # All tests from root
-pnpm --filter @mafia/server test:run   # Server (585 tests)
-pnpm --filter @mafia/shared test:run   # Shared (418 tests)
-pnpm --filter @mafia/web test:run      # Web (94 tests)
+pnpm --filter @mafia/server test:run   # Server (646 tests)
+pnpm --filter @mafia/shared test:run   # Shared (420 tests)
+pnpm --filter @mafia/cli test:run      # CLI (116 tests)
+pnpm --filter @mafia/web test:run      # Web (104 tests)
 ```
 
 **Live-server integration tests (`TEST_BASE_URL`).** A handful of server
@@ -346,12 +348,27 @@ server and pins `TEST_BASE_URL` to it (see `.github/workflows/ci.yml`).
 > the leaderboard. Use a scratch server, or make sure the stack's data is
 > disposable, before setting `TEST_BASE_URL`.
 
-**Test Coverage**: 1210 tests (418 shared, 585 server, 113 CLI, 94 web)
+**Test Coverage**: 1286 tests (420 shared, 646 server, 116 CLI, 104 web) —
+**1266 passing, 20 skipped**. Both skip groups are opt-in live-integration
+suites, so they run only when a server is pinned: server `health.test.ts` (2) +
+`api-live-endpoints.test.ts` (17), and the CLI `benchmark.test.ts` real-game run
+gated on `MAFIA_LIVE_BENCHMARK=1` (1).
 
-**Test counts are generated — don't hand-edit them.** Every test count in this
-README is produced from live vitest output by `pnpm test:counts`
+**Test counts are generated — don't hand-edit them.** Every collected count in
+this README is produced from live vitest output by `pnpm test:counts`
 (`scripts/sync-test-counts.mjs`). Run it after adding or removing tests to
-regenerate all counts from the suites' own "Tests" summary lines.
+regenerate the counts from the suites' own "Tests" summary lines. The four
+summary lines behind those numbers are:
+
+```
+shared  Tests  420 passed (420)
+server  Tests  627 passed | 19 skipped (646)
+cli     Tests  115 passed | 1 skipped (116)
+web     Tests  104 passed (104)
+```
+
+so the passing figure is `420 + 627 + 115 + 104 = 1266` out of `420 + 646 + 116 +
+104 = 1286` collected, with the remaining 20 skipped.
 
 ### Game Events
 
@@ -432,7 +449,7 @@ MIT License - see LICENSE file
 
 ---
 
-**Status**: ✅ Production Ready | ✅ Fully Documented | ✅ 1210 Tests (all 1210 passing: 418 shared, 585 server, 113 CLI, 94 web)
+**Status**: ✅ Production Ready | ✅ Fully Documented | ✅ 1266 of 1286 Tests passing (20 skipped; 420 shared, 646 server, 116 CLI, 104 web)
 
 **Quick Start**: See [QUICK_START.md](QUICK_START.md) for 5-minute setup guide!
 
