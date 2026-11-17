@@ -22,7 +22,7 @@ import {
   HEALTHCHECK_NAMES,
   HTTP_METHODS,
   HTTP_STATUS_CLASSES,
-  ORPHAN_GAME_STALE_MS,
+  IN_PROGRESS_GAMES_SQL,
   STORAGE_GAUGE_REFRESH_MS,
   STORAGE_TABLES,
   UNMATCHED_ROUTE_LABEL,
@@ -35,6 +35,11 @@ import {
   statusClassOf,
   type MetricsStorageDatabase,
 } from '../../observability/metrics.js';
+import {
+  GAME_REGISTRATION_GRACE_MS,
+  collectLiveGameIds,
+  legacyBridgeLiveGameSource,
+} from '../../services/game-liveness.js';
 
 /** The six Tier-2 families from docs/observability-spec.md section 3.3. */
 const TIER2_FAMILIES = [
@@ -431,32 +436,43 @@ describe('OBS-003 storage gauges', () => {
   });
 });
 
-describe('OBS-003 orphan detector (mafia_game_in_progress)', () => {
-  it('counts an IN_PROGRESS row past the staleness window and ignores a fresh one', async () => {
+describe('OBS-006 orphan detector (mafia_game_in_progress)', () => {
+  it('flips > 0 within one refresh interval of the bridge child being killed, even when the last event is fresh', async () => {
+    // THE acceptance case from the OBS-003 verdict: a game whose bridge child
+    // has just died but whose last event is seconds old. Under OBS-003's 5 min
+    // ORPHAN_GAME_STALE_MS window this row read as "owned" for five minutes and
+    // the alarm stayed silent. Under OBS-006 ownership outranks recency: the
+    // only thing that changes between the two refreshes below is the child's
+    // exit, and the gauge must flip on the very next refresh.
     const { file, db } = makeFileDb();
     const now = Date.now();
-    insertGame(db, 'orphan-stale', {
-      createdAt: now - ORPHAN_GAME_STALE_MS - 60_000,
-      startedAt: now - ORPHAN_GAME_STALE_MS - 60_000,
-    });
-    insertGame(db, 'orphan-fresh', { createdAt: now - 30_000, startedAt: now - 30_000 });
-    // old evidence, but a recent heartbeat event: NOT an orphan
-    insertGame(db, 'orphan-heartbeat', {
-      createdAt: now - ORPHAN_GAME_STALE_MS - 60_000,
-      startedAt: now - ORPHAN_GAME_STALE_MS - 60_000,
-    });
+    insertGame(db, 'bridge-dies', { createdAt: now - 60_000, startedAt: now - 60_000 });
     db.prepare(
       `INSERT INTO events (id, game_id, type, timestamp, visibility, data, turn_number, day_number, phase, sequence)
-       VALUES ('evt-1', 'orphan-heartbeat', 'STATE_CHANGE', ?, 'PUBLIC', '{}', 1, 1, 'DAY', 1)`,
-    ).run(now - 5_000);
+       VALUES ('evt-fresh', 'bridge-dies', 'STATE_CHANGE', ?, 'PUBLIC', '{}', 1, 1, 'DAY', 1)`,
+    ).run(now - 1_000); // one second old: maximally fresh evidence
 
-    const snapshot = refreshStorageGauges({
-      db: storageDb(db),
-      dbPath: file,
-      now,
-      liveGameIds: () => new Set<string>(),
-    });
-    expect(snapshot?.inProgressOrphans).toBe(1);
+    // The real production liveness rule, driven by a fake bridge child.
+    const child: { exitCode: number | null; signalCode: string | null } = {
+      exitCode: null,
+      signalCode: null,
+    };
+    const adapter = {
+      getActiveGames: () => ['bridge-dies'],
+      getGameState: () => ({ status: 'RUNNING', process: child }),
+    };
+    const liveGameIds = () => collectLiveGameIds([legacyBridgeLiveGameSource(adapter)]);
+
+    const alive = refreshStorageGauges({ db: storageDb(db), dbPath: file, now, liveGameIds });
+    expect(alive?.inProgressOrphans).toBe(0);
+    expect(valueOf(await render(), 'mafia_game_in_progress ')).toBe(0);
+
+    // The bridge child is killed. Same row, same recent event, no clock advance.
+    child.exitCode = 0;
+    child.signalCode = null;
+
+    const dead = refreshStorageGauges({ db: storageDb(db), dbPath: file, now, liveGameIds });
+    expect(dead?.inProgressOrphans).toBe(1);
     expect(valueOf(await render(), 'mafia_game_in_progress ')).toBe(1);
     db.close();
   });
@@ -464,10 +480,9 @@ describe('OBS-003 orphan detector (mafia_game_in_progress)', () => {
   it('never counts a game this process still owns, however old its row is', async () => {
     const { file, db } = makeFileDb();
     const now = Date.now();
-    insertGame(db, 'orphan-owned', {
-      createdAt: now - ORPHAN_GAME_STALE_MS - 60_000,
-      startedAt: now - ORPHAN_GAME_STALE_MS - 60_000,
-    });
+    // two days of silence, still owned: the reconciler's 24 h retirement window
+    // is not the gauge's business.
+    insertGame(db, 'orphan-owned', { createdAt: now - 172_800_000, startedAt: now - 172_800_000 });
 
     const owned = refreshStorageGauges({
       db: storageDb(db),
@@ -478,16 +493,29 @@ describe('OBS-003 orphan detector (mafia_game_in_progress)', () => {
     expect(owned?.inProgressOrphans).toBe(0);
     expect(valueOf(await render(), 'mafia_game_in_progress ')).toBe(0);
 
-    // A killed bridge child leaves the live set (index.ts liveGameIds drops it)
-    // and the row becomes an orphan once its evidence is past the window.
-    const killedChild = refreshStorageGauges({
+    // Owner gone => orphan, immediately (no staleness window to wait out).
+    const unowned = refreshStorageGauges({
       db: storageDb(db),
       dbPath: file,
       now,
       liveGameIds: () => new Set<string>(),
     });
-    expect(killedChild?.inProgressOrphans).toBe(1);
+    expect(unowned?.inProgressOrphans).toBe(1);
     expect(valueOf(await render(), 'mafia_game_in_progress ')).toBe(1);
+    db.close();
+  });
+
+  it('does not count a row created a moment ago: it may still be mid-registration', async () => {
+    const { file, db } = makeFileDb();
+    const now = Date.now();
+    insertGame(db, 'registering', { createdAt: now - 500, startedAt: now - 500 });
+
+    const snapshot = refreshStorageGauges({ db: storageDb(db), dbPath: file, now });
+    expect(snapshot?.inProgressOrphans).toBe(0);
+
+    // One grace period later the same unowned row IS an orphan.
+    const later = refreshStorageGauges({ db: storageDb(db), dbPath: file, now: now + GAME_REGISTRATION_GRACE_MS });
+    expect(later?.inProgressOrphans).toBe(1);
     db.close();
   });
 
@@ -506,6 +534,24 @@ describe('OBS-003 orphan detector (mafia_game_in_progress)', () => {
     const snapshot = refreshStorageGauges({ db: storageDb(db), dbPath: file, now: Date.now() });
     expect(snapshot?.inProgressOrphans).toBe(0);
     expect(valueOf(await render(), 'mafia_game_in_progress ')).toBe(0);
+    db.close();
+  });
+
+  it('does not scan `events` on the refresh path (query plan pinned)', async () => {
+    // OBS-006 (b): the 30 s refresh must not pay for the events table. The plan
+    // is asserted, not just the SQL text, so a future edit that reintroduces a
+    // join/aggregate over events fails here even if it looks cheap.
+    const { db } = makeFileDb();
+    const plan = db
+      .prepare(`EXPLAIN QUERY PLAN ${IN_PROGRESS_GAMES_SQL}`)
+      .all() as Array<{ detail?: string }>;
+    const details = plan.map((row) => String(row.detail ?? '')).join('\n');
+
+    expect(details).not.toMatch(/\bevents\b/);
+    expect(details).toMatch(/idx_games_status/);
+    expect(details).toMatch(/idx_players_game/);
+    // The whole statement must not mention the events table at all.
+    expect(IN_PROGRESS_GAMES_SQL).not.toMatch(/\bevents\b/);
     db.close();
   });
 });

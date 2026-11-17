@@ -25,6 +25,11 @@ import { adminAuthMiddleware } from './middleware/auth.js';
 import { DEFAULT_PORT } from './config.js';
 import { GameLifecycleReconciler } from './services/game-lifecycle-reconciler.js';
 import {
+  collectLiveGameIds,
+  engineLiveGameSource,
+  legacyBridgeLiveGameSource,
+} from './services/game-liveness.js';
+import {
   STORAGE_GAUGE_REFRESH_MS,
   healthcheckFailed,
   httpMetricsMiddleware,
@@ -63,18 +68,17 @@ async function main(): Promise<void> {
   // heartbeat/event evidence is recent.
   let gameEngine: GameEngine | undefined;
   let legacyAdapter: LegacyGameAdapter | null = null;
-  // OBS-003: ONE definition of "live owner" for the whole process. The
-  // reconciler (retirement, 24 h window) and the mafia_game_in_progress
-  // orphan gauge (alarm, ORPHAN_GAME_STALE_MS window) both read this same
-  // set, so "a game this process is playing" cannot mean two things.
-  const liveGameIds = (): Set<string> => {
-    const liveIds = new Set<string>();
-    for (const gameId of gameEngine?.getActiveGames() ?? []) liveIds.add(gameId);
-    for (const gameId of legacyAdapter?.getActiveGames() ?? []) {
-      if (legacyAdapter?.getGameState(gameId)?.status === 'RUNNING') liveIds.add(gameId);
-    }
-    return liveIds;
-  };
+  // OBS-003/OBS-006: ONE definition of "live owner" for the whole process. The
+  // reconciler (retirement, 24 h window) and the mafia_game_in_progress orphan
+  // gauge (alarm) both read this same set, and the set is built by the shared
+  // helpers in services/game-liveness.ts — so "a game this process is playing"
+  // cannot mean two things, and a legacy game whose bridge child has exited is
+  // NOT live even while its persisted last event is seconds old.
+  const liveGameIds = (): Set<string> =>
+    collectLiveGameIds([
+      gameEngine ? engineLiveGameSource(gameEngine) : null,
+      legacyAdapter ? legacyBridgeLiveGameSource(legacyAdapter) : null,
+    ]);
   const gameLifecycle = new GameLifecycleReconciler(gameRepository, { liveGameIds });
 
   const statsCollector = new StatsCollector(gameRepository, gameLifecycle);

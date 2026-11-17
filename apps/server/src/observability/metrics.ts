@@ -33,6 +33,12 @@ import fs from 'node:fs';
 import type { NextFunction, Request, Response } from 'express';
 import client, { type Counter, type Gauge, type Histogram, type Registry } from 'prom-client';
 
+import {
+  classifyGameLiveness,
+  isOrphanVerdict,
+  type GameLivenessRow,
+} from '../services/game-liveness.js';
+
 /** Single source of truth for the mafia_server_up version label. */
 export const SERVER_VERSION: string = process.env.npm_package_version || '1.2.0';
 
@@ -820,23 +826,18 @@ export type StorageTable = (typeof STORAGE_TABLES)[number];
  */
 export const STORAGE_GAUGE_REFRESH_MS = 30_000;
 
-/**
- * Orphan window for mafia_game_in_progress.
+/*
+ * mafia_game_in_progress has no staleness window of its own (OBS-006).
  *
- * "Live owner" is defined once, here, and shared with the retirement seam:
- * an IN_PROGRESS game is OWNED by this process iff its id is in the live set
- * the server passes in (the union of GameEngine's active games and the legacy
- * adapter's RUNNING games — i.e. a bridge child that is still alive), OR its
- * persisted activity evidence (created_at / started_at / newest event
- * timestamp) is younger than this window. A row with no owner and no
- * heartbeat inside the window is ORPHANED — nobody can ever advance it, and
- * /health still says healthy. Retiring those rows is
- * GameLifecycleReconciler's job (24 h window, read-path safe); this gauge is
- * the fast alarm in front of it, which is why its window is minutes, not a
- * day. Killing a bridge child removes it from the live set immediately, so
- * the row is counted as an orphan once its last event ages past this window.
+ * OBS-003 gave the gauge a 5 minute `ORPHAN_GAME_STALE_MS` window that outranked
+ * the live-owner set: a game whose bridge child had just been killed still read
+ * as "owned" while its last event was fresh, so the alarm under-reported exactly
+ * the failure it exists for. The orphan verdict now comes from
+ * `classifyGameLiveness` (services/game-liveness.ts) — owner first, activity
+ * recency never wins — which is the SAME predicate GameLifecycleReconciler
+ * applies to decide what it may retire. The single written definition lives in
+ * docs/observability-spec.md §3.3.
  */
-export const ORPHAN_GAME_STALE_MS = 5 * 60 * 1000;
 
 /** Closed {check} set for mafia_healthcheck_failed_total (spec 3.3). */
 export const HEALTHCHECK_NAMES = ['db_write', 'legacy_adapter', 'spawn_capacity'] as const;
@@ -1078,12 +1079,11 @@ export interface MetricsStorageDatabase {
   };
 }
 
-/** One IN_PROGRESS row plus the activity evidence the orphan rule needs. */
+/** One IN_PROGRESS row plus the evidence the orphan rule reads (no events join). */
 interface InProgressGameRow {
   id?: unknown;
   created_at?: unknown;
   started_at?: unknown;
-  last_event_at?: unknown;
   player_count?: unknown;
 }
 
@@ -1093,7 +1093,7 @@ export interface StorageGaugeSnapshot {
   bytes: number;
   /** Row count per allow-listed table. */
   rows: Record<StorageTable, number>;
-  /** IN_PROGRESS rows with no live owner (see ORPHAN_GAME_STALE_MS). */
+  /** IN_PROGRESS rows with no live owner (see classifyGameLiveness). */
   inProgressOrphans: number;
 }
 
@@ -1103,8 +1103,8 @@ export interface StorageGaugesOptions {
   dbPath?: string;
   /** Injectable clock for tests. */
   now?: number;
-  /** Override the orphan window (defaults to ORPHAN_GAME_STALE_MS). */
-  orphanStaleMs?: number;
+  /** Override the registration grace (defaults to GAME_REGISTRATION_GRACE_MS). */
+  registrationGraceMs?: number;
   /** The process's live-owner set — the SAME callback GameLifecycleReconciler uses. */
   liveGameIds?: () => ReadonlySet<string>;
 }
@@ -1152,56 +1152,56 @@ function isTimestamp(value: unknown): value is number {
 }
 
 /**
- * Count IN_PROGRESS games with no live owner (see ORPHAN_GAME_STALE_MS).
+ * The maintenance query behind mafia_game_in_progress (exported so a test can
+ * assert its query plan).
  *
- * Mirrors GameLifecycleReconciler's evidence policy exactly: a never-started
- * ghost (started_at NULL, zero player rows) is orphaned immediately because no
- * engine can ever own it, a row with no timestamp evidence at all is NOT
- * called orphaned (unknown is not proof), and every other row is orphaned once
- * its newest evidence is older than the window.
+ * OBS-006: no `LEFT JOIN events`, no GROUP BY, no per-game events subquery. It
+ * is one index seek on `idx_games_status` plus one covered player count per
+ * IN_PROGRESS row (`idx_players_game`) — nothing proportional to the size of
+ * `events`, which is the table that actually grows.
+ */
+export const IN_PROGRESS_GAMES_SQL = `SELECT
+   g.id,
+   g.created_at,
+   g.started_at,
+   (SELECT COUNT(*) FROM players p WHERE p.game_id = g.id) AS player_count
+ FROM games g
+ WHERE g.status = 'IN_PROGRESS'`;
+
+/**
+ * Count IN_PROGRESS games with no live owner (see classifyGameLiveness).
+ *
+ * The predicate is shared with GameLifecycleReconciler, so the alarm and the
+ * retirement seam cannot disagree: owned ⇒ live, never-started ghost ⇒ counted
+ * immediately, otherwise a row is an orphan the moment the registration grace
+ * (seconds) elapses — activity recency does not buy it an exception.
  */
 function countOrphanedGames(db: MetricsStorageDatabase, options: StorageGaugesOptions): number {
-  const staleMs =
-    typeof options.orphanStaleMs === 'number' && Number.isFinite(options.orphanStaleMs) &&
-    options.orphanStaleMs > 0
-      ? options.orphanStaleMs
-      : ORPHAN_GAME_STALE_MS;
   const now = typeof options.now === 'number' && Number.isFinite(options.now) ? options.now : Date.now();
   let live: ReadonlySet<string> = new Set<string>();
   try {
     live = options.liveGameIds ? options.liveGameIds() : new Set<string>();
   } catch {
     // A dying registry is not evidence of an orphan; treat as "no owner info"
-    // by keeping the empty set (the age rule still applies).
+    // by keeping the empty set (the classification rule still applies).
   }
 
-  const rows = db
-    .prepare(
-      `SELECT
-         g.id,
-         g.created_at,
-         g.started_at,
-         MAX(e.timestamp) AS last_event_at,
-         (SELECT COUNT(*) FROM players p WHERE p.game_id = g.id) AS player_count
-       FROM games g
-       LEFT JOIN events e ON e.game_id = g.id
-       WHERE g.status = 'IN_PROGRESS'
-       GROUP BY g.id, g.created_at, g.started_at`,
-    )
-    .all() as InProgressGameRow[];
+  const rows = db.prepare(IN_PROGRESS_GAMES_SQL).all() as InProgressGameRow[];
 
   let orphans = 0;
-  for (const row of Array.isArray(rows) ? rows : []) {
-    if (live.has(String(row.id))) continue; // a live bridge child owns it
-    const neverStarted =
-      (row.started_at === null || row.started_at === undefined) && countOf(row.player_count) === 0;
-    if (neverStarted) {
-      orphans += 1;
-      continue;
-    }
-    const evidence = [row.created_at, row.started_at, row.last_event_at].filter(isTimestamp);
-    if (evidence.length === 0) continue; // no evidence is not proof of staleness
-    if (now - Math.max(...evidence) > staleMs) orphans += 1;
+  for (const raw of Array.isArray(rows) ? rows : []) {
+    const row: GameLivenessRow = {
+      id: String(raw.id),
+      createdAt: isTimestamp(raw.created_at) ? raw.created_at : null,
+      startedAt: isTimestamp(raw.started_at) ? raw.started_at : null,
+      playerCount: countOf(raw.player_count),
+    };
+    const verdict = classifyGameLiveness(row, {
+      liveGameIds: live,
+      now,
+      registrationGraceMs: options.registrationGraceMs,
+    });
+    if (isOrphanVerdict(verdict)) orphans += 1;
   }
   return orphans;
 }
@@ -1214,6 +1214,11 @@ function countOrphanedGames(db: MetricsStorageDatabase, options: StorageGaugesOp
  * Never throws (spec section 4: /metrics must answer even when the DB is
  * wedged) and retains last-good values per series on failure, so a transient
  * DB error cannot make the gauges lie in the other direction either.
+ *
+ * OBS-006: the orphan count costs one seek on idx_games_status plus a covered
+ * player count per IN_PROGRESS row (idx_players_game). It does NOT join,
+ * GROUP BY or aggregate `events` — that table grows without bound and the
+ * refresh runs every STORAGE_GAUGE_REFRESH_MS.
  */
 export function refreshStorageGauges(options: StorageGaugesOptions): StorageGaugeSnapshot | null {
   try {

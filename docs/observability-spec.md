@@ -250,20 +250,48 @@ bound.
 | `mafia_game_in_progress` | gauge | games | — | Orphan detector: `IN_PROGRESS` rows with no live owner (bug 2 in §2.4). Alert when > 0 for 15 m. |
 | `mafia_healthcheck_failed_total` | counter | checks | `check` (`db_write`, `legacy_adapter`, `spawn_capacity`) | What is broken while the process still says "healthy"? |
 
-Implementation notes for `OBS-003` (proven in
+Implementation notes for `OBS-003`, as corrected by `OBS-006` (proven in
 `apps/server/src/__tests__/observability/metrics-tier2.test.ts`):
 
-- **"Live owner"** (the `mafia_game_in_progress` predicate) has exactly one
-  definition, shared with `GameLifecycleReconciler`: an `IN_PROGRESS` game is
-  owned by this process while its id is in the server's live set (a
-  `GameEngine` game, or a legacy adapter game whose bridge child is still
-  `RUNNING`), or while its newest activity evidence (`created_at`,
-  `started_at`, newest `events.timestamp`) is younger than
-  `ORPHAN_GAME_STALE_MS` (5 minutes). A never-started ghost
-  (`started_at IS NULL` with zero player rows) counts immediately, because no
-  engine can ever own it. Killing a bridge child drops the id from the live
-  set, so the row is counted once its evidence ages past the window — that is
-  the §6.3 `> 0` check.
+- **"Orphan" has exactly ONE definition** (`OBS-006`), implemented in
+  `apps/server/src/services/game-liveness.ts` (`classifyGameLiveness`) and used
+  by **both** seams: `refreshStorageGauges` (the `mafia_game_in_progress`
+  alarm) and `GameLifecycleReconciler` (retirement). Ownership outranks
+  recency:
+
+  1. **live** — the game's id is in this process's live set: a `GameEngine`
+     game in memory, or a legacy adapter game whose bridge child process has
+     not exited (`exitCode === null && signalCode === null`). A game this
+     process is playing is never an orphan, however quiet it has been.
+  2. **never-started ghost** — `started_at IS NULL` and zero player rows: no
+     engine can ever own it, so it is an orphan immediately.
+  3. **pending-registration** — unowned, and created less than
+     `GAME_REGISTRATION_GRACE_MS` (5 s) ago: not yet evidence of anything.
+  4. **orphan** — unowned and older than the registration grace.
+  5. **unattributable** — unowned with no timestamps at all: unknown is not
+     proof, so nothing is counted or cancelled.
+
+  **There is no staleness window in the liveness rule.** `ORPHAN_GAME_STALE_MS`
+  (5 min) is gone: it used to outrank the live set, so a game whose bridge
+  child had just died still read as "owned" for five minutes while its last
+  event was fresh — a gauge that under-reports exactly the signal it exists
+  to raise. Activity recency (`events.timestamp`) is no longer part of the
+  predicate, so the refresh does not read `events` at all. Killing a bridge
+  child removes the id from the live set and the very next refresh (30 s)
+  counts the row: that is the §6.3 `> 0` check.
+- **Two different windows, two different jobs.** The reconciler's
+  `STALE_IN_PROGRESS_MAX_MS` (24 h) survives only as a *retirement* gate:
+  cancelling a row is destructive, so it waits a day. Retirement still applies
+  only to rows the shared rule already called `orphan` or `never_started` —
+  the gauge alerts in seconds, the reconciler deletes in a day.
+- **Orphan query cost (`OBS-006`).** The 30 s refresh runs one
+  `SELECT ... FROM games WHERE status = 'IN_PROGRESS'` with a correlated
+  `COUNT(*)` on `players`: a seek on `idx_games_status` plus one covered
+  lookup per row on `idx_players_game`. It does **not** `LEFT JOIN events`,
+  `GROUP BY`, or aggregate the unbounded `events` table. The shape is pinned
+  by an `EXPLAIN QUERY PLAN` assertion in
+  `apps/server/src/__tests__/observability/metrics-tier2.test.ts`
+  (`IN_PROGRESS_GAMES_SQL`), so reintroducing an events join fails the suite.
 - `mafia_storage_bytes` / `mafia_storage_rows` are refreshed at boot and then
   on `STORAGE_GAUGE_REFRESH_MS` (30 s) **only** — never on scrape and never on
   a request path: `events` holds ~200k rows, so a per-scrape `COUNT(*)` would
@@ -440,7 +468,7 @@ from `api_calls.status_code` — see §2.3, where every row is a hard-coded 200
 (`legacy-game-adapter.ts:774`). A worker that wires the counter to `api_calls`
 produces a permanently-zero failure rate and fails this row.
 
-### 6.3 `OBS-003` (Tier 2)
+### 6.3 `OBS-003` (Tier 2) / `OBS-006` (honest orphan gauge)
 
 ```bash
 curl -s http://localhost:3004/metrics | grep '^mafia_storage_bytes'    # compare to du -b of the DB
