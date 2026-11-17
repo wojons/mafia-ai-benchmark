@@ -878,3 +878,4 @@
 {"id":834,"timestamp":"2026-11-17 07:46:07","event_type":"task_updated","task_id":"DF-MAFIA-AI-BENCHMARK-49","actor":"foreman","detail":"{\"status\":\"in_progress\"}","tick_number":null}
 {"id":835,"timestamp":"2026-11-17 07:46:07","event_type":"task_updated","task_id":"PERF-MAFIA-6","actor":"foreman","detail":"{\"status\":\"in_progress\"}","tick_number":null}
 {"id":836,"timestamp":"2026-11-17 08:52:14","event_type":"task_created","task_id":"TEST-CLI-1","actor":"foreman","detail":"{\"id\":\"TEST-CLI-1\",\"status\":\"pending\"}","tick_number":null}
+{"id":837,"timestamp":"2026-11-17 09:04:58","event_type":"task_completed","task_id":"OBS-006","actor":"foreman","detail":"{\"status\":\"complete\"}","tick_number":null}
