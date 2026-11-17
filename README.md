@@ -184,8 +184,30 @@ pnpm --filter @mafia/cli dev -- run-game --players 7 --model openai/gpt-4o --aut
 
 ### Persistent Config Commands
 
-The CLI stores configuration in `mafia.config.json` in the current directory.
-This file is gitignored; `init` (or `config set`) creates it.
+The CLI does not use one fixed config path: `init`, `config set`, `config reset`
+and `config show` all resolve `mafia.config.json` **against the directory the CLI
+process runs in** (`process.cwd()`). Because `pnpm --filter` runs a package's
+script with the package directory as its working directory, the documented
+`--filter` commands read and write a file inside the package:
+
+| Invocation | Working directory | Config file |
+| --- | --- | --- |
+| `pnpm --filter @mafia/cli dev -- init --default` | `apps/cli/` | `apps/cli/mafia.config.json` |
+| `pnpm --filter @mafia/cli run config show` | `apps/cli/` | `apps/cli/mafia.config.json` |
+| `pnpm --filter @mafia/cli run config set <key> <value>` | `apps/cli/` | `apps/cli/mafia.config.json` |
+| `node apps/cli/dist/index.js config show` (run from the repo root) | repo root | `mafia.config.json` |
+
+So under every `pnpm --filter @mafia/cli ...` form the file lives at
+`apps/cli/mafia.config.json`, and **`config show` reads that same
+`apps/cli/mafia.config.json`** — a `mafia.config.json` at the repo root is
+invisible to it. The root-level file is only read by a direct invocation whose
+working directory is the repo root. The `-c, --config <path>` flag listed under
+[Run-Game Flags](#run-game-flags) belongs to `run-game` (its relative paths are
+also resolved against the working directory); the `config` subcommands do not
+read it.
+
+Those paths are gitignored (the `mafia.config.json` pattern matches at any
+depth); `init` (or `config set`) creates the file on first use.
 Initialize it non-interactively before using the config commands:
 
 ```bash
