@@ -95,7 +95,7 @@ mutation counter in vendor tooling, **not** this product.
 
 Verdict of the starting hypothesis: **confirmed as of the 2026-11-03 audit** — at
 that date there was no metrics library in the dependency tree and no endpoint to
-hang one on. **That no longer holds.** `apps/server/src/index.ts:178` mounts
+hang one on. **That no longer holds.** `apps/server/src/index.ts:185` mounts
 `app.get('/metrics', ...)` before the admin-auth middleware and the 404
 catch-all, serving `registry.metrics()` with `registry.contentType`; the
 registry and every instrument live in

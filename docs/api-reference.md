@@ -101,7 +101,7 @@ report" }`.
 
 `GET /metrics` is the server's unauthenticated Prometheus scrape endpoint. It
 lives on the **same listener as the REST API** (host `:3004`, port `3000`
-inside the container) and is mounted in `apps/server/src/index.ts:178`
+inside the container) and is mounted in `apps/server/src/index.ts:185`
 **before** the admin-auth middleware and the 404 catch-all, so a collector never
 needs a token. It is deliberately not reachable through the public web tier:
 `apps/web/nginx.conf` proxies only `/api/` and `/ws`, so `:5174/metrics` returns
