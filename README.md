@@ -26,7 +26,7 @@ An advanced AI-powered Mafia game simulation that benchmarks different AI models
 - **☀️ Day Phase**: Discussion, voting, lynching
 - **📊 Event Sourcing**: Complete game audit trail with visibility levels
 - **💰 Cost Tracking**: Track API costs per game and player
-- **🧪 1210 Tests**: Comprehensive test coverage (418 shared, 585 server, 113 CLI, 94 web)
+- **🧪 1286 Tests**: Comprehensive test coverage (420 shared, 646 server, 116 CLI, 104 web)
 
 ## 🚀 Quick Start
 
@@ -200,7 +200,7 @@ pnpm --filter @mafia/cli run config set numPlayers 8
 pnpm --filter @mafia/cli run config show
 # Players:           8
 
-# Reset to default settings
+# Reset to default settings (asks for confirmation; --force skips the prompt)
 pnpm --filter @mafia/cli run config reset
 ```
 
@@ -216,7 +216,34 @@ each entry has the form `{ "role": "MAFIA", "count": 3 }`. It is not a
 `config set` scalar; edit the `game.roles` array directly when needed. Messaging
 limits and day-rounds are not CLI configuration keys and have no config reader.
 
-> **Note:** `pnpm --filter @mafia/cli config ...` is intercepted by pnpm's built-in `config` command (ERR_PNPM_RECURSIVE_RUN_NO_SCRIPT), so config subcommands use the `run config ...` form (see line 247 note).
+`config reset` overwrites `mafia.config.json` with the built-in defaults
+(`numPlayers: 10`, `llmProvider: openai`, `llmModel: openai/gpt-4o-mini`,
+night/day/voting 60/120/30 s) — flat keys, unlike the nested `game` / `llm` /
+`visualization` sections `init --default` writes; `config show` normalizes both
+shapes. Because it destroys the current values it asks first:
+
+```
+⚠️  This will reset all configuration to defaults.
+
+? Continue? (y/N)
+```
+
+The prompt defaults to **no**: answering `n` prints `Cancelled.` and leaves the
+file untouched. Both answers exit `0`. `--force` skips the prompt and is the
+only form that resets a file without a terminal:
+
+```bash
+pnpm --filter @mafia/cli run config reset --force
+✓ Configuration reset to defaults
+```
+
+In a non-TTY shell (cron, CI, agents) without `--force` the prompt is printed,
+stdin is already at EOF, and the command exits **0 having changed nothing** — no
+error, no file write, no `Cancelled.` line. So check the `✓ Configuration reset
+to defaults` line (or the file) rather than the exit code: `config reset`
+exits `0` for a real reset, a declined prompt, and a non-interactive run alike.
+
+> **Note:** `pnpm --filter @mafia/cli config ...` is intercepted by pnpm's built-in `config` command, which rejects the recursive filter (`[ERROR] Unknown option: 'recursive'`, exit 1), so config subcommands use the `run config ...` form (see the note under **Commands Guide** below).
 
 See **[CONFIG_GUIDE.md](CONFIG_GUIDE.md)** for complete documentation of all configurable parameters.
 
@@ -252,7 +279,7 @@ See **[specs/correct-night-flow.md](specs/correct-night-flow.md)** for complete 
 | `pnpm --filter @mafia/cli run config show` | **View config** | Check current settings |
 | `pnpm --filter @mafia/cli run config set <key> <value>` | **Configure** | Customize game params |
 
-> **Note:** `pnpm --filter @mafia/cli config ...` is intercepted by pnpm's built-in `config` command (ERR_PNPM_RECURSIVE_RUN_NO_SCRIPT / "Unknown option"), so config subcommands use the `run config ...` form. `stats` and `list-games` work directly as scripts.
+> **Note:** `pnpm --filter @mafia/cli config ...` is intercepted by pnpm's built-in `config` command instead of the `config` script, and that command has no recursive mode: on pnpm 11.13.1 it prints `[ERROR] Unknown option: 'recursive'` / `For help, run: pnpm help config` and exits 1. (`ERR_PNPM_RECURSIVE_RUN_NO_SCRIPT` is a different call — `pnpm --filter <pkg> run <missing-script>` reports `None of the selected packages has a "<script>" script`.) So config subcommands use the `run config ...` form. `stats` and `list-games` work directly as scripts.
 
 > **Note — non-interactive shells (cron / CI / agents):** pnpm 11 runs a
 > dependency check before every script and aborts in non-TTY shells with
@@ -270,16 +297,17 @@ See **[specs/correct-night-flow.md](specs/correct-night-flow.md)** for complete 
 | Command | Purpose | When to Use |
 | --- | --- | --- |
 | `pnpm --filter @mafia/server dev` | **Start server** | Run REST API + WebSocket |
-| `pnpm --filter @mafia/server test:run` | **Run tests** | Verify server tests (585) |
+| `pnpm --filter @mafia/server test:run` | **Run tests** | Verify server tests (646) |
 
 ### Root Commands
 
 ```bash
 pnpm install              # Install all dependencies
 pnpm build                # Build all packages (4/4)
-pnpm --filter @mafia/server test:run    # Server tests (585)
-pnpm --filter @mafia/shared test:run    # Shared tests (418)
-pnpm --filter @mafia/web test:run       # Web tests (94)
+pnpm --filter @mafia/server test:run    # Server tests (646)
+pnpm --filter @mafia/shared test:run    # Shared tests (420)
+pnpm --filter @mafia/cli test:run       # CLI tests (116)
+pnpm --filter @mafia/web test:run       # Web tests (104)
 ```
 
 ## 🎭 Roles
@@ -309,7 +337,7 @@ mafia-ai-benchmark/
 │   │   ├── events/              ✅ Event definitions
 │   │   ├── providers/           ✅ AI provider configs
 │   │   └── persona/             ✅ Persona generation
-│   └── __tests__/               ✅ 418 tests
+│   └── __tests__/               ✅ 420 tests
 ├── specs/                       ✅ Technical specifications
 ├── pnpm-workspace.yaml          ✅ Monorepo workspace config
 ├── turbo.json                   ✅ Build pipeline config
@@ -320,9 +348,10 @@ mafia-ai-benchmark/
 
 ```bash
 # All tests from root
-pnpm --filter @mafia/server test:run   # Server (585 tests)
-pnpm --filter @mafia/shared test:run   # Shared (418 tests)
-pnpm --filter @mafia/web test:run      # Web (94 tests)
+pnpm --filter @mafia/server test:run   # Server (646 tests)
+pnpm --filter @mafia/shared test:run   # Shared (420 tests)
+pnpm --filter @mafia/cli test:run      # CLI (116 tests)
+pnpm --filter @mafia/web test:run      # Web (104 tests)
 ```
 
 **Live-server integration tests (`TEST_BASE_URL`).** A handful of server
@@ -346,12 +375,27 @@ server and pins `TEST_BASE_URL` to it (see `.github/workflows/ci.yml`).
 > the leaderboard. Use a scratch server, or make sure the stack's data is
 > disposable, before setting `TEST_BASE_URL`.
 
-**Test Coverage**: 1210 tests (418 shared, 585 server, 113 CLI, 94 web)
+**Test Coverage**: 1286 tests (420 shared, 646 server, 116 CLI, 104 web) —
+**1266 passing, 20 skipped**. Both skip groups are opt-in live-integration
+suites, so they run only when a server is pinned: server `health.test.ts` (2) +
+`api-live-endpoints.test.ts` (17), and the CLI `benchmark.test.ts` real-game run
+gated on `MAFIA_LIVE_BENCHMARK=1` (1).
 
-**Test counts are generated — don't hand-edit them.** Every test count in this
-README is produced from live vitest output by `pnpm test:counts`
+**Test counts are generated — don't hand-edit them.** Every collected count in
+this README is produced from live vitest output by `pnpm test:counts`
 (`scripts/sync-test-counts.mjs`). Run it after adding or removing tests to
-regenerate all counts from the suites' own "Tests" summary lines.
+regenerate the counts from the suites' own "Tests" summary lines. The four
+summary lines behind those numbers are:
+
+```
+shared  Tests  420 passed (420)
+server  Tests  627 passed | 19 skipped (646)
+cli     Tests  115 passed | 1 skipped (116)
+web     Tests  104 passed (104)
+```
+
+so the passing figure is `420 + 627 + 115 + 104 = 1266` out of `420 + 646 + 116 +
+104 = 1286` collected, with the remaining 20 skipped.
 
 ### Game Events
 
@@ -432,7 +476,7 @@ MIT License - see LICENSE file
 
 ---
 
-**Status**: ✅ Production Ready | ✅ Fully Documented | ✅ 1210 Tests (all 1210 passing: 418 shared, 585 server, 113 CLI, 94 web)
+**Status**: ✅ Production Ready | ✅ Fully Documented | ✅ 1266 of 1286 Tests passing (20 skipped; 420 shared, 646 server, 116 CLI, 104 web)
 
 **Quick Start**: See [QUICK_START.md](QUICK_START.md) for 5-minute setup guide!
 
