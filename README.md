@@ -238,10 +238,12 @@ pnpm --filter @mafia/cli run config reset --force
 ```
 
 In a non-TTY shell (cron, CI, agents) without `--force` the prompt is printed,
-stdin is already at EOF, and the command exits **0 having changed nothing** — no
-error, no file write, no `Cancelled.` line. So check the `✓ Configuration reset
-to defaults` line (or the file) rather than the exit code: `config reset`
-exits `0` for a real reset, a declined prompt, and a non-interactive run alike.
+stdin is already at EOF, and the prompt is aborted: **nothing is written and no
+`Cancelled.` line is printed** — but the process exits **130** (inquirer aborts
+on EOF), not `0`. Only a real reset and a declined (`n`) prompt exit `0`. So
+check the `✓ Configuration reset to defaults` line (or the file) rather than the
+exit code: a non-interactive run and a real reset are distinguishable only by
+the output and the file, not by status.
 
 > **Note:** `pnpm --filter @mafia/cli config ...` is intercepted by pnpm's built-in `config` command, which rejects the recursive filter (`[ERROR] Unknown option: 'recursive'`, exit 1), so config subcommands use the `run config ...` form (see the note under **Commands Guide** below).
 
@@ -381,11 +383,15 @@ suites, so they run only when a server is pinned: server `health.test.ts` (2) +
 `api-live-endpoints.test.ts` (17), and the CLI `benchmark.test.ts` real-game run
 gated on `MAFIA_LIVE_BENCHMARK=1` (1).
 
-**Test counts are generated — don't hand-edit them.** Every collected count in
-this README is produced from live vitest output by `pnpm test:counts`
-(`scripts/sync-test-counts.mjs`). Run it after adding or removing tests to
-regenerate the counts from the suites' own "Tests" summary lines. The four
-summary lines behind those numbers are:
+**Test counts are generated from live vitest output — don't invent them.**
+`pnpm test:counts` (`scripts/sync-test-counts.mjs`) rewrites the collected counts
+from the suites' own "Tests" summary lines; run it after adding or removing
+tests. **It is currently broken for this README's wording**: the script's status
+line pattern still expects the old `✅ N Tests (all N passing: …)` shape and
+throws `README count patterns not found — structure drift: status line` on the
+split reported below, so the counts on this page were updated by hand from the
+four summary lines until `README-013` repairs the generator. The four lines
+behind the numbers above are:
 
 ```
 shared  Tests  420 passed (420)
