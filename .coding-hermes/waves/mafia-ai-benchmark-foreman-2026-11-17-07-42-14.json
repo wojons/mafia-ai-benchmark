@@ -8,33 +8,33 @@
       "task_id": "OBS-006",
       "branch": "wt/OBS-006",
       "worktree": "/home/kara/worktrees/mafia-ai-benchmark-OBS-006",
-      "commit_sha": "",
-      "judge": "",
-      "merge": ""
+      "commit_sha": "9eeccad",
+      "judge": "async job-2fe8f063870f4aa0b822b623eb345c31 (in flight at report time)",
+      "merge": "c5671e1"
     },
     {
       "task_id": "README-013",
       "branch": "wt/README-013",
       "worktree": "/home/kara/worktrees/mafia-ai-benchmark-README-013",
-      "commit_sha": "",
-      "judge": "",
-      "merge": ""
+      "commit_sha": "bdde806",
+      "judge": "pending: two task-complete attempts killed by per-call timeout under host load; rerun next tick",
+      "merge": "3625a04"
     },
     {
       "task_id": "DF-MAFIA-AI-BENCHMARK-49",
       "branch": "wt/DF-MAFIA-AI-BENCHMARK-49",
       "worktree": "/home/kara/worktrees/mafia-ai-benchmark-DF-MAFIA-AI-BENCHMARK-49",
-      "commit_sha": "",
-      "judge": "",
-      "merge": ""
+      "commit_sha": "6705e9b",
+      "judge": "pending: rerun next tick",
+      "merge": "2a92738"
     },
     {
       "task_id": "PERF-MAFIA-6",
       "branch": "wt/PERF-MAFIA-6",
       "worktree": "/home/kara/worktrees/mafia-ai-benchmark-PERF-MAFIA-6",
-      "commit_sha": "",
-      "judge": "",
-      "merge": ""
+      "commit_sha": "37f86df",
+      "judge": "pending: rerun next tick",
+      "merge": "b8e10db"
     }
   ]
 }

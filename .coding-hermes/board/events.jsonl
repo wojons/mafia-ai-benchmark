@@ -877,3 +877,4 @@
 {"id":833,"timestamp":"2026-11-17 07:46:07","event_type":"task_updated","task_id":"README-013","actor":"foreman","detail":"{\"status\":\"in_progress\"}","tick_number":null}
 {"id":834,"timestamp":"2026-11-17 07:46:07","event_type":"task_updated","task_id":"DF-MAFIA-AI-BENCHMARK-49","actor":"foreman","detail":"{\"status\":\"in_progress\"}","tick_number":null}
 {"id":835,"timestamp":"2026-11-17 07:46:07","event_type":"task_updated","task_id":"PERF-MAFIA-6","actor":"foreman","detail":"{\"status\":\"in_progress\"}","tick_number":null}
+{"id":836,"timestamp":"2026-11-17 08:52:14","event_type":"task_created","task_id":"TEST-CLI-1","actor":"foreman","detail":"{\"id\":\"TEST-CLI-1\",\"status\":\"pending\"}","tick_number":null}
