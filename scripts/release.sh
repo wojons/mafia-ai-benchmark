@@ -57,6 +57,37 @@ extract_release_notes() {
   ' "$changelog"
 }
 
+extract_release_summary() {
+  local version=$1
+  local changelog=${2:-CHANGELOG.md}
+
+  # The paragraph directly under the version heading — the delta summary used as
+  # the annotated-tag message. Stops at the first heading of any level, so the
+  # section keeps its "Known issues" / "### Added" subsections out of the tag.
+  awk -v version="$version" '
+    /^## \[/ {
+      heading = $0
+      sub(/^## \[/, "", heading)
+      sub(/\].*$/, "", heading)
+      if (heading == version) {
+        found = 1
+        next
+      }
+      if (found) {
+        exit
+      }
+    }
+    found {
+      if ($0 ~ /^#/) {
+        exit
+      }
+      if ($0 ~ /[^[:space:]]/) {
+        print
+      }
+    }
+  ' "$changelog"
+}
+
 main() {
   # 1. Repo state gates
   [ -z "$(git status --porcelain -- . ':!.gitreins' ':!.coding-hermes')" ] || { echo "FAIL: dirty tree"; exit 1; }
@@ -91,7 +122,25 @@ main() {
   if [ "${1:-}" != "$TAG" ] && [ "${1:-}" != "auto" ]; then
     echo "Note: requested '${1:-}' but version line says $TAG — cutting $TAG"
   fi
-  git tag -a "$TAG" -m "Release $TAG (mafia-ai-benchmark first public release; board rows RELEASE-001/003/004)"
+  # The annotation must be about THIS release. The previous literal
+  # ("mafia-ai-benchmark first public release; board rows RELEASE-001/003/004")
+  # shipped verbatim on v1.2.0 and was false there.
+  TAG_MSG="Release $TAG"
+  SUMMARY=$(extract_release_summary "$V" CHANGELOG.md)
+  if [ -n "$SUMMARY" ]; then
+    TAG_MSG=$(printf 'Release %s\n\n%s\n' "$TAG" "$SUMMARY")
+  fi
+  case "$TAG_MSG" in
+    *"$TAG"*) ;;
+    *) echo "FAIL: tag annotation does not name $TAG"; exit 1 ;;
+  esac
+  case "$TAG_MSG" in
+    *"first public release"*)
+      echo "FAIL: tag annotation carries a stale 'first public release' claim"
+      exit 1
+      ;;
+  esac
+  git tag -a "$TAG" -m "$TAG_MSG"
   git push origin "$TAG"
   gh release create "$TAG" --repo "$REPO" --title "Release $TAG" --verify-tag \
     --notes-file <(extract_release_notes "$V" CHANGELOG.md)
