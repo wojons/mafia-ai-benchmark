@@ -8,6 +8,10 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+---
+
+## [1.3.0] — 2026-11-16
+
 Fourth release. The delta since v1.2.0 is observability: the server now serves a
 Prometheus `/metrics` endpoint carrying the five Tier-0 game metric families,
 ten Tier-1 benchmark/LLM families and six Tier-2 storage/HTTP/orphan-liveness
