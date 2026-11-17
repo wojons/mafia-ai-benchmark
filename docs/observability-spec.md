@@ -564,6 +564,22 @@ aggregate row (`player_id='ALL'`) and the per-player rows for the same game
 the table exactly — which is what this cross-check asserts — but "money spent"
 is the per-model half, not the sum.
 
+**Re-verified on the shipped commit** (same procedure, one more 1-game run
+`607910ec-…`, container rebuilt from the branch): seed at boot
+`25632 token_usage rows -> 5 series, $95.389664`; run `COMPLETED` in 111.031 s;
+`mafia_benchmark_run_total{status="COMPLETED"} 1`, `…_stranded 0`,
+`…_games_queued 0`; `mafia_llm_request_total` 108 series with
+`gpt-4o-mini` 10 req / 0 failed and `gpt-4o` 10 req / 0 failed; cost
+**95.403334** metric vs **95.403334** DB; tokens **519,573,071 / 29,080,454**
+metric vs the same in the DB; `SELECT count(*) FROM benchmark_runs WHERE status
+IN ('QUEUED','RUNNING')` = 0. Both runs reproduce, so the cross-check is not a
+one-off.
+
+Deployment note for whoever re-runs this: the host rebuilds this stack from the
+canonical checkout on a `deploy-refresh` timer (every 15 min / hourly backstop),
+so a build made from a branch worktree is live only until the next tick. Measure
+inside that window, or merge to the canonical branch first.
+
 ### 6.3 `OBS-003` (Tier 2) / `OBS-006` (honest orphan gauge)
 
 ```bash
