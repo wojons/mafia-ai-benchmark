@@ -1576,7 +1576,16 @@ export function getCompareReport(
       (r) => `${r.modelA.toLowerCase()}|${r.modelB.toLowerCase()}`,
     ),
   );
-  const derivedH2h = deriveMatchupsFromBenchmarkGames(gameRepository).filter(
+  // PERF-MAFIA-6: the head-to-head derivation is an aggregate of this build
+  // like any other, so it probes the SAME materialized id set (getIncludedCompareGameIds
+  // above) instead of re-running the correlated degenerate/mock scans per
+  // benchmark_games row. Passing `includedIds` (never gating on null) keeps the
+  // fallback alive for free: null flows through to the derivation's correlated
+  // branch, exactly like every other aggregate's includedGamePredicate call.
+  const derivedH2h = deriveMatchupsFromBenchmarkGames(
+    gameRepository,
+    includedIds,
+  ).filter(
     (row) =>
       !persistedKeys.has(`${row.modelA.toLowerCase()}|${row.modelB.toLowerCase()}`) &&
       !isUnattributedModelKey(row.modelA) &&
