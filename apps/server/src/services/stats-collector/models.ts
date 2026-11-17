@@ -4,6 +4,7 @@
  * Extracted from the monolithic stats-collector.ts to reduce file size.
  */
 
+import type Database from 'better-sqlite3';
 import type { GameRepository } from '../../db/repository.js';
 import { GameRepository as GameRepositoryClass } from '../../db/repository.js';
 import { getGameWinnerFromEvents } from './wins.js';
@@ -558,6 +559,71 @@ function getModelComparisonFromUsage(
 }
 
 /**
+ * PERF-MAFIA-5: the degenerate + mock gates are two CORRELATED counts over
+ * `events` (see GameRepository.DEGENERATE_GAME_SQL / MOCK_GAME_SQL),
+ * re-evaluated for every joined row. Evaluated per aggregate that costs
+ * ~200 ms against players (19k rows) or token_usage (25k rows), and a compare
+ * report runs seven such aggregates — ~2.5 s of the ~3.5 s build on the live
+ * corpus, all of it redundant.
+ *
+ * So the surviving game ids are materialized ONCE per build and every
+ * aggregate probes that set instead (json_each(?)): ~70 ms once, ~8 ms per
+ * aggregate.
+ *
+ * The gate is keyed on GAME SHAPE ONLY (status, config flags, broadcast event
+ * shape) and never on a row COUNT: a game in flight only appends events, so
+ * the id set it belongs to is stable while it plays — the set does not churn
+ * on each new event row the way an events-count watermark did.
+ *
+ * Returns null when the gate cannot be evaluated; callers then keep the legacy
+ * correlated predicate and never silently include games they cannot classify.
+ */
+export function getIncludedCompareGameIds(
+  db: Database.Database,
+): string[] | null {
+  try {
+    const rows = db
+      .prepare(
+        `SELECT g.id as id FROM games g
+         WHERE COALESCE((${GameRepositoryClass.DEGENERATE_GAME_SQL}), 0) = 0
+           AND COALESCE((${GameRepositoryClass.MOCK_GAME_SQL}), 0) = 0`,
+      )
+      .all() as Array<{ id: unknown }>;
+    return rows.map((r) => String(r.id));
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Predicate anchoring an aggregate to the materialized id set above
+ * (PERF-MAFIA-5). Falls back to the correlated flag predicate when the set
+ * could not be built, so the two paths return the same rows.
+ */
+export function includedGamePredicate(
+  rowAlias: string,
+  includedIds: string[] | null,
+): { sql: string; params: string[] } {
+  if (includedIds === null) {
+    return {
+      sql: `AND COALESCE((${GameRepositoryClass.DEGENERATE_GAME_SQL.replace(
+        /\bg\./g,
+        `${rowAlias}.`,
+      )}), 0) = 0
+        AND COALESCE((${GameRepositoryClass.MOCK_GAME_SQL.replace(
+          /\bg\./g,
+          `${rowAlias}.`,
+        )}), 0) = 0`,
+      params: [],
+    };
+  }
+  return {
+    sql: `AND ${rowAlias}.game_id IN (SELECT value FROM json_each(?))`,
+    params: [JSON.stringify(includedIds)],
+  };
+}
+
+/**
  * Get model comparison data. Merges three honest sources, keyed by
  * provider/model (MAF-GAP-018):
  *   1. players/token_usage tables (new engine path),
@@ -577,6 +643,12 @@ function getModelComparisonFromUsage(
  */
 export function getModelComparison(
   gameRepository: GameRepository,
+  /**
+   * PERF-MAFIA-5: pre-materialized degenerate/mock game ids. getCompareReport
+   * threads its own set through so the gate is evaluated once per build;
+   * omit it (or pass undefined) to materialize here.
+   */
+  includedIdsOverride?: string[] | null,
 ): Array<{
   provider: string;
   model: string;
@@ -717,6 +789,11 @@ export function getModelComparison(
  */
 function getHonestReportFallbackModels(
   gameRepository: GameRepository,
+  /**
+   * PERF-MAFIA-5: pre-materialized degenerate/mock game ids (see
+   * getIncludedCompareGameIds). Omit to materialize here.
+   */
+  includedIdsOverride?: string[] | null,
 ): Array<{
   provider: string;
   model: string;
@@ -745,9 +822,16 @@ function getHonestReportFallbackModels(
   // player/usage queries below (games alias gdeg on the players queries;
   // the token_usage query filters directly on its own games alias g).
   // DF-MAFIA-AI-BENCHMARK-12: mock games are excluded with the same rule.
-  const degenerateJoin = `JOIN games gdeg ON gdeg.id = p.game_id
-        AND COALESCE((${GameRepositoryClass.DEGENERATE_GAME_SQL.replace(/\bg\./g, 'gdeg.')}), 0) = 0
-        AND COALESCE((${GameRepositoryClass.MOCK_GAME_SQL.replace(/\bg\./g, 'gdeg.')}), 0) = 0`;
+  // PERF-MAFIA-5: the flag predicates are materialized once
+  // (getIncludedCompareGameIds) instead of being re-evaluated per row; the
+  // inner join stays so rows referencing a missing game are still dropped.
+  const includedIds =
+    includedIdsOverride === undefined
+      ? getIncludedCompareGameIds(db)
+      : includedIdsOverride;
+  const degenerateJoin = 'JOIN games gdeg ON gdeg.id = p.game_id';
+  // DF-MAFIA-AI-BENCHMARK-18: degenerate games excluded from fallback rows.
+  const pGate = includedGamePredicate('p', includedIds);
 
   // 1. players-table rows (any role) — wins from players.won per row.
   try {
@@ -761,8 +845,9 @@ function getHonestReportFallbackModels(
       FROM players p
       ${degenerateJoin}
       WHERE p.provider IS NOT NULL AND p.model IS NOT NULL
+        ${pGate.sql}
       GROUP BY ${pProvExpr}, ${pModelExpr}
-    `).all() as Array<{
+    `).all(...pGate.params) as Array<{
       provider: string;
       model: string;
       games_played: number;
@@ -792,6 +877,7 @@ function getHonestReportFallbackModels(
   try {
     const tuProvExpr = normalizedProviderSql('tu');
     const tuModelExpr = normalizedModelSql('tu');
+    const tuGate = includedGamePredicate('tu', includedIds);
     const usageRows = db.prepare(`
       SELECT ${tuProvExpr} as provider,
              ${tuModelExpr} as model,
@@ -802,10 +888,9 @@ function getHonestReportFallbackModels(
       JOIN games g ON g.id = tu.game_id
       WHERE g.status = 'ENDED'
         AND tu.provider IS NOT NULL AND tu.model IS NOT NULL
-        AND COALESCE((${GameRepositoryClass.DEGENERATE_GAME_SQL}), 0) = 0
-        AND COALESCE((${GameRepositoryClass.MOCK_GAME_SQL}), 0) = 0
+        ${tuGate.sql}
       GROUP BY ${tuProvExpr}, ${tuModelExpr}
-    `).all() as Array<{
+    `).all(...tuGate.params) as Array<{
       provider: string;
       model: string;
       games_played: number;
@@ -980,6 +1065,11 @@ export function countGamesWithoutPlayerRow(
 export function getModelPerformanceBreakdown(
   gameRepository: GameRepository,
   modelList?: string[],
+  /**
+   * PERF-MAFIA-5: pre-materialized degenerate/mock game ids (see
+   * getIncludedCompareGameIds). Omit to materialize here.
+   */
+  includedIdsOverride?: string[] | null,
 ): Map<
   string,
   {
@@ -1005,13 +1095,18 @@ export function getModelPerformanceBreakdown(
   try {
     const pProvExpr = normalizedProviderSql('p');
     const pModelExpr = normalizedModelSql('p');
-    const degenerateJoin = `JOIN games gdeg ON gdeg.id = p.game_id
-        AND COALESCE((${GameRepositoryClass.DEGENERATE_GAME_SQL.replace(/\bg\./g, 'gdeg.')}), 0) = 0
-        AND COALESCE((${GameRepositoryClass.MOCK_GAME_SQL.replace(/\bg\./g, 'gdeg.')}), 0) = 0`;
+    // PERF-MAFIA-5: gate materialized once per call instead of per row.
+    const includedIds =
+      includedIdsOverride === undefined
+        ? getIncludedCompareGameIds(db)
+        : includedIdsOverride;
+    const pGate = includedGamePredicate('p', includedIds);
+    const degenerateJoin = 'JOIN games gdeg ON gdeg.id = p.game_id';
     const baseWhere = `
         WHERE p.provider IS NOT NULL AND p.model IS NOT NULL
           AND p.provider != '${OBJECT_OBJECT_SENTINEL}'
           AND p.model != '${OBJECT_OBJECT_SENTINEL}'
+          ${pGate.sql}
       `;
     const filterParams: string[] = [];
     let modelFilterSql = '';
@@ -1045,7 +1140,7 @@ export function getModelPerformanceBreakdown(
         ${modelFilterSql}
         GROUP BY ${pProvExpr}, ${pModelExpr}, p.role`,
       )
-      .all(...filterParams) as Array<{
+      .all(...pGate.params, ...filterParams) as Array<{
       provider: string;
       model: string;
       role: string;
@@ -1083,7 +1178,7 @@ export function getModelPerformanceBreakdown(
         ${modelFilterSql}
         GROUP BY ${pProvExpr}, ${pModelExpr}, num_players`,
       )
-      .all(...filterParams) as Array<{
+      .all(...pGate.params, ...filterParams) as Array<{
       provider: string;
       model: string;
       num_players: number | null;
@@ -1163,6 +1258,12 @@ export function getCompareReport(
 } {
   const db = gameRepository.getDatabase();
 
+  // PERF-MAFIA-5: materialize the degenerate/mock gate ONCE for this build and
+  // thread it through every aggregate below. The gate reads game shape
+  // (status/config/event shape), never a row count, so an in-flight game
+  // appending events does not change it.
+  const includedIds = getIncludedCompareGameIds(db);
+
   // DF-MAFIA-AI-BENCHMARK-12: count of mock games excluded from the
   // aggregates below — surfaced on the report so the exclusion is
   // auditable rather than silent.
@@ -1192,7 +1293,7 @@ export function getCompareReport(
   // /benchmark/compare rendering 'CUSTOM/openai' (208 games) and
   // 'CUSTOM/qwen3.6-35b-fast' as first-class competitor rows beside the
   // real openai models while /benchmark/report was already clean.
-  const modelComparison = getModelComparison(gameRepository);
+  const modelComparison = getModelComparison(gameRepository, includedIds);
   const {
     real: realModelComparison,
     unattributed: unattributedComparison,
@@ -1204,20 +1305,25 @@ export function getCompareReport(
   // contested gamesPlayed/wins/winRate aggregates (see above).
   const pProvExpr = normalizedProviderSql('p');
   const pModelExpr = normalizedModelSql('p');
-  const degenerateJoin = `JOIN games gdeg ON gdeg.id = p.game_id
-        AND COALESCE((${GameRepositoryClass.DEGENERATE_GAME_SQL.replace(/\bg\./g, 'gdeg.')}), 0) = 0
-        AND COALESCE((${GameRepositoryClass.MOCK_GAME_SQL.replace(/\bg\./g, 'gdeg.')}), 0) = 0`;
+  // PERF-MAFIA-5: plain join (orphan semantics) + materialized gate predicate.
+  const degenerateJoin = 'JOIN games gdeg ON gdeg.id = p.game_id';
+  const pGate = includedGamePredicate('p', includedIds);
 
   // ===== Per-model breakdown (DF-MAFIA-AI-BENCHMARK-39) =====
   // rolePerformance (per-role distinct-game cells) + byNumPlayers
   // (per-config.numPlayers split) — one shared builder, used by BOTH
   // benchmark endpoints so the report's modelPerformance rows carry the
   // same maps and a blended winRate can never be read as a skill score.
-  const breakdownMap = getModelPerformanceBreakdown(gameRepository, modelList ?? undefined);
+  const breakdownMap = getModelPerformanceBreakdown(
+    gameRepository,
+    modelList ?? undefined,
+    includedIds,
+  );
 
   // ===== Avg cost per model (normalized key, MAF-GAP-036/045) =====
   const tuProvExpr = normalizedProviderSql('tu');
   const tuModelExpr = normalizedModelSql('tu');
+  const costGate = includedGamePredicate('tu', includedIds);
   let costQuery = `
       SELECT 
         tu.provider,
@@ -1233,10 +1339,9 @@ export function getCompareReport(
         WHERE tu.provider IS NOT NULL AND tu.model IS NOT NULL
           AND tu.provider != '${OBJECT_OBJECT_SENTINEL}'
           AND tu.model != '${OBJECT_OBJECT_SENTINEL}'
-          AND COALESCE((${GameRepositoryClass.DEGENERATE_GAME_SQL.replace(/\bg\./g, 'gmock.')}), 0) = 0
-          AND COALESCE((${GameRepositoryClass.MOCK_GAME_SQL.replace(/\bg\./g, 'gmock.')}), 0) = 0
+          ${costGate.sql}
     `;
-  const costParams: string[] = [];
+  const costParams: string[] = [...costGate.params];
   if (modelList) {
     const placeholders = modelList.map(() => '?').join(',');
     costQuery += ` AND (tu.model IN (${placeholders}) OR ${tuModelExpr} IN (${placeholders}))`;
@@ -1294,8 +1399,9 @@ export function getCompareReport(
         AND p.role != 'UNASSIGNED'
         AND p.provider != '${OBJECT_OBJECT_SENTINEL}'
         AND p.model != '${OBJECT_OBJECT_SENTINEL}'
+        ${pGate.sql}
     `;
-  const roleAvgParams: string[] = [];
+  const roleAvgParams: string[] = [...pGate.params];
   if (modelList) {
     const placeholders = modelList.map(() => '?').join(',');
     roleAvgQuery += ` AND (p.model IN (${placeholders}) OR ${pModelExpr} IN (${placeholders}))`;
@@ -1450,8 +1556,9 @@ export function getCompareReport(
       ${degenerateJoin}
       WHERE p.provider IS NOT NULL AND p.model IS NOT NULL
         AND p.role != 'UNASSIGNED'
+        ${pGate.sql}
     `;
-  const trendParams: string[] = [];
+  const trendParams: string[] = [...pGate.params];
   if (modelList) {
     const placeholders = modelList.map(() => '?').join(',');
     trendQuery += ` AND (p.model IN (${placeholders}) OR ${pModelExpr} IN (${placeholders}))`;
