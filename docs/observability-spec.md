@@ -1,11 +1,28 @@
 # Observability Spec — mafia-ai-benchmark
 
-Status: **proposal** (audit 2026-11-03). Nothing in this document is implemented
-yet; every "current state" claim below was verified against the running stack or
-the source tree on that date.
+Status: **partially shipped** (updated 2026-11-17). The metrics surface this
+document specifies is implemented: Tier 0, Tier 1 and Tier 2 are live behind
+`GET /metrics` on the existing Express listener. The audit findings in §2 are
+the **2026-11-03 baseline** — they are kept because they explain *why* each
+metric exists, and §2.1 now records the measured post-implementation state next
+to them. Everything that has not shipped (the fleet scrape job in §5, the
+alerting rules, the §8 hand-offs) is still a proposal and is labelled as such.
 
-Audience: the worker implementing the `OBS-*` board rows, and the reviewer who
-has to prove the work landed.
+Shipped rows, with the commit each landed in:
+
+| Board row | Scope | Commit |
+|---|---|---|
+| `OBS-001` | `GET /metrics` (prom-client registry on the existing listener) + the five Tier-0 families in §3.1 | `d1a109b` — `feat(obs): Prometheus /metrics with 5 Tier-0 game metrics. Addresses OBS-001.` |
+| `OBS-002` | Tier-1 benchmark-run and LLM depth families in §3.2 | `f302b57` — `feat(obs): add Tier-1 benchmark and LLM metrics per spec 3.2. Addresses OBS-002.` |
+| `OBS-003` | Tier-2 storage, HTTP-traffic and orphan-liveness families in §3.3 | `3422d40` — `feat(obs): add Tier-2 storage, HTTP and orphan-liveness metrics per spec 3.3. Addresses OBS-003.` |
+
+Measured live on 2026-11-17: `curl -s -o /dev/null -w '%{http_code}'
+http://localhost:3004/metrics` → **200**, `Content-Type: text/plain;
+version=0.0.4; charset=utf-8`, 1242 `mafia_` sample lines across 21 families.
+(At the 2026-11-03 audit the same probe returned **404**.)
+
+Audience: the operator reading the running system, the worker implementing the
+remaining `OBS-*` rows, and the reviewer who has to prove the work landed.
 
 ---
 
@@ -53,31 +70,37 @@ All of the following hold:
 6. Cost per game stays inside the per-game budget the engine enforces
    (`game-engine.js:2308`, `COST_PER_GAME_TOTAL`).
 
-Right now **only signal (1) is machine-readable, and it is only a scrape
-target — the fleet's Prometheus does not scrape it.**
+Signals 3–6 are now machine-readable as `mafia_*` counters/histograms on
+`GET /metrics` (`OBS-001/002/003`, §2.1) — that is what those rows exist to
+change. Whether the fleet's Prometheus actually **scrapes** this container is
+configured outside this repo (§5), so this document does not claim it. At the
+2026-11-03 audit only signal (1) existed, and only as an unscraped HTTP probe.
 
 ---
 
 ## 2. Current state — what exists today
 
-### 2.1 No metrics surface at all
+### 2.1 Metrics surface — 2026-11-03 audit vs. 2026-11-17 measured
 
 | Probe | Command | Result |
 |---|---|---|
-| Live `/metrics` | `curl -s -o /dev/null -w '%{http_code}' http://localhost:3004/metrics` | **404** |
-| Live `/health` | `curl -s http://localhost:3004/health` | 200, JSON with `status`, `timestamp`, `uptime`, `memory` |
-| Prometheus client dep | `grep prom-client apps/server/package.json` | **none** — deps end at `ws` (`apps/server/package.json:18-29`) |
-| First-party metric code | `grep -rIlE "prom-client\|prometheus\|opentelemetry\|/metrics"` excluding `node_modules/.git/dist/.opencode/.pnpm/archive/openrouter_models*` | **0 files** |
+| Live `/metrics` | `curl -s -o /dev/null -w '%{http_code}' http://localhost:3004/metrics` | **200** (2026-11-17) — Prometheus text format, 1242 `mafia_` sample lines across 21 families. **404** at the 2026-11-03 audit. |
+| Live `/health` | `curl -s http://localhost:3004/health` | 200, JSON with `status`, `timestamp`, `uptime`, `memory` (unchanged) |
+| Prometheus client dep | `grep prom-client apps/server/package.json` | **`"prom-client": "^15.1.3",` — `apps/server/package.json:27`** (2026-11-17). At the audit: **none** — deps ended at `ws` (`apps/server/package.json:18-29`). |
+| First-party metric code | registry + instruments | **`apps/server/src/observability/metrics.ts`** (2026-11-17) — one `client.Registry`, `collectDefaultMetrics`, the Tier-0/1/2 `mafia_*` families, and `METRICS_MODEL_ALLOWLIST`. At the audit: **0 files**. |
 
 The static scan's `own_counter_or_gauge=1` hit is
 `incrementMutationCounter` in `.opencode/lib/graph-harness.ts:5424` — a SQL
-mutation counter in vendor tooling, **not** this product. Verdict of the
-starting hypothesis: **confirmed, and it is worse than "no metrics" — there is no
-metrics library in the dependency tree and no endpoint to hang one on.**
+mutation counter in vendor tooling, **not** this product.
 
-The only route enumeration helper is `GET /api/v1/health`
-(`apps/server/src/index.ts:151`). There is no route named `metrics`
-(`grep -rn "metrics" apps/server/src` → only prose comments and test fixtures).
+Verdict of the starting hypothesis: **confirmed as of the 2026-11-03 audit** — at
+that date there was no metrics library in the dependency tree and no endpoint to
+hang one on. **That no longer holds.** `apps/server/src/index.ts:178` mounts
+`app.get('/metrics', ...)` before the admin-auth middleware and the 404
+catch-all, serving `registry.metrics()` with `registry.contentType`; the
+registry and every instrument live in
+`apps/server/src/observability/metrics.ts`. The route enumeration helper
+`GET /api/v1/health` (`apps/server/src/index.ts:151`) is unchanged.
 
 ### 2.2 Logging is unstructured `console.*` into the container log
 
