@@ -97,6 +97,81 @@ start endpoint.
 failure: `{ "success": false, "error": "Failed to generate benchmark run
 report" }`.
 
+## Prometheus metrics (`GET /metrics`)
+
+`GET /metrics` is the server's unauthenticated Prometheus scrape endpoint. It
+lives on the **same listener as the REST API** (host `:3004`, port `3000`
+inside the container) and is mounted in `apps/server/src/index.ts:178`
+**before** the admin-auth middleware and the 404 catch-all, so a collector never
+needs a token. It is deliberately not reachable through the public web tier:
+`apps/web/nginx.conf` proxies only `/api/` and `/ws`, so `:5174/metrics` returns
+the SPA shell rather than metrics.
+
+- **Path:** `GET /metrics` (no auth, no query parameters).
+- **Content type:** `text/plain; version=0.0.4; charset=utf-8` —
+  `registry.contentType` from `prom-client`, i.e. the Prometheus text exposition
+  format 0.0.4.
+- **Body:** every `mafia_*` family below plus the `prom-client` default process
+  metrics (CPU, heap, event-loop lag, GC). Measured 2026-11-17: HTTP `200`,
+  1242 `mafia_` sample lines across 21 families.
+- **Failure mode:** if registry collection itself throws, the endpoint answers
+  `500` with the body `# mafia metrics collection failed` instead of taking the
+  scrape target down.
+
+Registry and instruments: `apps/server/src/observability/metrics.ts`.
+Design authority: [`observability-spec.md`](observability-spec.md) §3.
+
+### Tier-0 families (game liveness — `OBS-001`)
+
+| Family | Type | Labels |
+| --- | --- | --- |
+| `mafia_server_up` | gauge | `version` |
+| `mafia_game_active` | gauge | — |
+| `mafia_game_ended_total` | counter | `outcome`, `provider` |
+| `mafia_game_failed_total` | counter | `reason` |
+| `mafia_game_duration_seconds` | histogram | `provider` |
+
+### Remaining exposed families
+
+Tier-1 (`OBS-002`) — benchmark runs and LLM depth:
+`mafia_benchmark_games_queued`, `mafia_benchmark_run_total`,
+`mafia_benchmark_run_duration_seconds`, `mafia_benchmark_run_stranded`,
+`mafia_llm_request_total`, `mafia_llm_request_duration_seconds`,
+`mafia_llm_tokens_total`, `mafia_llm_cost_usd_total`,
+`mafia_llm_budget_exhausted_total`, `mafia_llm_retry_total`.
+
+Tier-2 (`OBS-003`) — storage, HTTP traffic, orphan liveness:
+`mafia_storage_bytes`, `mafia_storage_rows`, `mafia_http_requests_total`,
+`mafia_http_request_duration_seconds`, `mafia_game_in_progress`,
+`mafia_healthcheck_failed_total`.
+
+Histograms expose the usual `_bucket` / `_count` / `_sum` suffixes, which is why
+the live body carries more raw name prefixes (29) than base families (21).
+
+### Cardinality bound — `METRICS_MODEL_ALLOWLIST` and `other`
+
+The `{model}` label on the `mafia_llm_*` families is a **closed set**, never the
+free-form model string a benchmark happens to name. `METRICS_MODEL_ALLOWLIST`
+(comma-separated env var, `apps/server/src/observability/metrics.ts:342-354`)
+overrides the documented default compiled into `metrics.ts`:
+
+```
+gpt-4o-mini, gpt-4o, gpt-4, claude-3-haiku, claude-3-sonnet,
+claude-3-opus, gemini-1.5-flash, gemini-1.5-pro
+```
+
+Every model outside that list — and any empty/unparseable value — rolls up to
+`model="other"`, so the label set stays at allow-list size + 1 (9 values with the
+default). A known provider prefix is stripped before matching, so
+`openai/gpt-4o-mini` and `gpt-4o-mini` are one series. `{provider}` is likewise
+closed: `openai`, `anthropic`, `google`, `openrouter`, `custom`, plus `unknown`.
+The full `mafia_llm_request_total` space is therefore providers (6) × models
+(allow-list + `other`) × outcomes (2) — 108 series with the default list.
+
+Neither `game_id`, `run_id`, `player_id`, nor a raw request path can ever become
+a label: HTTP series use the matched Express route pattern, with unmatched
+requests collapsing to `route="unmatched"` and overflow to `route="other"`.
+
 ## Health checks
 
 - `GET /health` and `GET /api/v1/health` — identical payload (`status`, `timestamp`, `uptime`, `memory`)
