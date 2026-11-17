@@ -200,7 +200,7 @@ pnpm --filter @mafia/cli run config set numPlayers 8
 pnpm --filter @mafia/cli run config show
 # Players:           8
 
-# Reset to default settings
+# Reset to default settings (asks for confirmation; --force skips the prompt)
 pnpm --filter @mafia/cli run config reset
 ```
 
@@ -215,6 +215,33 @@ Role configuration is read from the `roles` array in the game config, where
 each entry has the form `{ "role": "MAFIA", "count": 3 }`. It is not a
 `config set` scalar; edit the `game.roles` array directly when needed. Messaging
 limits and day-rounds are not CLI configuration keys and have no config reader.
+
+`config reset` overwrites `mafia.config.json` with the built-in defaults
+(`numPlayers: 10`, `llmProvider: openai`, `llmModel: openai/gpt-4o-mini`,
+night/day/voting 60/120/30 s) — flat keys, unlike the nested `game` / `llm` /
+`visualization` sections `init --default` writes; `config show` normalizes both
+shapes. Because it destroys the current values it asks first:
+
+```
+⚠️  This will reset all configuration to defaults.
+
+? Continue? (y/N)
+```
+
+The prompt defaults to **no**: answering `n` prints `Cancelled.` and leaves the
+file untouched. Both answers exit `0`. `--force` skips the prompt and is the
+only form that resets a file without a terminal:
+
+```bash
+pnpm --filter @mafia/cli run config reset --force
+✓ Configuration reset to defaults
+```
+
+In a non-TTY shell (cron, CI, agents) without `--force` the prompt is printed,
+stdin is already at EOF, and the command exits **0 having changed nothing** — no
+error, no file write, no `Cancelled.` line. So check the `✓ Configuration reset
+to defaults` line (or the file) rather than the exit code: `config reset`
+exits `0` for a real reset, a declined prompt, and a non-interactive run alike.
 
 > **Note:** `pnpm --filter @mafia/cli config ...` is intercepted by pnpm's built-in `config` command, which rejects the recursive filter (`[ERROR] Unknown option: 'recursive'`, exit 1), so config subcommands use the `run config ...` form (see the note under **Commands Guide** below).
 
