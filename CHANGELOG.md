@@ -8,6 +8,97 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+Fourth release. The delta since v1.2.0 is observability: the server now serves a
+Prometheus `/metrics` endpoint carrying the five Tier-0 game metric families,
+ten Tier-1 benchmark/LLM families and six Tier-2 storage/HTTP/orphan-liveness
+families, all from one prom-client registry with closed label sets and
+zero-valued pre-registration so a fresh process is scrapable before its first
+request. No public API, CLI or web behaviour changes; nothing publishes to npm —
+the release surface remains the annotated tag, the GitHub Release object and the
+compose stack.
+
+## Known issues
+
+- **Nothing scrapes `/metrics` yet.** The endpoint is served by the API
+  (unauthenticated, ahead of the admin auth middleware), but no fleet scrape job
+  exists: job name, `:3004/metrics` target, host/product/service labels and the
+  spawn-failure alert rule are all still open, so there are no dashboards or
+  alerts — only the endpoint (OBS-004).
+- **Tier-1 metric values are unproven in production.** Benchmark run throughput,
+  stranded runs, per-model request outcome and latency, tokens and USD cost are
+  emitted, but their live acceptance criteria have not been proven against a
+  real benchmark run (OBS-002).
+- **Failure and latency facts are not truthful yet.** `api_calls.status_code` is
+  hard-coded 200 (25612 recorded rows, zero errors), `/health` is unconditional,
+  and `LOG_LEVEL` is not honoured by the server (OBS-005). Charting these today
+  would report a permanently healthy system.
+- **`mafia_game_in_progress` over-counts.** The orphan staleness window is 5
+  minutes while the lifecycle reconciler retires ghosts at 24 hours, so
+  abandoned games inflate the gauge; the collection path also runs a LEFT JOIN +
+  GROUP BY over every in-progress game on each 30 s refresh (OBS-006).
+- **`/api/v1/benchmark/compare` is slow while a game is live.** It collapses
+  from ~0.28 s warm to ~4 s on every call: each new event row busts the
+  data-watermark memo and the synchronous rebuild blocks the event loop — a
+  5–6 ms `/api/v1/games?limit=50` queued behind it measured 4.20 s, and a real
+  `/stats` page load paid compare 4969 ms / matchups 5006 ms / games 5012 ms
+  (PERF-MAFIA-5).
+- **Documentation is stale against the shipped code.** `docs/observability-spec.md`
+  still says "Nothing in this document is implemented yet" and that `/metrics`
+  answers 404, while `GET /metrics` serves 200 with 1242 `mafia_` series at HEAD
+  (DOC-021).
+- **README inaccuracies.** A cross-reference points at a Commands-Guide table row
+  instead of the note and quotes a pnpm error code current pnpm no longer emits
+  (README-10); the test-count claim ("1210 Tests (all 1210 passing)") ignores 20
+  skipped tests — server 566 passed / 19 skipped, CLI 112 passed / 1 skipped
+  (README-11); `config reset` is documented without its confirmation prompt or
+  the `--force` flag that makes it work from a non-TTY shell (README-12).
+- **The usage skill's contract coaching has no verifier.** `skills/mafia-usage/SKILL.md`
+  taught a `/benchmark/report` contract that the code had already moved past;
+  corrected in place, but nothing guards prose against outliving the contract it
+  describes (DF-MAFIA-AI-BENCHMARK-49).
+
+### Added
+
+- Observability: unauthenticated `GET /metrics` exposing five Tier-0 game metric
+  families — `mafia_server_up{version}`, `mafia_game_active`,
+  `mafia_game_ended_total{outcome,provider}`, `mafia_game_failed_total{reason}`
+  and `mafia_game_duration_seconds{provider}` — from a single prom-client
+  registry; label sets are closed and low-cardinality, no game/run/player
+  identifier is ever a label, and a wedged collector answers 500 with a
+  text/plain body instead of throwing (`d1a109b`, OBS-001).
+- Observability: all five Tier-0 families are pre-registered at zero, so every
+  family is scrapable from process boot — prom-client emits no sample for a
+  counter or histogram that has never been observed, and the first deployed
+  build returned 200 with only two `mafia_` sample lines (`cfe946b`, OBS-001).
+- Observability: ten Tier-1 benchmark and LLM families (run throughput, run
+  duration, stranded runs, per-model request outcome and latency, token counts,
+  USD cost), instrumented in the benchmark runner and the legacy game adapter,
+  each pre-registered at zero with coerced label sets (`f302b57`, OBS-002).
+- Observability: six Tier-2 families — storage bytes, storage rows per
+  allow-listed table, HTTP requests by route/method/status class and
+  orphan-liveness — with every collection path wrapped so a failing collector
+  can neither 500 a scrape nor fail a request that already succeeded
+  (`3422d40`, OBS-003).
+
+### Carried forward
+
+Open findings that this release does not close, listed here so they are visible
+in the release rather than only on the board:
+
+- OBS-002 — Tier-1 metrics code shipped; live acceptance criteria unproven.
+- OBS-004 — no fleet scrape job on fleet-monitor (reachability proven, apply
+  route still owner-gated).
+- OBS-005 — `api_calls.status_code` hard-coded 200, `/health` unconditional,
+  `LOG_LEVEL` not honoured.
+- OBS-006 — orphan staleness window (5 min) disagrees with the reconciler (24 h);
+  30 s LEFT JOIN sweep.
+- PERF-MAFIA-5 — compare endpoint ~4 s per call under live games.
+- DOC-021 — observability spec and API reference stale against shipped
+  `/metrics`.
+- README-10, README-11, README-12 — cross-reference, test-count and
+  `config reset` documentation gaps.
+- DF-MAFIA-AI-BENCHMARK-49 — usage-skill contract prose has no verifier.
+
 ---
 
 ## [1.2.0] — 2026-11-01
