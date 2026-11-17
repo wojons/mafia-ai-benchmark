@@ -155,6 +155,53 @@ export class GameRepository {
     };
   }
 
+  /**
+   * PERF-MAFIA-6: PROJECTION twin of `includedGamePredicate` — the per-row
+   * classification COLUMN for a statement that must keep every row it reads and
+   * only TAG it. The head-to-head derivation is that case: a degenerate/mock
+   * game still counts toward gamesPlayed (it lands in the honest `ties`
+   * remainder) and is refused win attribution, so filtering the row out in a
+   * WHERE clause would change the reported numbers.
+   *
+   * Returns 1 when the enclosing `games` row is excluded by the gate, 0 when it
+   * is included. `gamesAlias` must be the alias of a games row that may be
+   * MISSING — the derivation LEFT JOINs benchmark_games onto games, and its
+   * documented contract keeps an orphaned benchmark_games row readable. A NULL
+   * games row classifies as INCLUDED (0): both correlated CASE arms fall through
+   * to 0 for a NULL row (no status, no config flag, zero events), and the
+   * materialized branch spells that out with the `IS NOT NULL` guard, so the two
+   * paths agree on orphans instead of relying on three-valued NULL logic.
+   *
+   * `includedIds` null/undefined keeps the legacy correlated expression, so a
+   * caller that cannot materialize the set (/stats/matchups, and the compare
+   * build's own fallback branch when the set fails to build) keeps the
+   * historical classification byte for byte.
+   */
+  static includedGameProjection(
+    gamesAlias: string,
+    includedIds: string[] | null | undefined,
+  ): { sql: string; params: string[] } {
+    if (includedIds === null || includedIds === undefined) {
+      return {
+        sql: `CASE WHEN COALESCE((${GameRepository.DEGENERATE_GAME_SQL.replace(
+          /\bg\./g,
+          `${gamesAlias}.`,
+        )}), 0) != 0
+          OR COALESCE((${GameRepository.MOCK_GAME_SQL.replace(
+            /\bg\./g,
+            `${gamesAlias}.`,
+          )}), 0) != 0 THEN 1 ELSE 0 END`,
+        params: [],
+      };
+    }
+    return {
+      sql: `CASE WHEN ${gamesAlias}.id IS NOT NULL
+          AND ${gamesAlias}.id NOT IN (SELECT value FROM json_each(?))
+        THEN 1 ELSE 0 END`,
+      params: [JSON.stringify(includedIds)],
+    };
+  }
+
   constructor(db: Database.Database) {
     this.db = db;
   }

@@ -424,6 +424,24 @@ describe('StatsCollector compare memoization (PERF-MAFIA-3)', () => {
     }
 
     /**
+     * Does this statement carry the CORRELATED degenerate/mock gate — the
+     * per-row re-classification of the enclosing `games` row that PERF-MAFIA-6
+     * removed from the compare build?
+     *
+     * Matched on the canonical predicate TEXT (GameRepository
+     * .DEGENERATE_GAME_SQL / .MOCK_GAME_SQL both open with
+     * `CASE WHEN <alias>.status != 'ENDED'`, aliased g / gdeg / gmock), not on a
+     * call site: a statement added later that never imports the helper still
+     * trips this detector. Any SQL outside those two constants that opened a
+     * CASE on a games alias status would be a false positive, which is the
+     * conservative direction for a structural gate.
+     */
+    const CORRELATED_GATE_MARKER = /WHEN\s+[A-Za-z_][A-Za-z0-9_]*\.status\s*!=\s*'ENDED'/;
+    function carriesCorrelatedGate(sql: string): boolean {
+      return CORRELATED_GATE_MARKER.test(sql);
+    }
+
+    /**
      * Store carrying every class the gate distinguishes:
      *  - gate-healthy  ENDED, real dialogue, long duration  → counted
      *  - gate-degen    ENDED, 3 empty broadcasts, 80 s      → degenerate
@@ -549,6 +567,33 @@ describe('StatsCollector compare memoization (PERF-MAFIA-3)', () => {
                    'anthropic', 'claude-3', 'VILLAGER', 1)`,
         )
         .run();
+
+      // benchmark_games rows so the head-to-head derivation (the compare
+      // build's benchmark_games statement) has something to classify:
+      //   p-gate-degen  parent game IS degenerate → row kept (gamesPlayed/ties),
+      //                 win attribution refused by the gate;
+      //   p-gate-orphan parent games row is GONE → row kept and classified
+      //                 INCLUDED by both gate paths (the LEFT JOIN contract).
+      target.insertBenchmarkRun({
+        id: 'run-gate', config: {}, status: 'COMPLETED',
+      });
+      target.insertBenchmarkGame({
+        game_id: 'gate-degen', run_id: 'run-gate', pairing_id: 'p-gate-degen',
+        model_a: 'fake/degenerate-only', model_b: 'fake/degenerate-only',
+        seed: 1, model_a_role: 'VILLAGER', model_b_role: 'VILLAGER',
+        winner: 'TOWN', completed_at: Date.now(), valid: 1,
+      });
+      // benchmark_games.game_id FKs games(id); a real store can still carry the
+      // row after the parent is gone, so this fixture seeds one with enforcement
+      // off (same convention as the orphaned token_usage row above).
+      target.db.pragma('foreign_keys = OFF');
+      target.insertBenchmarkGame({
+        game_id: 'gate-orphan', run_id: 'run-gate', pairing_id: 'p-gate-orphan',
+        model_a: 'openai/gpt-4o-mini', model_b: 'anthropic/claude-3',
+        seed: 1, model_a_role: 'VILLAGER', model_b_role: 'VILLAGER',
+        winner: 'TOWN', completed_at: Date.now(), valid: 1,
+      });
+      target.db.pragma('foreign_keys = ON');
     }
 
     it('returns the same compare report from the fallback and materialized paths', () => {
@@ -569,6 +614,23 @@ describe('StatsCollector compare memoization (PERF-MAFIA-3)', () => {
       // The mock game really is classified as mock (audit counter on the
       // report), so its exclusion above is the gate at work.
       expect(materialized.mockGames).toBe(1);
+
+      // The head-to-head projection is gated, not filtered: a degenerate
+      // parent game still counts toward gamesPlayed (honest `ties` remainder)
+      // and contributes NO win, and an orphaned benchmark_games row (parent
+      // games row gone) stays INCLUDED on both paths.
+      const degenPair = materialized.headToHead.find(
+        (r) => r.modelA === 'fake/degenerate-only',
+      );
+      expect(degenPair).toBeDefined();
+      expect(degenPair!.gamesPlayed).toBe(1);
+      expect(degenPair!.modelAWins).toBe(0);
+      expect(degenPair!.ties).toBe(1);
+      const orphanPair = materialized.headToHead.find(
+        (r) => r.modelA === 'openai/gpt-4o-mini' && r.modelB === 'anthropic/claude-3',
+      );
+      expect(orphanPair).toBeDefined();
+      expect(orphanPair!.gamesPlayed).toBe(1);
 
       // The two paths agree on EVERY row, in order.
       expect(fallback).toEqual(materialized);
@@ -640,11 +702,12 @@ describe('StatsCollector compare memoization (PERF-MAFIA-3)', () => {
       expect(fallback).toEqual(materialized);
     });
 
-    it('evaluates the correlated gate once per build and json_each everywhere else', () => {
+    it('evaluates the correlated gate once per build — every other prepared statement probes the materialized set', () => {
       seedGateFixture(repo);
 
       const { result, sqls } = recordStatements(repo, () => getCompareReport(repo));
       expect(result.models.length).toBeGreaterThan(0);
+      expect(sqls.length).toBeGreaterThanOrEqual(10);
 
       // Exactly ONE statement carries the correlated degenerate/mock scan: the
       // build's single materialization (the constants live only in the
@@ -653,23 +716,45 @@ describe('StatsCollector compare memoization (PERF-MAFIA-3)', () => {
         sql.includes('SELECT g.id as id FROM games g'),
       );
       expect(materializations).toHaveLength(1);
+      expect(carriesCorrelatedGate(materializations[0])).toBe(true);
 
-      // No aggregate re-evaluates the per-row correlated gate: nothing that
-      // aggregates players/token_usage may read `events` (the correlated
-      // DEGENERATE_GAME_SQL is the only such reader), and the gate-carrying
-      // aggregates all probe the materialized set with json_each.
-      const aggregates = sqls.filter(
-        (sql) => sql.includes('FROM players p') || sql.includes('FROM token_usage tu'),
-      );
-      expect(aggregates.length).toBeGreaterThanOrEqual(5);
-      for (const sql of aggregates) {
+      // The ONLY other correlated classification allowed in this build is the
+      // mock AUDIT counter (#mockGames on the report). It is not an aggregate
+      // row filter: it counts mock games in one pass over games, it cannot be
+      // derived from the included-id set, and it carries MOCK_GAME_SQL only (no
+      // `events` scan). Pinned by name so a SECOND correlated statement cannot
+      // hide behind the exemption.
+      const auditCounters = sqls.filter((sql) => sql.includes('as count FROM games g'));
+      expect(auditCounters).toHaveLength(1);
+      for (const sql of auditCounters) {
         expect(sql).not.toContain('FROM events e');
       }
-      const gated = aggregates.filter((sql) => sql.includes('json_each'));
-      // getModelStats, usage aggregate, role breakdown, numPlayers
-      // breakdown, avg-cost, avg-role-performance, trends.
-      expect(gated.length).toBeGreaterThanOrEqual(7);
-      expect(materializations[0]).toContain('FROM events e');
+
+      // EVERY statement this build prepares is inspected — no players /
+      // token_usage narrowing (that narrowing is exactly how the
+      // benchmark_games head-to-head statement kept its per-row correlated scan;
+      // tier-2 FAIL 885f285b). Nothing but those two known statements may
+      // re-evaluate the gate.
+      const correlated = sqls.filter((sql) => carriesCorrelatedGate(sql));
+      const unexpected = correlated.filter(
+        (sql) => sql !== materializations[0] && sql !== auditCounters[0],
+      );
+      expect(unexpected).toEqual([]);
+
+      // The head-to-head statement is covered by the assertion above: it is
+      // prepared by this build and it probes the materialized set instead of
+      // carrying the correlated gate.
+      const headToHead = sqls.filter((sql) => sql.includes('FROM benchmark_games bg'));
+      expect(headToHead).toHaveLength(1);
+      expect(headToHead[0]).toContain('json_each');
+      expect(carriesCorrelatedGate(headToHead[0])).toBe(false);
+
+      // Spread check: the gate-carrying aggregates all probe the set —
+      // getModelStats, usage aggregate, assignments, role breakdown,
+      // numPlayers breakdown, avg-cost, avg-role-performance, trends and the
+      // head-to-head derivation.
+      const gated = sqls.filter((sql) => sql.includes('json_each'));
+      expect(gated.length).toBeGreaterThanOrEqual(8);
     });
 
     it('getModelComparison() materialized and forced-null paths agree', () => {
