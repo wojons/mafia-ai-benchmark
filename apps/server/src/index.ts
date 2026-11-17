@@ -9,6 +9,7 @@ import cors from 'cors';
 import helmet from 'helmet';
 import compression from 'compression';
 import dotenv from 'dotenv';
+import fs from 'node:fs';
 
 import { GameEngine } from './services/game-engine.js';
 import { AgentCoordinator } from './services/agent-coordinator.js';
@@ -32,6 +33,10 @@ import {
   registry,
   type MetricsStorageDatabase,
 } from './observability/metrics.js';
+// OBS-005: real health probes (degraded-in-body, HTTP 200 preserved) and a
+// LOG_LEVEL-honouring logger, so the two surfaces an operator reads are true.
+import { evaluateHealth } from './observability/health-probe.js';
+import { logger } from './utils/logger.js';
 
 dotenv.config();
 
@@ -49,7 +54,7 @@ export interface ServerContext {
 }
 
 async function main(): Promise<void> {
-  console.log('Mafia AI Benchmark Server');
+  logger.info('Mafia AI Benchmark Server');
   const dbPath = process.env.DB_PATH || './data/mafia.db';
   const migrator = createDatabase(dbPath);
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -87,12 +92,14 @@ async function main(): Promise<void> {
   // regular games share one adapter instance.
   try {
     legacyAdapter = LegacyGameAdapter.getInstance(eventBus, gameRepository);
-    console.log('✅ Legacy game adapter initialized');
+    logger.info('✅ Legacy game adapter initialized');
   } catch (e) {
-    // OBS-003: /health is unconditional, so a server that cannot play a single
-    // game still reports healthy. This is the boot site where that happens.
+    // OBS-003: this is the boot site where a server that cannot play a single
+    // game loses its engine. OBS-005: /health now probes the adapter and
+    // reports degraded, so the counter below is the rate signal and the body
+    // carries the reason.
     healthcheckFailed('legacy_adapter');
-    console.warn('⚠️ Legacy game adapter not available:', (e as Error).message);
+    logger.warn('⚠️ Legacy game adapter not available:', (e as Error).message);
   }
 
   const bootstrapContext: ServerContext = {
@@ -113,7 +120,7 @@ async function main(): Promise<void> {
   // Retire persisted games whose owner disappeared before serving any reads.
   // The shared read seam below makes this idempotent for rows written later.
   const gameLifecycleSummary = gameLifecycle.reconcile();
-  console.log(
+  logger.info(
     'Game lifecycle reconciliation: ' +
       `${gameLifecycleSummary.retired} retired, ` +
       `${gameLifecycleSummary.preservedLive} live, ` +
@@ -129,7 +136,7 @@ async function main(): Promise<void> {
   // BenchmarkRunner.reconcileStrandedRuns). Idempotent: a second pass finds
   // nothing to do. A genuinely active run is preserved as-is.
   const reconcileSummary = benchmarkRunner.reconcileStrandedRuns();
-  console.log(
+  logger.info(
     'Benchmark run reconciliation: ' +
       `${reconcileSummary.reconciled} recovered, ${reconcileSummary.leftActive} left active, ` +
       `${reconcileSummary.inspected} inspected`,
@@ -177,7 +184,7 @@ async function main(): Promise<void> {
       res.set('Content-Type', registry.contentType);
       res.end(body);
     } catch (e) {
-      console.error('[metrics] registry collection failed:', (e as Error).message);
+      logger.error('[metrics] registry collection failed:', (e as Error).message);
       res.status(500).set('Content-Type', 'text/plain; charset=utf-8').end('# mafia metrics collection failed\n');
     }
   });
@@ -197,13 +204,49 @@ async function main(): Promise<void> {
   app.use((req, res, next) => {
     const start = Date.now();
     res.on('finish', () => {
-      console.log(req.method + ' ' + req.path + ' - ' + res.statusCode + ' (' + (Date.now() - start) + 'ms)');
+      logger.info(req.method + ' ' + req.path + ' - ' + res.statusCode + ' (' + (Date.now() - start) + 'ms)');
     });
     next();
   });
 
-  const healthHandler = (req: express.Request, res: express.Response) => {
-    res.json({ status: 'healthy', timestamp: new Date().toISOString(), uptime: process.uptime(), memory: process.memoryUsage() });
+  // OBS-005: /health PROBES instead of asserting. Both checks are cheap
+  // (a constant SELECT; an in-memory adapter lookup), so this is safe to call
+  // at Docker's healthcheck cadence. The HTTP status stays 200 even when a
+  // check fails — Docker restarts on a failed healthcheck, and a locked or
+  // briefly unreadable DB must not flap the container. The truth travels in
+  // the body: status 'degraded' plus per-check reasons. Failures also
+  // increment mafia_healthcheck_failed_total{check} (OBS-003 family), which is
+  // the alertable signal.
+  const dbHealthProbe = migrator as unknown as {
+    db: { prepare: (sql: string) => { get: () => unknown } };
+  };
+  const healthHandler = (_req: express.Request, res: express.Response) => {
+    const report = evaluateHealth({
+      // A held SQLite handle survives `chmod 000`/unlink: a bare SELECT can be
+      // answered from the open handle's cache while the database file is no
+      // longer readable or writable by this process. So check the file the
+      // server actually opened FIRST, then still run the statement — that way a
+      // corrupt, locked or detached database fails here too. Both cost
+      // microseconds.
+      db_write: () => {
+        fs.accessSync(dbPath, fs.constants.R_OK | fs.constants.W_OK);
+        dbHealthProbe.db.prepare('SELECT 1 AS ok').get();
+      },
+      // Cheap liveness: a working adapter answers from its in-memory game map.
+      // A missing adapter (boot failure, above) is a degraded start, not a
+      // 500 — the server still serves reads.
+      legacy_adapter: () => {
+        if (!legacyAdapter) throw new Error('legacy game adapter is not initialized');
+        legacyAdapter.getActiveGames();
+      },
+    });
+    res.json({
+      status: report.status,
+      timestamp: new Date().toISOString(),
+      uptime: process.uptime(),
+      memory: process.memoryUsage(),
+      checks: report.checks,
+    });
   };
 
   app.get('/health', healthHandler);
@@ -221,7 +264,7 @@ async function main(): Promise<void> {
   app.use(bodyParseErrorHandler());
 
   app.use((err: Error, req: express.Request, res: express.Response, _next: express.NextFunction) => {
-    console.error('Server error:', err);
+    logger.error('Server error:', err);
     res.status(500).json({ success: false, error: { code: 'INTERNAL_ERROR', message: process.env.NODE_ENV === 'production' ? 'An internal error occurred' : err.message } });
   });
 
@@ -233,16 +276,16 @@ async function main(): Promise<void> {
   setupWebSocket(wsServer, context);
 
   httpServer.listen(PORT, () => {
-    console.log('HTTP Server running on port ' + PORT);
-    console.log('POST /api/v1/benchmark    - Run benchmark');
+    logger.info('HTTP Server running on port ' + PORT);
+    logger.info('POST /api/v1/benchmark    - Run benchmark');
   });
 
   const shutdown = async (signal: string) => {
-    console.log('Received ' + signal + ', shutting down gracefully...');
+    logger.info('Received ' + signal + ', shutting down gracefully...');
     wsServer.clients.forEach((client: WebSocket) => { client.close(1000, 'Server shutting down'); });
-    httpServer.close(() => { console.log('HTTP server closed'); });
+    httpServer.close(() => { logger.info('HTTP server closed'); });
     migrator.close();
-    console.log('Database connection closed');
+    logger.info('Database connection closed');
     process.exit(0);
   };
 
@@ -251,6 +294,6 @@ async function main(): Promise<void> {
 }
 
 main().catch((error) => {
-  console.error('Failed to start server:', error);
+  logger.error('Failed to start server:', error);
   process.exit(1);
 });
