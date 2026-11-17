@@ -6,7 +6,7 @@
  * translates them to server GameEvent format, and publishes through EventBus.
  */
 
-import { ChildProcess, spawn } from 'child_process';
+import { ChildProcess, ChildProcessWithoutNullStreams, spawn, type SpawnOptions } from 'child_process';
 import { EventEmitter } from 'events';
 import { EventBus } from './event-bus.js';
 import { GameRepository } from '../db/repository.js';
@@ -46,6 +46,25 @@ export interface LegacyGameConfig {
   gameConfig?: Record<string, unknown>;
   /** Per-role model assignments, e.g. { MAFIA: "qwen3.6-35b", SHERIFF: "kimi-k2.6" } */
   roleModels?: Record<string, string>;
+}
+
+/** Launches the bridge child. Mirrors the `child_process.spawn` call this adapter makes. */
+export type BridgeSpawn = (
+  command: string,
+  args: string[],
+  options: SpawnOptions,
+) => ChildProcessWithoutNullStreams;
+
+export interface LegacyGameAdapterOptions {
+  /**
+   * OBS-006 test seam: the bridge launcher. Production leaves this unset and
+   * the adapter spawns `node ./legacy-bridge.js`; a test supplies the real
+   * `child_process.spawn` bound to a short-lived script, so a REAL bridge
+   * child is created, registered, and its exit observed through the same
+   * startGame()/close-handler path production runs. There is no other seam:
+   * the bridge path and command are fixed at the spawn call.
+   */
+  spawn?: BridgeSpawn;
 }
 
 /** Map role names to legacy env var names */
@@ -183,16 +202,23 @@ export class LegacyGameAdapter extends EventEmitter {
   private gameConfigs: Map<string, LegacyGameConfig>;
   /** OBS-002: line-buffered stderr reader for the budget/retry signatures. */
   private childLogs: ChildLogObserver;
+  /** OBS-006: bridge launcher (defaults to child_process.spawn). */
+  private spawnChild?: BridgeSpawn;
   
   private static instance: LegacyGameAdapter | null = null;
   
-  constructor(eventBus: EventBus, gameRepository: GameRepository) {
+  constructor(
+    eventBus: EventBus,
+    gameRepository: GameRepository,
+    options: LegacyGameAdapterOptions = {},
+  ) {
     super();
     this.eventBus = eventBus;
     this.gameRepository = gameRepository;
     this.activeGames = new Map();
     this.gameConfigs = new Map();
     this.childLogs = new ChildLogObserver();
+    this.spawnChild = options.spawn;
     this.bridgeScriptPath = path.resolve(__dirname, 'legacy-bridge.js');
   }
   
@@ -312,8 +338,14 @@ export class LegacyGameAdapter extends EventEmitter {
       }
     }
     
-    // Spawn the bridge as a child process
-    const childProcess = spawn('node', [this.bridgeScriptPath, ...args], {
+    // Spawn the bridge as a child process. OBS-006: the launcher is injectable
+    // (see LegacyGameAdapterOptions.spawn) so a test can run a REAL, killable
+    // child through this exact registration path; production uses spawn().
+    // The cast is only about stream nullability: this call always passes
+    // ['pipe','pipe','pipe'], so the child's stdout/stderr are never null, but
+    // that fact is not visible through a variable-typed call site.
+    const launch: BridgeSpawn = this.spawnChild ?? (spawn as BridgeSpawn);
+    const childProcess = launch('node', [this.bridgeScriptPath, ...args], {
       cwd: path.resolve(__dirname, '..'),
       env,
       stdio: ['pipe', 'pipe', 'pipe'],

@@ -12,6 +12,7 @@
  */
 import { afterEach, describe, expect, it } from 'vitest';
 import express from 'express';
+import { spawn } from 'node:child_process';
 import http from 'node:http';
 import fs from 'node:fs';
 import os from 'node:os';
@@ -38,8 +39,12 @@ import {
 import {
   GAME_REGISTRATION_GRACE_MS,
   collectLiveGameIds,
+  isBridgeChildAlive,
   legacyBridgeLiveGameSource,
 } from '../../services/game-liveness.js';
+import { LegacyGameAdapter } from '../../services/legacy-game-adapter.js';
+import type { EventBus } from '../../services/event-bus.js';
+import type { GameRepository } from '../../db/repository.js';
 
 /** The six Tier-2 families from docs/observability-spec.md section 3.3. */
 const TIER2_FAMILIES = [
@@ -444,37 +449,141 @@ describe('OBS-006 orphan detector (mafia_game_in_progress)', () => {
     // the alarm stayed silent. Under OBS-006 ownership outranks recency: the
     // only thing that changes between the two refreshes below is the child's
     // exit, and the gauge must flip on the very next refresh.
+    //
+    // The child is REAL: an actual OS process spawned through the adapter's own
+    // startGame() registration path, registered in its activeGames map, and
+    // observed by the adapter's production 'close' handler. Nothing in this arm
+    // mutates a hand-built object.
     const { file, db } = makeFileDb();
     const now = Date.now();
-    insertGame(db, 'bridge-dies', { createdAt: now - 60_000, startedAt: now - 60_000 });
-    db.prepare(
-      `INSERT INTO events (id, game_id, type, timestamp, visibility, data, turn_number, day_number, phase, sequence)
-       VALUES ('evt-fresh', 'bridge-dies', 'STATE_CHANGE', ?, 'PUBLIC', '{}', 1, 1, 'DAY', 1)`,
-    ).run(now - 1_000); // one second old: maximally fresh evidence
 
-    // The real production liveness rule, driven by a fake bridge child.
-    const child: { exitCode: number | null; signalCode: string | null } = {
-      exitCode: null,
-      signalCode: null,
-    };
-    const adapter = {
-      getActiveGames: () => ['bridge-dies'],
-      getGameState: () => ({ status: 'RUNNING', process: child }),
-    };
-    const liveGameIds = () => collectLiveGameIds([legacyBridgeLiveGameSource(adapter)]);
+    // The stand-in bridge: alive until signalled, then exits 0. Exit code 0 is
+    // load-bearing — a signal-killed child (code null) makes the adapter's
+    // close handler write games.status='CANCELLED', removing the row before the
+    // gauge can classify it. A graceful 0 exit leaves the row IN_PROGRESS while
+    // the adapter stops owning the game: exactly the orphan this gauge exists
+    // to report. The readiness marker exists because a SIGTERM that arrives
+    // before the script has installed its handler kills node by default
+    // disposition (code null) — the test must wait for the real child to be up.
+    const bridgeScript = path.join(path.dirname(file), 'bridge.js');
+    const readyMarker = path.join(path.dirname(file), 'bridge-ready');
+    fs.writeFileSync(
+      bridgeScript,
+      [
+        'const fs = require("node:fs");',
+        'process.on("SIGTERM", () => process.exit(0));',
+        'process.on("SIGINT", () => process.exit(0));',
+        'fs.writeFileSync(process.env.OBS006_BRIDGE_READY_FILE, String(process.pid));',
+        'setInterval(() => {}, 1000);',
+        '',
+      ].join('\n'),
+    );
 
-    const alive = refreshStorageGauges({ db: storageDb(db), dbPath: file, now, liveGameIds });
-    expect(alive?.inProgressOrphans).toBe(0);
-    expect(valueOf(await render(), 'mafia_game_in_progress ')).toBe(0);
+    const adapter = new LegacyGameAdapter(
+      { publish: () => undefined } as unknown as EventBus,
+      { db } as unknown as GameRepository,
+      {
+        // Same node binary, same argv shape production builds, same stdio
+        // wiring; only the launched script differs, so the process under test
+        // is real and killable.
+        spawn: (command, args, options) => {
+          void command;
+          return spawn(process.execPath, [bridgeScript, ...args], {
+            ...options,
+            env: { ...options.env, OBS006_BRIDGE_READY_FILE: readyMarker },
+          });
+        },
+      },
+    );
 
-    // The bridge child is killed. Same row, same recent event, no clock advance.
-    child.exitCode = 0;
-    child.signalCode = null;
+    const state = adapter.startGame({ numPlayers: 5 });
+    const child = state.process;
+    try {
+      // Bounded poll (5 ms steps, 5 s ceiling) — never a blind sleep: the
+      // child announces that it is running and has installed its handlers.
+      const readyDeadline = Date.now() + 5_000;
+      while (!fs.existsSync(readyMarker)) {
+        if (Date.now() > readyDeadline) {
+          throw new Error('the bridge child never signalled readiness within 5000 ms');
+        }
+        await new Promise((resolve) => setTimeout(resolve, 5));
+      }
+      // The pid in the marker is the pid Node reports: the process this test
+      // watches IS the script that installed the SIGTERM handler.
+      expect(Number(fs.readFileSync(readyMarker, 'utf-8'))).toBe(child.pid);
 
-    const dead = refreshStorageGauges({ db: storageDb(db), dbPath: file, now, liveGameIds });
-    expect(dead?.inProgressOrphans).toBe(1);
-    expect(valueOf(await render(), 'mafia_game_in_progress ')).toBe(1);
-    db.close();
+      // A real child: a real OS pid, and Node reports it alive.
+      expect(child.pid).toBeGreaterThan(0);
+      expect(isBridgeChildAlive(child)).toBe(true);
+
+      // Production's own games row (startGame inserted it): age it past the
+      // registration grace and give it a 1 s old event, so recency cannot be
+      // what decides the verdict.
+      db.prepare('UPDATE games SET created_at = ?, started_at = ? WHERE id = ?')
+        .run(now - 60_000, now - 60_000, state.gameId);
+      db.prepare(
+        `INSERT INTO events (id, game_id, type, timestamp, visibility, data, turn_number, day_number, phase, sequence)
+         VALUES ('evt-fresh', ?, 'STATE_CHANGE', ?, 'PUBLIC', '{}', 1, 1, 'DAY', 1)`,
+      ).run(state.gameId, now - 1_000); // one second old: maximally fresh evidence
+
+      const liveGameIds = () => collectLiveGameIds([legacyBridgeLiveGameSource(adapter)]);
+
+      const alive = refreshStorageGauges({ db: storageDb(db), dbPath: file, now, liveGameIds });
+      expect(alive?.inProgressOrphans).toBe(0);
+      expect(valueOf(await render(), 'mafia_game_in_progress ')).toBe(0);
+
+      // Attach the adapter's own exit observation BEFORE signalling, so the
+      // kill cannot race the listener.
+      let deadline: ReturnType<typeof setTimeout> | undefined;
+      const observed = new Promise<void>((resolve, reject) => {
+        const onEnded = (gameId: string): void => {
+          if (gameId !== state.gameId) return;
+          adapter.off('gameEnded', onEnded);
+          if (deadline) clearTimeout(deadline);
+          resolve();
+        };
+        adapter.on('gameEnded', onEnded);
+        deadline = setTimeout(() => {
+          adapter.off('gameEnded', onEnded);
+          reject(new Error('the adapter never observed the bridge child exit within 3000 ms'));
+        }, 3_000);
+      });
+
+      // Kill the real child exactly as stopGame() would. The escalation is a
+      // leak guard only — the script answers SIGTERM, so it never fires.
+      const escalate = setTimeout(() => child.kill('SIGKILL'), 1_500);
+      expect(child.kill('SIGTERM')).toBe(true);
+      await observed;
+      clearTimeout(escalate);
+
+      // OS-confirmed death...
+      expect(child.exitCode).toBe(0);
+      expect(child.signalCode).toBeNull();
+      expect(isBridgeChildAlive(child)).toBe(false);
+      // ...yet the adapter's map still LISTS the game and still says RUNNING.
+      // That over-report is precisely why getActiveGames() alone is not
+      // liveness and why the child's exit has to be part of the rule.
+      expect(adapter.getActiveGames()).toContain(state.gameId);
+      expect(adapter.getGameState(state.gameId)?.status).toBe('RUNNING');
+
+      // The row itself was never touched: same row, still IN_PROGRESS, still
+      // holding the one-second-old event. Only the child's exit changed.
+      const row = db.prepare('SELECT status FROM games WHERE id = ?').get(state.gameId) as
+        | { status?: string }
+        | undefined;
+      expect(row?.status).toBe('IN_PROGRESS');
+
+      // Same clock (`now`), no staleness window waited out: the gauge flips on
+      // the very next refresh, and on the rendered /metrics text.
+      const dead = refreshStorageGauges({ db: storageDb(db), dbPath: file, now, liveGameIds });
+      expect(dead?.inProgressOrphans).toBe(1);
+      expect(valueOf(await render(), 'mafia_game_in_progress ')).toBe(1);
+    } finally {
+      // A child that somehow survived must not outlive this test.
+      if (isBridgeChildAlive(child)) child.kill('SIGKILL');
+      adapter.removeAllListeners();
+      db.close();
+    }
   });
 
   it('never counts a game this process still owns, however old its row is', async () => {
