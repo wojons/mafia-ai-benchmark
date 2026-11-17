@@ -384,14 +384,15 @@ suites, so they run only when a server is pinned: server `health.test.ts` (2) +
 gated on `MAFIA_LIVE_BENCHMARK=1` (1).
 
 **Test counts are generated from live vitest output — don't invent them.**
-`pnpm test:counts` (`scripts/sync-test-counts.mjs`) rewrites the collected counts
-from the suites' own "Tests" summary lines; run it after adding or removing
-tests. **It is currently broken for this README's wording**: the script's status
-line pattern still expects the old `✅ N Tests (all N passing: …)` shape and
-throws `README count patterns not found — structure drift: status line` on the
-split reported below, so the counts on this page were updated by hand from the
-four summary lines until `README-013` repairs the generator. The four lines
-behind the numbers above are:
+`pnpm test:counts` (`scripts/sync-test-counts.mjs`) rewrites every count on this
+page — the feature bullet, both command blocks, the coverage sentence, the
+summary block below and the status line — from the suites' own "Tests" summary
+lines; run it after adding or removing tests. The generator publishes the
+passed/skipped split it parses from those lines and fails loudly rather than
+assuming a suite skipped nothing, so a stale "all passing" claim cannot come
+back. `--dry-run` prints the rewrites without touching the file, and `--check`
+exits 1 when any count on the page is stale. The four lines behind the numbers
+above are:
 
 ```
 shared  Tests  420 passed (420)
@@ -400,8 +401,7 @@ cli     Tests  115 passed | 1 skipped (116)
 web     Tests  104 passed (104)
 ```
 
-so the passing figure is `420 + 644 + 115 + 104 = 1283` out of `420 + 663 + 116 +
-104 = 1303` collected, with the remaining 20 skipped.
+so the passing figure is `420 + 644 + 115 + 104 = 1283` out of `420 + 663 + 116 + 104 = 1303` collected, with the remaining 20 skipped.
 
 ### Game Events
 
