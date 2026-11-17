@@ -216,7 +216,7 @@ each entry has the form `{ "role": "MAFIA", "count": 3 }`. It is not a
 `config set` scalar; edit the `game.roles` array directly when needed. Messaging
 limits and day-rounds are not CLI configuration keys and have no config reader.
 
-> **Note:** `pnpm --filter @mafia/cli config ...` is intercepted by pnpm's built-in `config` command (ERR_PNPM_RECURSIVE_RUN_NO_SCRIPT), so config subcommands use the `run config ...` form (see line 247 note).
+> **Note:** `pnpm --filter @mafia/cli config ...` is intercepted by pnpm's built-in `config` command, which rejects the recursive filter (`[ERROR] Unknown option: 'recursive'`, exit 1), so config subcommands use the `run config ...` form (see the note under **Commands Guide** below).
 
 See **[CONFIG_GUIDE.md](CONFIG_GUIDE.md)** for complete documentation of all configurable parameters.
 
@@ -252,7 +252,7 @@ See **[specs/correct-night-flow.md](specs/correct-night-flow.md)** for complete 
 | `pnpm --filter @mafia/cli run config show` | **View config** | Check current settings |
 | `pnpm --filter @mafia/cli run config set <key> <value>` | **Configure** | Customize game params |
 
-> **Note:** `pnpm --filter @mafia/cli config ...` is intercepted by pnpm's built-in `config` command (ERR_PNPM_RECURSIVE_RUN_NO_SCRIPT / "Unknown option"), so config subcommands use the `run config ...` form. `stats` and `list-games` work directly as scripts.
+> **Note:** `pnpm --filter @mafia/cli config ...` is intercepted by pnpm's built-in `config` command instead of the `config` script, and that command has no recursive mode: on pnpm 11.13.1 it prints `[ERROR] Unknown option: 'recursive'` / `For help, run: pnpm help config` and exits 1. (`ERR_PNPM_RECURSIVE_RUN_NO_SCRIPT` is a different call — `pnpm --filter <pkg> run <missing-script>` reports `None of the selected packages has a "<script>" script`.) So config subcommands use the `run config ...` form. `stats` and `list-games` work directly as scripts.
 
 > **Note — non-interactive shells (cron / CI / agents):** pnpm 11 runs a
 > dependency check before every script and aborts in non-TTY shells with
