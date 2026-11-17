@@ -85,7 +85,7 @@ configured outside this repo (§5), so this document does not claim it. At the
 | Probe | Command | Result |
 |---|---|---|
 | Live `/metrics` | `curl -s -o /dev/null -w '%{http_code}' http://localhost:3004/metrics` | **200** (2026-11-17) — Prometheus text format, 1242 `mafia_` sample lines across 21 families. **404** at the 2026-11-03 audit. |
-| Live `/health` | `curl -s http://localhost:3004/health` | 200, JSON with `status`, `timestamp`, `uptime`, `memory` (unchanged) |
+| Live `/health` | `curl -s http://localhost:3004/health` | 200, JSON with `status`, `timestamp`, `uptime`, `memory`, `checks` — `status` is `degraded` with per-check reasons when a probe fails (OBS-005, `6ba1457`); HTTP stays 200 and the alertable signal is `mafia_healthcheck_failed_total{check}` |
 | Prometheus client dep | `grep prom-client apps/server/package.json` | **`"prom-client": "^15.1.3",` — `apps/server/package.json:27`** (2026-11-17). At the audit: **none** — deps ended at `ws` (`apps/server/package.json:18-29`). |
 | First-party metric code | registry + instruments | **`apps/server/src/observability/metrics.ts`** (2026-11-17) — one `client.Registry`, `collectDefaultMetrics`, the Tier-0/1/2 `mafia_*` families, and `METRICS_MODEL_ALLOWLIST`. At the audit: **0 files**. |
 
