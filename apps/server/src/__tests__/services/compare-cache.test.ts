@@ -23,6 +23,10 @@
  */
 import { describe, it, expect, beforeEach } from 'vitest';
 import { StatsCollector } from '../../services/stats-collector.js';
+import {
+  getCompareReport,
+  getModelComparison,
+} from '../../services/stats-collector/models.js';
 import { createSqliteBackedRepository } from './mocks.js';
 
 // Type alias matching the return shape of createSqliteBackedRepository().
@@ -364,6 +368,318 @@ describe('StatsCollector compare memoization (PERF-MAFIA-3)', () => {
       expect(recovered.models[0].model).toBe('gpt-4o');
       // And the recovered report IS cached (identical on the next call).
       expect(stats.getCompareReport()).toBe(recovered);
+    });
+  });
+
+  /**
+   * PERF-MAFIA-6 — the materialized degenerate/mock gate must be
+   * OBSERVATIONALLY IDENTICAL to the correlated fallback it replaced.
+   *
+   * getCompareReport() materializes the surviving game ids once per build
+   * (`getIncludedCompareGameIds`) and every aggregate probes that set with
+   * json_each. When the set cannot be built the helpers return null and every
+   * aggregate keeps the legacy correlated DEGENERATE_GAME_SQL /
+   * MOCK_GAME_SQL predicate. These tests pin that the two paths return the
+   * SAME rows on the same store — row order included, no ordering slop — over
+   * a fixture that actually contains degenerate, mock, in-flight and orphaned
+   * rows (so the gates have something to disagree about).
+   */
+  describe('PERF-MAFIA-6 materialized gate ≡ correlated fallback', () => {
+    /**
+     * Reject ONLY the materialization statement so
+     * getIncludedCompareGameIds() returns null; every other query still runs
+     * against the real store, which is exactly the degraded-but-honest path
+     * the fallback branch exists for.
+     */
+    function withUnavailableMaterialization<T>(target: FakeRepo, fn: () => T): T {
+      const db = target.db as unknown as { prepare: (sql: string) => unknown };
+      const realPrepare = db.prepare.bind(db);
+      db.prepare = (sql: string) => {
+        if (sql.includes('SELECT g.id as id FROM games g')) {
+          throw new Error('PERF-MAFIA-6 test: materialization unavailable');
+        }
+        return realPrepare(sql);
+      };
+      try {
+        return fn();
+      } finally {
+        db.prepare = realPrepare;
+      }
+    }
+
+    /** Record every prepared statement while `fn` runs. */
+    function recordStatements<T>(target: FakeRepo, fn: () => T): { result: T; sqls: string[] } {
+      const db = target.db as unknown as { prepare: (sql: string) => unknown };
+      const realPrepare = db.prepare.bind(db);
+      const sqls: string[] = [];
+      db.prepare = (sql: string) => {
+        sqls.push(sql);
+        return realPrepare(sql);
+      };
+      try {
+        return { result: fn(), sqls };
+      } finally {
+        db.prepare = realPrepare;
+      }
+    }
+
+    /**
+     * Store carrying every class the gate distinguishes:
+     *  - gate-healthy  ENDED, real dialogue, long duration  → counted
+     *  - gate-degen    ENDED, 3 empty broadcasts, 80 s      → degenerate
+     *  - gate-mock     ENDED, write-time $.mock flag        → mock
+     *  - gate-live     IN_PROGRESS (gate returns NULL)      → counted
+     *  - gate-missing  token_usage only, no games row       → orphan
+     */
+    function seedGateFixture(target: FakeRepo) {
+      target.seedGame({
+        id: 'gate-healthy',
+        status: 'ENDED',
+        winner: 'TOWN',
+        duration: 300_000,
+        numPlayers: 4,
+        players: [
+          {
+            id: 'gh-mafia', name: 'H Mafia', role: 'MAFIA', isMafia: true,
+            joinOrder: 0, provider: 'openai', model: 'gpt-4o-mini', won: 0,
+            role_performance: 0.4,
+          },
+          {
+            id: 'gh-town', name: 'H Town', role: 'VILLAGER', isMafia: false,
+            joinOrder: 1, provider: 'anthropic', model: 'claude-3', won: 1,
+            role_performance: 0.8,
+          },
+        ],
+        events: [
+          { type: 'AGENT_SAYS_BROADCASTED', actorId: 'gh-mafia', data: { says: 'the town is quiet' } },
+          { type: 'AGENT_SAYS_BROADCASTED', actorId: 'gh-town', data: { says: 'I am a villager' } },
+          { type: 'AGENT_SAYS_BROADCASTED', actorId: 'gh-mafia', data: { statement: 'vote tomorrow' } },
+        ],
+      });
+      target.seedGame({
+        id: 'gate-degen',
+        status: 'ENDED',
+        winner: 'TOWN',
+        duration: 80_000,
+        numPlayers: 2,
+        players: [
+          {
+            id: 'gd-player', name: 'D Player', role: 'VILLAGER', isMafia: false,
+            joinOrder: 0, provider: 'fake', model: 'degenerate-only', won: 1,
+            role_performance: 0.1,
+          },
+        ],
+        events: [
+          { type: 'AGENT_SAYS_BROADCASTED', actorId: 'gd-player', data: {} },
+          { type: 'AGENT_SAYS_BROADCASTED', actorId: 'gd-player', data: {} },
+          { type: 'AGENT_SAYS_BROADCASTED', actorId: 'gd-player', data: {} },
+        ],
+      });
+      target.seedGame({
+        id: 'gate-mock',
+        status: 'ENDED',
+        winner: 'MAFIA',
+        duration: 300_000,
+        numPlayers: 2,
+        players: [
+          {
+            id: 'gm-player', name: 'M Player', role: 'MAFIA', isMafia: true,
+            joinOrder: 0, provider: 'fake', model: 'mock-only', won: 1,
+            role_performance: 0.1,
+          },
+        ],
+        events: [
+          { type: 'AGENT_SAYS_BROADCASTED', actorId: 'gm-player', data: { says: 'canned mock line' } },
+        ],
+      });
+      // Write-time flag the legacy adapter sets when every provider call fell
+      // back to the canned mock (DF-MAFIA-AI-BENCHMARK-12).
+      target.db
+        .prepare(`UPDATE games SET config = json_set(config, '$.mock', 1) WHERE id = ?`)
+        .run('gate-mock');
+      target.seedGame({
+        id: 'gate-live',
+        status: 'IN_PROGRESS',
+        numPlayers: 4,
+        players: [
+          {
+            id: 'gl-player', name: 'L Player', role: 'VILLAGER', joinOrder: 0,
+            provider: 'openai', model: 'gpt-4o-mini',
+          },
+        ],
+      });
+
+      target.insertTokenUsage({
+        gameId: 'gate-healthy', playerId: 'gh-mafia', turnNumber: 1,
+        provider: 'openai', model: 'gpt-4o-mini', promptTokens: 100,
+        completionTokens: 50, totalTokens: 150, cost: 0.01,
+      });
+      target.insertTokenUsage({
+        gameId: 'gate-healthy', playerId: 'gh-town', turnNumber: 1,
+        provider: 'anthropic', model: 'claude-3', promptTokens: 200,
+        completionTokens: 100, totalTokens: 300, cost: 0.02,
+      });
+      target.insertTokenUsage({
+        gameId: 'gate-degen', playerId: 'gd-player', turnNumber: 1,
+        provider: 'fake', model: 'degenerate-only', promptTokens: 5,
+        completionTokens: 5, totalTokens: 10, cost: 0.001,
+      });
+      target.insertTokenUsage({
+        gameId: 'gate-mock', playerId: 'gm-player', turnNumber: 1,
+        provider: 'fake', model: 'mock-only', promptTokens: 0,
+        completionTokens: 0, totalTokens: 0, cost: 0,
+      });
+      // Orphaned usage row: no games row, so the inner join drops it on BOTH
+      // paths (the join is load-bearing even after the flag predicate moves).
+      // Seeded with enforcement off — a real store can carry such a row, and
+      // the aggregates must keep ignoring it rather than count it in.
+      target.db.pragma('foreign_keys = OFF');
+      target.insertTokenUsage({
+        gameId: 'gate-missing', playerId: 'gone', turnNumber: 1,
+        provider: 'openai', model: 'orphan-only', promptTokens: 10,
+        completionTokens: 10, totalTokens: 20, cost: 0.5,
+      });
+      target.db.pragma('foreign_keys = ON');
+      // Legacy assignment source (getModelComparisonFromAssignments).
+      target.db
+        .prepare(
+          `INSERT INTO player_model_assignments
+             (id, game_id, player_id, player_name, provider, model, role, created_at)
+           VALUES ('pma-gate', 'gate-healthy', 'gh-town', 'H Town',
+                   'anthropic', 'claude-3', 'VILLAGER', 1)`,
+        )
+        .run();
+    }
+
+    it('returns the same compare report from the fallback and materialized paths', () => {
+      seedGateFixture(repo);
+
+      const materialized = getCompareReport(repo);
+      const fallback = withUnavailableMaterialization(repo, () => getCompareReport(repo));
+
+      // Non-vacuity: the fixture produces real rows AND the gate excludes the
+      // games it must — otherwise "equal" would be "equally empty".
+      expect(materialized.models.length).toBeGreaterThan(0);
+      const modelKeys = materialized.models.map((m) => `${m.provider}/${m.model}`);
+      expect(modelKeys).toContain('openai/gpt-4o-mini');
+      expect(modelKeys).toContain('anthropic/claude-3');
+      expect(modelKeys).not.toContain('fake/degenerate-only');
+      expect(modelKeys).not.toContain('fake/mock-only');
+      expect(modelKeys).not.toContain('openai/orphan-only');
+      // The mock game really is classified as mock (audit counter on the
+      // report), so its exclusion above is the gate at work.
+      expect(materialized.mockGames).toBe(1);
+
+      // The two paths agree on EVERY row, in order.
+      expect(fallback).toEqual(materialized);
+      expect(fallback.models).toEqual(materialized.models);
+      expect(fallback.unattributedModels).toEqual(materialized.unattributedModels);
+      expect(fallback.headToHead).toEqual(materialized.headToHead);
+      expect(fallback.trends).toEqual(materialized.trends);
+      expect(fallback.mockGames).toEqual(materialized.mockGames);
+    });
+
+    it('returns the same compare report when the fallback model/trend branch runs', () => {
+      // A store whose only rows are the DF-33 mis-key family: the real-model
+      // partition is empty, so the honest fallback model builder AND the
+      // assignment-derived fallback trends query both execute.
+      repo.seedGame({
+        id: 'gate-ghost',
+        status: 'ENDED',
+        winner: 'TOWN',
+        duration: 300_000,
+        numPlayers: 2,
+        players: [
+          {
+            id: 'gg-player', name: 'G Player', role: 'VILLAGER', joinOrder: 0,
+            provider: 'CUSTOM', model: 'openai', won: 1,
+          },
+        ],
+        events: [
+          { type: 'AGENT_SAYS_BROADCASTED', actorId: 'gg-player', data: { says: 'legacy row' } },
+        ],
+      });
+      repo.insertTokenUsage({
+        gameId: 'gate-ghost', playerId: 'gg-player', turnNumber: 1,
+        provider: 'CUSTOM', model: 'openai', promptTokens: 10,
+        completionTokens: 10, totalTokens: 20, cost: 0.1,
+      });
+      repo.db
+        .prepare(
+          `INSERT INTO player_model_assignments
+             (id, game_id, player_id, player_name, provider, model, role, created_at)
+           VALUES ('pma-ghost', 'gate-ghost', 'gg-player', 'G Player',
+                   'CUSTOM', 'openai', 'VILLAGER', 1)`,
+        )
+        .run();
+      // A degenerate game the fallback's assignment query must still exclude.
+      repo.seedGame({
+        id: 'gate-ghost-degen',
+        status: 'ENDED',
+        winner: 'TOWN',
+        duration: 90_000,
+        numPlayers: 2,
+        players: [
+          {
+            id: 'ggd-player', name: 'GD Player', role: 'VILLAGER', joinOrder: 0,
+            provider: 'CUSTOM', model: 'qwen3', won: 1,
+          },
+        ],
+        events: [
+          { type: 'AGENT_SAYS_BROADCASTED', actorId: 'ggd-player', data: {} },
+          { type: 'AGENT_SAYS_BROADCASTED', actorId: 'ggd-player', data: {} },
+          { type: 'AGENT_SAYS_BROADCASTED', actorId: 'ggd-player', data: {} },
+        ],
+      });
+
+      const materialized = getCompareReport(repo);
+      const fallback = withUnavailableMaterialization(repo, () => getCompareReport(repo));
+
+      expect(materialized.models).toEqual([]);
+      expect(materialized.unattributedModels.length).toBeGreaterThan(0);
+      expect(fallback).toEqual(materialized);
+    });
+
+    it('evaluates the correlated gate once per build and json_each everywhere else', () => {
+      seedGateFixture(repo);
+
+      const { result, sqls } = recordStatements(repo, () => getCompareReport(repo));
+      expect(result.models.length).toBeGreaterThan(0);
+
+      // Exactly ONE statement carries the correlated degenerate/mock scan: the
+      // build's single materialization (the constants live only in the
+      // fallback branch now, so nothing here can silently re-run them).
+      const materializations = sqls.filter((sql) =>
+        sql.includes('SELECT g.id as id FROM games g'),
+      );
+      expect(materializations).toHaveLength(1);
+
+      // No aggregate re-evaluates the per-row correlated gate: nothing that
+      // aggregates players/token_usage may read `events` (the correlated
+      // DEGENERATE_GAME_SQL is the only such reader), and the gate-carrying
+      // aggregates all probe the materialized set with json_each.
+      const aggregates = sqls.filter(
+        (sql) => sql.includes('FROM players p') || sql.includes('FROM token_usage tu'),
+      );
+      expect(aggregates.length).toBeGreaterThanOrEqual(5);
+      for (const sql of aggregates) {
+        expect(sql).not.toContain('FROM events e');
+      }
+      const gated = aggregates.filter((sql) => sql.includes('json_each'));
+      // getModelStats, usage aggregate, role breakdown, numPlayers
+      // breakdown, avg-cost, avg-role-performance, trends.
+      expect(gated.length).toBeGreaterThanOrEqual(7);
+      expect(materializations[0]).toContain('FROM events e');
+    });
+
+    it('getModelComparison() materialized and forced-null paths agree', () => {
+      seedGateFixture(repo);
+
+      const materialized = getModelComparison(repo);
+      const forcedFallback = getModelComparison(repo, null);
+
+      expect(materialized.length).toBeGreaterThan(0);
+      expect(forcedFallback).toEqual(materialized);
     });
   });
 });

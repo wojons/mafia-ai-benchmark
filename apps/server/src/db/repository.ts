@@ -116,6 +116,45 @@ export class GameRepository {
     WHEN COALESCE(json_extract(g.config, '$.mock'), 0) = 1 THEN 1
     ELSE 0
   END)`;
+
+  /**
+   * PERF-MAFIA-6: predicate anchoring an aggregate to a PRE-MATERIALIZED
+   * included-game id set (built once per report by
+   * `getIncludedCompareGameIds` in services/stats-collector/models.ts) instead
+   * of re-evaluating the two CORRELATED `events` counts for every joined row.
+   *
+   * `gamesAlias` must be the alias of the `games` row the statement already
+   * joins: the degenerate/mock predicates are g-aliased SQL, and the
+   * materialized form keys on that same row's `id`, so both branches classify
+   * exactly the same row (INNER JOIN, so WHERE and ON placement agree).
+   *
+   * `includedIds` null/undefined keeps the legacy correlated predicate, so a
+   * caller that could not materialize the set still gets the historical
+   * classification rather than silently including games it cannot classify.
+   */
+  static includedGamePredicate(
+    gamesAlias: string,
+    includedIds: string[] | null | undefined,
+  ): { sql: string; params: string[] } {
+    if (includedIds === null || includedIds === undefined) {
+      return {
+        sql: `AND COALESCE((${GameRepository.DEGENERATE_GAME_SQL.replace(
+          /\bg\./g,
+          `${gamesAlias}.`,
+        )}), 0) = 0
+        AND COALESCE((${GameRepository.MOCK_GAME_SQL.replace(
+          /\bg\./g,
+          `${gamesAlias}.`,
+        )}), 0) = 0`,
+        params: [],
+      };
+    }
+    return {
+      sql: `AND ${gamesAlias}.id IN (SELECT value FROM json_each(?))`,
+      params: [JSON.stringify(includedIds)],
+    };
+  }
+
   constructor(db: Database.Database) {
     this.db = db;
   }
@@ -921,8 +960,13 @@ export class GameRepository {
   
   /**
    * Get model performance
+   *
+   * PERF-MAFIA-6: `includedIds` is the report-level materialized
+   * degenerate/mock gate (see `getIncludedCompareGameIds`). Omit it to keep
+   * the legacy correlated predicate; pass null when the set could not be
+   * materialized (same fallback).
    */
-  getModelStats(): Array<{
+  getModelStats(includedIds?: string[] | null): Array<{
     provider: string;
     model: string;
     gamesPlayed: number;
@@ -974,6 +1018,13 @@ export class GameRepository {
     const acModelExpr =
       `CASE WHEN instr(ac.model, '/') > 0 ` +
       `THEN substr(ac.model, instr(ac.model, '/') + 1) ELSE ac.model END`;
+    // PERF-MAFIA-6: when the caller already materialized the degenerate/mock
+    // gate for this build (`getIncludedCompareGameIds`), the two correlated
+    // `events` counts are replaced by a json_each probe on the id set — the
+    // dominant cost of this aggregate on the live corpus. Omitted (undefined)
+    // or unclassifiable (null) keeps the legacy correlated predicate, so every
+    // existing caller is unchanged.
+    const gate = GameRepository.includedGamePredicate('gdeg', includedIds);
     const rows = this.db.prepare(`
       SELECT 
         ${pProvExpr} as provider,
@@ -993,12 +1044,11 @@ export class GameRepository {
         )), 0) as avg_latency
       FROM players p
       JOIN games gdeg ON gdeg.id = p.game_id
-        AND COALESCE((${GameRepository.DEGENERATE_GAME_SQL.replace(/\bg\./g, 'gdeg.')}), 0) = 0
-        AND COALESCE((${GameRepository.MOCK_GAME_SQL.replace(/\bg\./g, 'gdeg.')}), 0) = 0
       WHERE p.provider IS NOT NULL
+        ${gate.sql}
       GROUP BY ${pProvExpr}, ${pModelExpr}
       ORDER BY games_played DESC
-    `).all() as Record<string, unknown>[];
+    `).all(...gate.params) as Record<string, unknown>[];
     
     return rows.map(row => ({
       provider: row.provider as string,
