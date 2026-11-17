@@ -8,6 +8,35 @@ on:
     branches: [main]
 
 jobs:
+  usage-skill-guard:
+    name: Usage skill coaching guard
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 11.13.1
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      # DF-MAFIA-AI-BENCHMARK-49: the coaching prose in
+      # skills/mafia-usage/SKILL.md must not outlive the API contract it
+      # describes, and every closed-defect id it cites must still be complete
+      # on the tracked board. Both inputs are tracked source and the checker
+      # itself has no dependencies, so this job needs no build step: it is a
+      # fail-closed drift check that runs on plain Node.
+      - name: Check the usage-skill coaching contract
+        run: pnpm check:usage-skill
+
+      - name: Prove the guard can fail (script test suite)
+        run: pnpm test:scripts
+
   build-and-test:
     runs-on: ubuntu-latest
     strategy:
