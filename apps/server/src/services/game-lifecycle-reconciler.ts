@@ -2,13 +2,20 @@ import { randomUUID } from 'node:crypto';
 import type { GameRepository } from '../db/repository.js';
 import type { GameEvent } from '@mafia/shared/events';
 import { healthcheckFailed } from '../observability/metrics.js';
+import {
+  classifyGameLiveness,
+  newestGameActivity,
+  type GameLivenessRow,
+} from './game-liveness.js';
 
 /**
- * A persisted IN_PROGRESS row is only trustworthy while its owner is present
- * in one of the server's in-memory game registries, or while its persisted
- * heartbeat evidence is recent. The age window is deliberately conservative:
- * a live adapter game is always preserved by the owner check, while a game
- * left behind by a restart is retired once its last known activity is stale.
+ * Liveness is NOT decided here (OBS-006): `classifyGameLiveness` in
+ * ./game-liveness.ts is the one definition of "live" / "orphan" / "ghost",
+ * shared with the mafia_game_in_progress gauge so the alarm and the retirement
+ * seam can never disagree. This window is only about what retirement may DO:
+ * it is the age at which an already-orphaned row is safe to cancel — long
+ * enough that a restart, a slow deploy or a stale read cannot destroy a game
+ * the owner still intends to resume, which is why it is a day and not seconds.
  */
 export const STALE_IN_PROGRESS_MAX_MS = 24 * 60 * 60 * 1000;
 
@@ -85,7 +92,19 @@ export class GameLifecycleReconciler {
 
       for (const row of rows) {
         summary.inspected += 1;
-        if (liveIds.has(row.id)) {
+
+        // OBS-006: the liveness verdict comes from the ONE shared rule, not
+        // from a local opinion — the same call decides mafia_game_in_progress.
+        const evidence: GameLivenessRow = {
+          id: row.id,
+          createdAt: row.created_at,
+          startedAt: row.started_at,
+          lastEventAt: row.last_event_at,
+          playerCount: row.player_count,
+        };
+        const verdict = classifyGameLiveness(evidence, { liveGameIds: liveIds, now });
+
+        if (verdict === 'live') {
           summary.preservedLive += 1;
           continue;
         }
@@ -97,8 +116,7 @@ export class GameLifecycleReconciler {
         // live and no engine can advance it. Retire it immediately
         // instead of preserving it as "recent" for the whole age window
         // while read surfaces advertise it as live.
-        const neverStarted = row.started_at === null && row.player_count === 0;
-        if (neverStarted) {
+        if (verdict === 'never_started') {
           const changed = this.retireAsCancelled(db, now, row.id, 'never started: no engine owner, started_at NULL, zero players');
           if (changed > 0) {
             summary.retired += 1;
@@ -107,14 +125,17 @@ export class GameLifecycleReconciler {
           continue;
         }
 
-        const activityTimes = [row.created_at, row.started_at, row.last_event_at]
-          .filter((value): value is number => typeof value === 'number' && Number.isFinite(value));
-        const lastActivity = activityTimes.length > 0 ? Math.max(...activityTimes) : null;
-
-        // No timestamp is not proof that a game is stale. Leave it alone and
-        // let the next pass observe a real timestamp rather than cancelling a
-        // row on incomplete legacy data.
-        if (lastActivity === null || now - lastActivity <= this.staleAfterMs) {
+        // Only an orphan is even a retirement candidate, and retirement is
+        // destructive: it keeps its own conservative age window. A
+        // 'pending_registration' row may still be mid-registration, and
+        // 'unattributable' means no evidence at all — neither is proof of
+        // staleness, so both are preserved and re-examined on the next pass.
+        const lastActivity = newestGameActivity(evidence);
+        if (
+          verdict !== 'orphan' ||
+          lastActivity === null ||
+          now - lastActivity <= this.staleAfterMs
+        ) {
           summary.preservedRecent += 1;
           continue;
         }
