@@ -10,10 +10,7 @@ import { ChildProcess, spawn } from 'child_process';
 import { EventEmitter } from 'events';
 import { EventBus } from './event-bus.js';
 import { GameRepository } from '../db/repository.js';
-import {
-  extractPlayersFromEvents as extractPlayersFromEventStream,
-  ExtractedPlayer,
-} from '../db/player-extraction.js';
+import { extractPlayersFromEvents as extractPlayersFromEventStream } from '../db/player-extraction.js';
 import { GameEvent, EventVisibility, GamePhase, EventType } from '@mafia/shared/events';
 import { v4 as uuidv4 } from 'uuid';
 import path from 'path';
