@@ -1,0 +1,40 @@
+{
+  "tick_id": "mafia-ai-benchmark-foreman-2026-11-17-07-42-14",
+  "project": "mafia-ai-benchmark",
+  "started_at": "2026-11-17T07:42:14-05:00",
+  "finished_at": "",
+  "workers": [
+    {
+      "task_id": "OBS-006",
+      "branch": "wt/OBS-006",
+      "worktree": "/home/kara/worktrees/mafia-ai-benchmark-OBS-006",
+      "commit_sha": "",
+      "judge": "",
+      "merge": ""
+    },
+    {
+      "task_id": "README-013",
+      "branch": "wt/README-013",
+      "worktree": "/home/kara/worktrees/mafia-ai-benchmark-README-013",
+      "commit_sha": "",
+      "judge": "",
+      "merge": ""
+    },
+    {
+      "task_id": "DF-MAFIA-AI-BENCHMARK-49",
+      "branch": "wt/DF-MAFIA-AI-BENCHMARK-49",
+      "worktree": "/home/kara/worktrees/mafia-ai-benchmark-DF-MAFIA-AI-BENCHMARK-49",
+      "commit_sha": "",
+      "judge": "",
+      "merge": ""
+    },
+    {
+      "task_id": "PERF-MAFIA-6",
+      "branch": "wt/PERF-MAFIA-6",
+      "worktree": "/home/kara/worktrees/mafia-ai-benchmark-PERF-MAFIA-6",
+      "commit_sha": "",
+      "judge": "",
+      "merge": ""
+    }
+  ]
+}
