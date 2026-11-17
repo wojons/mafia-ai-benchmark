@@ -184,6 +184,11 @@ export function partitionModelRows<
  */
 function getModelComparisonFromAssignments(
   gameRepository: GameRepository,
+  /**
+   * PERF-MAFIA-6: the build's materialized degenerate/mock id set (see
+   * getIncludedCompareGameIds). Omit to classify per game here.
+   */
+  includedIds?: string[] | null,
 ): Array<{
   provider: string;
   model: string;
@@ -220,10 +225,9 @@ function getModelComparisonFromAssignments(
   // provider call, write-time flagged) are excluded with the same rule —
   // the mock phrases pass the say gate, so the event signature alone
   // cannot catch them; the write-time usage marker can.
-  const degenerateGames = new Set(getDegenerateGameIds(gameRepository));
-  const mockGames = new Set(getMockGameIds(gameRepository));
-  const isCounted = (gameId: string): boolean =>
-    !degenerateGames.has(gameId) && !mockGames.has(gameId);
+  // PERF-MAFIA-6: the build's materialized set decides this instead of two
+  // extra correlated id scans; the filter is byte-for-byte the same choice.
+  const isCounted = includedGameFilter(gameRepository, includedIds);
 
   const byModel = new Map<
     string,
@@ -387,6 +391,11 @@ function getModelComparisonFromAssignments(
  */
 function getSideAttributedWinGames(
   gameRepository: GameRepository,
+  /**
+   * PERF-MAFIA-6: the build's materialized degenerate/mock id set (see
+   * getIncludedCompareGameIds). Omit to classify per game here.
+   */
+  includedIds?: string[] | null,
 ): Map<string, Set<string>> {
   const winGamesByModel = new Map<string, Set<string>>();
   let db;
@@ -400,8 +409,9 @@ function getSideAttributedWinGames(
     // DF-MAFIA-AI-BENCHMARK-18: degenerate games carry no real play — a
     // "win" there must not be side-attributed to any model.
     // DF-MAFIA-AI-BENCHMARK-12: same for mock games (write-time flag).
-    const degenerateGames = new Set(getDegenerateGameIds(gameRepository));
-    const mockGames = new Set(getMockGameIds(gameRepository));
+    // PERF-MAFIA-6: reuse the build's materialized gate instead of two more
+    // correlated id scans.
+    const isCounted = includedGameFilter(gameRepository, includedIds);
     const pProvExpr = normalizedProviderSql('p');
     const pModelExpr = normalizedModelSql('p');
     const rows = db.prepare(`
@@ -424,8 +434,7 @@ function getSideAttributedWinGames(
     const winnerCache = new Map<string, 'MAFIA' | 'TOWN' | null>();
     for (const row of rows) {
       if (!row.provider || !row.model) continue;
-      if (degenerateGames.has(row.game_id)) continue;
-      if (mockGames.has(row.game_id)) continue;
+      if (!isCounted(row.game_id)) continue;
       if (isObjectObjectSentinel(row.provider) || isObjectObjectSentinel(row.model)) continue;
       let winner: 'MAFIA' | 'TOWN' | null = null;
       if (row.winner === 'MAFIA' || row.winner === 'TOWN') {
@@ -471,6 +480,11 @@ function getSideAttributedWinGames(
 function getModelComparisonFromUsage(
   gameRepository: GameRepository,
   excludeKeys: Set<string>,
+  /**
+   * PERF-MAFIA-6: the build's materialized degenerate/mock id set (see
+   * getIncludedCompareGameIds). Omit to keep the correlated predicate here.
+   */
+  includedIds?: string[] | null,
 ): Array<{
   provider: string;
   model: string;
@@ -490,6 +504,9 @@ function getModelComparisonFromUsage(
   // DF-MAFIA-AI-BENCHMARK-12: mock games (write-time $.mock flag) are
   // excluded with the same rule — their zero-token usage rows must not
   // fabricate "played" model rows.
+  // PERF-MAFIA-6: the build's materialized set replaces the per-row
+  // correlated evaluation of those two predicates.
+  const gate = includedGamePredicate('g', includedIds);
   const rows = db.prepare(`
     SELECT ${tuProvExpr} as provider, ${tuModelExpr} as model,
            COUNT(DISTINCT tu.game_id) as games,
@@ -498,10 +515,9 @@ function getModelComparisonFromUsage(
     FROM token_usage tu
     JOIN games g ON g.id = tu.game_id
     WHERE g.status = 'ENDED'
-      AND COALESCE((${GameRepositoryClass.DEGENERATE_GAME_SQL}), 0) = 0
-      AND COALESCE((${GameRepositoryClass.MOCK_GAME_SQL}), 0) = 0
+      ${gate.sql}
     GROUP BY ${tuProvExpr}, ${tuModelExpr}
-  `).all() as Array<{
+  `).all(...gate.params) as Array<{
     provider: string;
     model: string;
     games: number;
@@ -597,30 +613,40 @@ export function getIncludedCompareGameIds(
 
 /**
  * Predicate anchoring an aggregate to the materialized id set above
- * (PERF-MAFIA-5). Falls back to the correlated flag predicate when the set
- * could not be built, so the two paths return the same rows.
+ * (PERF-MAFIA-5/6). `gamesAlias` is the alias of the `games` row the
+ * statement already joins — the degenerate/mock predicates are g-aliased SQL,
+ * so the correlated fallback is substituted onto that alias, and the
+ * materialized form probes the same row's `id`.
+ *
+ * Falls back to the correlated flag predicate when the set could not be
+ * built, so the two paths return the same rows (pinned by
+ * compare-cache.test.ts "materialized gate ≡ correlated fallback").
  */
 export function includedGamePredicate(
-  rowAlias: string,
-  includedIds: string[] | null,
+  gamesAlias: string,
+  includedIds: string[] | null | undefined,
 ): { sql: string; params: string[] } {
-  if (includedIds === null) {
-    return {
-      sql: `AND COALESCE((${GameRepositoryClass.DEGENERATE_GAME_SQL.replace(
-        /\bg\./g,
-        `${rowAlias}.`,
-      )}), 0) = 0
-        AND COALESCE((${GameRepositoryClass.MOCK_GAME_SQL.replace(
-          /\bg\./g,
-          `${rowAlias}.`,
-        )}), 0) = 0`,
-      params: [],
-    };
+  return GameRepositoryClass.includedGamePredicate(gamesAlias, includedIds);
+}
+
+/**
+ * In-memory half of the same gate (PERF-MAFIA-6): the aggregates that filter
+ * in TypeScript (assignments rows, side-attributed wins) reuse the build's
+ * materialized set instead of re-running the two correlated id scans. Falls
+ * back to the degenerate/mock id helpers when the set could not be built, so
+ * classification is identical either way.
+ */
+function includedGameFilter(
+  gameRepository: GameRepository,
+  includedIds: string[] | null | undefined,
+): (gameId: string) => boolean {
+  if (includedIds !== undefined && includedIds !== null) {
+    const included = new Set(includedIds);
+    return (gameId) => included.has(gameId);
   }
-  return {
-    sql: `AND ${rowAlias}.game_id IN (SELECT value FROM json_each(?))`,
-    params: [JSON.stringify(includedIds)],
-  };
+  const degenerateGames = new Set(getDegenerateGameIds(gameRepository));
+  const mockGames = new Set(getMockGameIds(gameRepository));
+  return (gameId) => !degenerateGames.has(gameId) && !mockGames.has(gameId);
 }
 
 /**
@@ -728,27 +754,42 @@ export function getModelComparison(
   };
 
   try {
+    // PERF-MAFIA-6: ONE materialization per call when no set was threaded in
+    // (getCompareReport threads its own). Every source below then classifies
+    // games against this set instead of re-evaluating the correlated
+    // degenerate/mock predicates per row. A store that cannot be read here
+    // degrades to the correlated fallback, never to a silently unfiltered
+    // aggregate.
+    let includedIds: string[] | null;
+    try {
+      includedIds =
+        includedIdsOverride === undefined
+          ? getIncludedCompareGameIds(gameRepository.getDatabase())
+          : includedIdsOverride;
+    } catch {
+      includedIds = null;
+    }
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     let dbStats: any[] = [];
     try {
-      dbStats = gameRepository.getModelStats();
+      dbStats = gameRepository.getModelStats(includedIds);
     } catch {
       dbStats = [];
     }
     addRows(dbStats);
-    addRows(getModelComparisonFromAssignments(gameRepository));
+    addRows(getModelComparisonFromAssignments(gameRepository, includedIds));
     // Pass NO exclusions: after key normalization (MAF-GAP-036) the same
     // model can legitimately appear in multiple sources (e.g. assignments
     // with 1 game vs token_usage with 495). addRows' merge-max keeps the
     // most complete row instead of letting the earlier source shadow it.
-    addRows(getModelComparisonFromUsage(gameRepository, new Set()));
+    addRows(getModelComparisonFromUsage(gameRepository, new Set(), includedIds));
 
     // MAF-GAP-039: fold in side-attributed wins from real game-level
     // winners joined to per-game model participation (players.is_mafia).
     // This keeps the per-model rows consistent with the summary's winner
     // derivation without fabricating anything: usage-only rows have no
     // players rows, so they keep their honest 0 wins.
-    const sideWinGames = getSideAttributedWinGames(gameRepository);
+    const sideWinGames = getSideAttributedWinGames(gameRepository, includedIds);
     if (sideWinGames.size > 0) {
       for (const [key, row] of merged) {
         const winSet = sideWinGames.get(key);
@@ -831,7 +872,9 @@ function getHonestReportFallbackModels(
       : includedIdsOverride;
   const degenerateJoin = 'JOIN games gdeg ON gdeg.id = p.game_id';
   // DF-MAFIA-AI-BENCHMARK-18: degenerate games excluded from fallback rows.
-  const pGate = includedGamePredicate('p', includedIds);
+  // PERF-MAFIA-6: the gate is keyed on the JOINED GAMES alias, not on the
+  // row being aggregated — the correlated predicates are g-aliased SQL.
+  const pGate = includedGamePredicate('gdeg', includedIds);
 
   // 1. players-table rows (any role) — wins from players.won per row.
   try {
@@ -877,7 +920,7 @@ function getHonestReportFallbackModels(
   try {
     const tuProvExpr = normalizedProviderSql('tu');
     const tuModelExpr = normalizedModelSql('tu');
-    const tuGate = includedGamePredicate('tu', includedIds);
+    const tuGate = includedGamePredicate('g', includedIds);
     const usageRows = db.prepare(`
       SELECT ${tuProvExpr} as provider,
              ${tuModelExpr} as model,
@@ -1100,7 +1143,7 @@ export function getModelPerformanceBreakdown(
       includedIdsOverride === undefined
         ? getIncludedCompareGameIds(db)
         : includedIdsOverride;
-    const pGate = includedGamePredicate('p', includedIds);
+    const pGate = includedGamePredicate('gdeg', includedIds);
     const degenerateJoin = 'JOIN games gdeg ON gdeg.id = p.game_id';
     const baseWhere = `
         WHERE p.provider IS NOT NULL AND p.model IS NOT NULL
@@ -1305,9 +1348,12 @@ export function getCompareReport(
   // contested gamesPlayed/wins/winRate aggregates (see above).
   const pProvExpr = normalizedProviderSql('p');
   const pModelExpr = normalizedModelSql('p');
-  // PERF-MAFIA-5: plain join (orphan semantics) + materialized gate predicate.
+  // PERF-MAFIA-5/6: plain join (orphan semantics) + materialized gate
+  // predicate, keyed on the JOINED GAMES alias (the correlated predicates are
+  // g-aliased SQL, so substituting onto `p` would reference columns players
+  // does not have).
   const degenerateJoin = 'JOIN games gdeg ON gdeg.id = p.game_id';
-  const pGate = includedGamePredicate('p', includedIds);
+  const pGate = includedGamePredicate('gdeg', includedIds);
 
   // ===== Per-model breakdown (DF-MAFIA-AI-BENCHMARK-39) =====
   // rolePerformance (per-role distinct-game cells) + byNumPlayers
@@ -1323,7 +1369,7 @@ export function getCompareReport(
   // ===== Avg cost per model (normalized key, MAF-GAP-036/045) =====
   const tuProvExpr = normalizedProviderSql('tu');
   const tuModelExpr = normalizedModelSql('tu');
-  const costGate = includedGamePredicate('tu', includedIds);
+  const costGate = includedGamePredicate('gmock', includedIds);
   let costQuery = `
       SELECT 
         tu.provider,
@@ -1584,7 +1630,7 @@ export function getCompareReport(
     let fallbackModels: AnyRecord[] = models as AnyRecord[];
     if (fallbackModels.length === 0) {
       const { real, unattributed } = partitionModelRows(
-        getHonestReportFallbackModels(gameRepository),
+        getHonestReportFallbackModels(gameRepository, includedIds),
       );
       fallbackModels = real as AnyRecord[];
       const bucketedKeys = new Set(unattributedModels.map((r) => r.key));
@@ -1662,6 +1708,9 @@ export function getCompareReport(
 
     // Per-model game entries derived from real assignments; the won flag
     // comes from players.won per row, never from game-level winners.
+    // PERF-MAFIA-6: same materialized gate as every other aggregate in this
+    // build, keyed on the joined games row (`g`).
+    const fallbackGate = includedGamePredicate('g', includedIds);
     const assignmentRows = db.prepare(`
       SELECT pma.provider, pma.model, pma.game_id, pma.role, g.created_at
       FROM player_model_assignments pma
@@ -1669,9 +1718,8 @@ export function getCompareReport(
       WHERE g.status = 'ENDED'
         AND pma.provider != '${OBJECT_OBJECT_SENTINEL}'
         AND pma.model != '${OBJECT_OBJECT_SENTINEL}'
-        AND COALESCE((${GameRepositoryClass.DEGENERATE_GAME_SQL}), 0) = 0
-        AND COALESCE((${GameRepositoryClass.MOCK_GAME_SQL}), 0) = 0
-    `).all() as Array<{
+        ${fallbackGate.sql}
+    `).all(...fallbackGate.params) as Array<{
       provider: string;
       model: string;
       game_id: string;
