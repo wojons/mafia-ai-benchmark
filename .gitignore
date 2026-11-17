@@ -7,11 +7,16 @@ dist/
 build/
 *.tsbuildinfo
 
-# TypeScript in-source compiled output (packages/shared)
-packages/shared/src/**/*.js
-packages/shared/src/**/*.js.map
-packages/shared/src/**/*.d.ts
-packages/shared/src/**/*.d.ts.map
+# packages/shared does NOT emit in-source compiler output (`tsc -b` writes to
+# dist/, already ignored above) and it ships AUTHORED .js/.d.ts sources that the
+# legacy engine require()s directly. Blanket patterns for those families here
+# made 7 tracked files "ignored", so every ignore-aware materialization
+# (git init + git add -A snapshots, act checkouts) silently dropped them and the
+# server suite failed with "Cannot find module
+# './packages/shared/src/agents/response-parser'". QA-MAFIA-AI-BENCHMARK-15-R2:
+# do NOT re-add them. The guard test
+# packages/shared/src/__tests__/repo/tracked-files-not-ignored.test.ts fails if a
+# tracked file under packages/shared/src is ever git-ignored again.
 
 # Environment files (never commit these!)
 .env
