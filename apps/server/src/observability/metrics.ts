@@ -689,6 +689,173 @@ export function recordLlmUsage(perModel: unknown, perPlayer?: unknown): void {
   }
 }
 
+/** One aggregated (provider, model) group as it comes back out of token_usage. */
+export interface LlmUsageSeedGroupRow {
+  provider?: unknown;
+  model?: unknown;
+  rows?: unknown;
+  promptTokens?: unknown;
+  completionTokens?: unknown;
+  cost?: unknown;
+}
+
+/** One series in the CLOSED label set after raw groups have been folded in. */
+export interface LlmUsageSeedSeries {
+  provider: string;
+  model: string;
+  promptTokens: number;
+  completionTokens: number;
+  cost: number;
+}
+
+/** Result of folding raw token_usage groups into the bounded label set. */
+export interface LlmUsageSeedAggregate {
+  /** Distinct raw (provider, model) groups read. */
+  groups: number;
+  /** token_usage rows behind those groups. */
+  rows: number;
+  /** Series in the bounded label set that received a non-zero amount. */
+  series: LlmUsageSeedSeries[];
+  promptTokens: number;
+  completionTokens: number;
+  costUsd: number;
+}
+
+/**
+ * Fold raw token_usage groups into the SAME closed label sets the live
+ * recorders use (spec 3.2 cardinality policy).
+ *
+ * Pure: no counters are touched, so a test can call it repeatedly. Raw
+ * cardinality is whatever the database holds — thousands of model spellings,
+ * legacy '[object Object]' rows, prefixed/bare duplicates — and the OUTPUT is
+ * bounded by providers x (allow-list + 'other'), because every group goes
+ * through normalizeProvider/normalizeModel exactly like a live usage row does.
+ *
+ * Negative/non-numeric amounts are dropped rather than subtracted, matching
+ * llmCost/llmTokens (a counter cannot go down).
+ */
+export function aggregateLlmUsageGroups(rows: unknown): LlmUsageSeedAggregate {
+  const list = Array.isArray(rows) ? (rows as LlmUsageSeedGroupRow[]) : [];
+  const byLabels = new Map<string, LlmUsageSeedSeries>();
+  let groupCount = 0;
+  let rowCount = 0;
+
+  for (const row of list) {
+    if (!row || typeof row !== 'object') continue;
+    groupCount += 1;
+    rowCount += countOf(row.rows);
+    const provider = normalizeProvider(row.provider);
+    const model = normalizeModel(row.model);
+    const key = `${provider}\u0000${model}`;
+    const series = byLabels.get(key) ?? {
+      provider,
+      model,
+      promptTokens: 0,
+      completionTokens: 0,
+      cost: 0,
+    };
+    const prompt = numberOf(row.promptTokens);
+    const completion = numberOf(row.completionTokens);
+    const cost = numberOf(row.cost);
+    if (prompt !== undefined && prompt > 0) series.promptTokens += prompt;
+    if (completion !== undefined && completion > 0) series.completionTokens += completion;
+    if (cost !== undefined && cost > 0) series.cost += cost;
+    byLabels.set(key, series);
+  }
+
+  const series = Array.from(byLabels.values()).filter(
+    (s) => s.promptTokens > 0 || s.completionTokens > 0 || s.cost > 0,
+  );
+  return {
+    groups: groupCount,
+    rows: rowCount,
+    series,
+    promptTokens: series.reduce((sum, s) => sum + s.promptTokens, 0),
+    completionTokens: series.reduce((sum, s) => sum + s.completionTokens, 0),
+    costUsd: series.reduce((sum, s) => sum + s.cost, 0),
+  };
+}
+
+/** Minimal slice of better-sqlite3 the boot-time seed needs (driver-agnostic). */
+export interface MetricsSeedDatabase {
+  prepare(sql: string): { all(...params: unknown[]): unknown };
+}
+
+/**
+ * The boot-time read behind the cumulative LLM counters (exported so a test
+ * can assert the shape, like IN_PROGRESS_GAMES_SQL).
+ *
+ * GROUP BY keeps it one pass over token_usage (a real table, ~25k rows live)
+ * and returns at most one row per raw (provider, model) pair.
+ */
+export const LLM_USAGE_SEED_SQL = `SELECT
+   provider,
+   model,
+   COUNT(*) AS rows,
+   SUM(COALESCE(prompt_tokens, 0)) AS promptTokens,
+   SUM(COALESCE(completion_tokens, 0)) AS completionTokens,
+   SUM(COALESCE(cost, 0)) AS cost
+ FROM token_usage
+ GROUP BY provider, model`;
+
+/** Set once the seed has run, so a second call cannot double-count. */
+let llmUsageSeeded = false;
+
+/** True once seedLlmUsageFromDatabase has applied (exported for the boot log). */
+export function llmUsageSeedApplied(): boolean {
+  return llmUsageSeeded;
+}
+
+/**
+ * Seed the CUMULATIVE LLM counters from durable token_usage rows (spec 3.2).
+ *
+ * Why this exists: `mafia_llm_cost_usd_total` answers "what have we spent,
+ * cumulatively, per model" and `token_usage` is the durable record of exactly
+ * that. A counter that starts at zero on every process start answers
+ * "what has THIS process spent", which is a different question — and it makes
+ * the spec 6.2 cross-check (`sum(metric)` vs `SELECT sum(cost) FROM
+ * token_usage`) unsatisfiable on any stack that has history: the live DB
+ * carried $95 of spend while the freshly booted counter read 0.000.
+ *
+ * Contract:
+ *   - Runs ONCE per process, at boot, before any game can be accepted, so the
+ *     counter is (history at boot) + (rows written since) = the durable total.
+ *   - Idempotent: a second call returns null and touches nothing (a double
+ *     seed would silently double the spend figure).
+ *   - Never throws: a wedged DB must not stop the server from booting; the
+ *     counters simply keep their pre-registered zeros and the error is logged.
+ *   - Only tokens and cost are seeded. Request counts, latencies, retries and
+ *     budget stops are per-OBSERVATION evidence with no durable per-call row
+ *     to replay (api_calls mixes per-model, per-player and per-failure rows,
+ *     so counting it would double-count); they stay process-lifetime, which
+ *     docs/observability-spec.md 3.2 states explicitly.
+ */
+export function seedLlmUsageFromDatabase(db: MetricsSeedDatabase): LlmUsageSeedAggregate | null {
+  if (llmUsageSeeded) return null;
+  try {
+    const aggregate = aggregateLlmUsageGroups(db.prepare(LLM_USAGE_SEED_SQL).all());
+    for (const series of aggregate.series) {
+      const labels = { provider: series.provider, model: series.model };
+      if (series.promptTokens > 0) {
+        llmTokensCounter.inc({ ...labels, direction: 'prompt' }, series.promptTokens);
+      }
+      if (series.completionTokens > 0) {
+        llmTokensCounter.inc({ ...labels, direction: 'completion' }, series.completionTokens);
+      }
+      if (series.cost > 0) {
+        llmCostCounter.inc(labels, series.cost);
+      }
+    }
+    llmUsageSeeded = true;
+    return aggregate;
+  } catch (error) {
+    console.error(
+      `[metrics] llm usage seed failed: ${error instanceof Error ? error.message : String(error)}`,
+    );
+    return null;
+  }
+}
+
 /**
  * Record the failed-request evidence for a game whose LLM request stream died
  * with its child process (non-zero exit, bridge 'gameError', spawn failure).

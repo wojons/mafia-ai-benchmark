@@ -262,6 +262,35 @@ closed set is providers (6) × models (allow-list + `other`) × outcomes (2) =
 108 series with the default allow-list, well under the 200-series acceptance
 bound.
 
+**Cumulative vs. process-lifetime — which families reset, and why** (`OBS-002`,
+shipped in `seedLlmUsageFromDatabase`):
+
+| Families | Window | Why |
+|---|---|---|
+| `mafia_llm_tokens_total`, `mafia_llm_cost_usd_total` | **cumulative**: seeded from durable `token_usage` at boot, then incremented as this process writes rows | the row's own question is "what have we spent, **cumulatively**, per model". A counter that starts at 0 on each restart answers "what has this process spent", which is a different number — and it makes the §6.2 cross-check unsatisfiable on any stack that has history (measured: the live DB carried `$95.375665` of `token_usage.cost` while a freshly booted counter read `0.000000`) |
+| `mafia_llm_request_total`, `mafia_llm_request_duration_seconds`, `mafia_llm_retry_total`, `mafia_llm_budget_exhausted_total` | **process-lifetime** | there is no durable per-call row to replay: `api_calls` mixes one per-model aggregate, one per-player aggregate and one per failed call, so counting it would double- or triple-count. Reset on restart is the honest reading |
+| `mafia_benchmark_*` | mix: counters/duration are process-lifetime; the two **gauges** are recomputed from durable rows on every transition and every 30 s | a gauge has no accumulation problem, so it reads the durable truth continuously |
+
+Seeding details that matter to a reader:
+
+- One grouped pass over `token_usage` (`LLM_USAGE_SEED_SQL`:
+  `GROUP BY provider, model`) at boot, **before** the listener exists, so no
+  game can land between the seed and the first increment.
+- Raw groups are folded through the same `normalizeProvider` / `normalizeModel`
+  as live rows, so a database holding thousands of model spellings (or the
+  legacy `'[object Object]'` episode) still seeds a bounded series set.
+- Idempotent (`llmUsageSeedApplied()`): a second call is a no-op, so a restart
+  path cannot double the spend figure.
+- Never throws: a wedged database logs and leaves the pre-registered zeros —
+  `/metrics` must answer regardless (§4).
+
+`mafia_benchmark_run_stranded` counts `benchmark_runs` rows still
+`QUEUED`/`RUNNING` past `STALE_RUN_MAX_MS` (7 days) — exactly the predicate
+`BenchmarkRunner.reconcileStrandedRuns` sweeps to `FAILED`. A **clean stack**
+therefore reads 0 *after the startup reconciler has run* (boot does
+reconcile-then-refresh). If it reads non-zero, look for the run row: the gauge
+is inside its own defined window, and 0 would be the lie.
+
 ### 3.3 Tier 2 — storage, HTTP, and credential health (board row `OBS-003`)
 
 | Name | Type | Unit | Labels | The one question it answers |
@@ -483,6 +512,22 @@ sqlite3 /app/data/mafia.db "SELECT round(sum(cost),6) FROM token_usage;"
 curl -s http://localhost:3004/metrics | awk '/^mafia_llm_cost_usd_total/ {s+=$2} END {printf "%.6f\n", s}'
 ```
 
+The comparison is valid at **any** uptime, not just on a fresh database: the
+token/cost counters are seeded from `token_usage` at boot (§3.2) and then
+incremented by this process, so `sum(metric)` is the durable total and the two
+sides agree within 1e-6. Before that seed existed the check only held on an
+empty DB — a restarted server reported `$0.000000` against `$95.375665` of
+history.
+
+Bound and gauge checks that must also hold:
+
+```bash
+# series bound: one series per (provider, model, outcome), never per raw DB spelling
+curl -s http://localhost:3004/metrics | grep -c '^mafia_llm_request_total'   # < 200
+# stranded: 0 on a clean stack, i.e. after the startup reconciler swept old runs
+curl -s http://localhost:3004/metrics | grep '^mafia_benchmark_run_stranded'
+```
+
 PromQL:
 
 ```promql
@@ -498,6 +543,26 @@ counter must be sourced from the adapter's child-exit and event evidence, **not*
 from `api_calls.status_code` — see §2.3, where every row is a hard-coded 200
 (`legacy-game-adapter.ts:774`). A worker that wires the counter to `api_calls`
 produces a permanently-zero failure rate and fails this row.
+
+**Measured 2026-11-17** (`OBS-002`, server rebuilt from the branch that adds the
+boot seed; one game posted to the live stack on `:3004`):
+
+| Check | Command | Result |
+|---|---|---|
+| 1-game run | `POST /api/v1/benchmark` `{"config":{"models":["openai/gpt-4o-mini","openai/gpt-4o"],"gamesPerPairing":1,"numPlayers":5}}` | run `b05a99c6-…` → `COMPLETED` in 115.215 s, 1 game, 5 players |
+| request series present | `curl -s :3004/metrics \| grep -c '^mafia_llm_request_total'` | **108** (bound is < 200; the closed set is 6 providers × 9 models × 2 outcomes) |
+| failure ratio computable | per-model `failed` / `total` from the raw series | `gpt-4o-mini` 10 req, 0 failed; `gpt-4o` 10 req, 0 failed; every pre-registered model 0/0 (NaN in PromQL, which is "no data", not an error) |
+| cost cross-check | `sum(mafia_llm_cost_usd_total)` vs `SELECT round(sum(cost),6) FROM token_usage` | **95.389664** vs **95.389664** (Δ = 0.000000 ≤ 1e-6) — the seed printed `$95.375665` at boot and the game added `$0.013999` |
+| token cross-check | `sum(mafia_llm_tokens_total{direction=…})` vs `SELECT sum(prompt_tokens), sum(completion_tokens)` | **519,505,221 / 29,074,518** vs **519,505,221 / 29,074,518** |
+| run counters | `mafia_benchmark_run_total`, `…_duration_seconds` | `COMPLETED 1`, others 0; histogram `sum 115.204`, `count 1`, `le="300"` = 1 |
+| stranded | `mafia_benchmark_run_stranded` | **0**, and `SELECT count(*) FROM benchmark_runs WHERE status IN ('QUEUED','RUNNING')` = 0 (startup reconciler ran first: "0 recovered, 0 left active, 0 inspected") |
+
+Reading the cost number honestly: `token_usage` holds BOTH the per-model
+aggregate row (`player_id='ALL'`) and the per-player rows for the same game
+(MAF-GAP-029), so its `sum(cost)` is twice the engine's own spend for that game
+(measured: `$0.006999` per-model + `$0.007000` per-player). The metric mirrors
+the table exactly — which is what this cross-check asserts — but "money spent"
+is the per-model half, not the sum.
 
 ### 6.3 `OBS-003` (Tier 2) / `OBS-006` (honest orphan gauge)
 

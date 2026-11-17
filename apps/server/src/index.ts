@@ -36,6 +36,8 @@ import {
   httpMetricsMiddleware,
   refreshStorageGauges,
   registry,
+  seedLlmUsageFromDatabase,
+  type MetricsSeedDatabase,
   type MetricsStorageDatabase,
 } from './observability/metrics.js';
 // OBS-005: real health probes (degraded-in-body, HTTP 200 preserved) and a
@@ -161,6 +163,27 @@ async function main(): Promise<void> {
   // the same resolved DB_PATH the migrator opened, and the same live-owner
   // set as the reconciler. Both timers are unref'd.
   const metricsDb = (migrator as unknown as { db: MetricsStorageDatabase }).db;
+
+  // OBS-002: the LLM token/cost counters are CUMULATIVE (spec 3.2 asks "what
+  // have we spent, cumulatively, per model"), so they are seeded from the
+  // durable token_usage rows at boot and then incremented as this process
+  // writes more. Without the seed the counter answers "what has this process
+  // spent", which is a different number and can never agree with
+  // `SELECT sum(cost) FROM token_usage` on a stack that has history. Runs
+  // once, before the listener exists, so no game can slip between seed and
+  // first increment.
+  const llmSeed = seedLlmUsageFromDatabase(metricsDb as unknown as MetricsSeedDatabase);
+  if (llmSeed) {
+    logger.info(
+      'LLM usage seeded into metrics: ' +
+        `${llmSeed.rows} token_usage rows -> ${llmSeed.series.length} series, ` +
+        `$${llmSeed.costUsd.toFixed(6)} spend, ` +
+        `${llmSeed.promptTokens} prompt tokens, ${llmSeed.completionTokens} completion tokens`,
+    );
+  } else {
+    logger.warn('LLM usage seed skipped (already applied or the database refused the read)');
+  }
+
   refreshStorageGauges({ db: metricsDb, dbPath, liveGameIds });
   const storageGaugeTimer = setInterval(() => {
     refreshStorageGauges({ db: metricsDb, dbPath, liveGameIds });
