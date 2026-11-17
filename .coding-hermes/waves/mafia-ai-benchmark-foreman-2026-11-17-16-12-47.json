@@ -1,0 +1,26 @@
+{
+  "tick_id": "mafia-ai-benchmark-foreman-2026-11-17-16-12-47",
+  "project": "mafia-ai-benchmark",
+  "started_at": "2026-11-17T16:12:47-05:00",
+  "finished_at": "",
+  "recovery_of": "mafia-ai-benchmark-foreman-2026-11-17-07-42-14",
+  "recovery_summary": "Inherited wave 07:42: all 4 branches already merged into main (fast path). Judges settled this tick: OBS-006 PASS a2b67982 (prior tick), README-013 PASS 91c6c4ef (rerun after 302f7167 cap-out), DF-49 PASS cf12c59c (rerun). PERF-MAFIA-6 substantive FAIL 885f285b -> fixup worker dispatched. Rows README-013 + DF-49 closed in 0c1996a; worktrees/branches of the 4 merged tasks removed.",
+  "workers": [
+    {
+      "task_id": "PERF-MAFIA-6",
+      "kind": "recovery-fixup",
+      "branch": "wt/PERF-MAFIA-6",
+      "worktree": "/home/kara/worktrees/mafia-ai-benchmark-PERF-MAFIA-6",
+      "base": "dc44be6",
+      "judge_status": "FAIL 885f285b on merged tree; fixup dispatched per recovery rule (red -> fresh-worktree fixup worker)"
+    },
+    {
+      "task_id": "TEST-CLI-1",
+      "kind": "new-dispatch",
+      "branch": "wt/TEST-CLI-1",
+      "worktree": "/home/kara/worktrees/mafia-ai-benchmark-TEST-CLI-1",
+      "base": "origin/main",
+      "judge_status": "not yet judged"
+    }
+  ]
+}

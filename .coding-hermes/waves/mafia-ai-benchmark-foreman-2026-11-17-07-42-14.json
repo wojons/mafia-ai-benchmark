@@ -2,7 +2,7 @@
   "tick_id": "mafia-ai-benchmark-foreman-2026-11-17-07-42-14",
   "project": "mafia-ai-benchmark",
   "started_at": "2026-11-17T07:42:14-05:00",
-  "finished_at": "",
+  "finished_at": "2026-11-17T16:51:49Z",
   "workers": [
     {
       "task_id": "OBS-006",
@@ -36,5 +36,30 @@
       "judge": "pending: rerun next tick",
       "merge": "b8e10db"
     }
-  ]
+  ],
+  "recovery_status": "complete",
+  "recovered_by_tick": "mafia-ai-benchmark-foreman-2026-11-17-16-12-47",
+  "per_task_verification": [
+    {
+      "task": "OBS-006",
+      "verdict": "PASS a2b67982 (prior tick)",
+      "row": "complete in 0c1996a ancestor"
+    },
+    {
+      "task": "README-013",
+      "verdict": "PASS 91c6c4ef (rerun after cap-out 302f7167)",
+      "row": "complete in 0c1996a"
+    },
+    {
+      "task": "DF-MAFIA-AI-BENCHMARK-49",
+      "verdict": "PASS cf12c59c (rerun)",
+      "row": "complete in 0c1996a"
+    },
+    {
+      "task": "PERF-MAFIA-6",
+      "verdict": "FAIL 885f285b -> fixup -> PASS e0730b78 on merge 922a0d4",
+      "row": "complete this tick"
+    }
+  ],
+  "cleanup": "worktrees + local branches removed for all 4 merged tasks; remote evidence branches never existed for these wave branches"
 }
