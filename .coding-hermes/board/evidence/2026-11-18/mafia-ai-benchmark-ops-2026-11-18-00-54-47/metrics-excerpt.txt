@@ -1,0 +1,40 @@
+# TYPE mafia_server_up gauge
+# TYPE mafia_game_active gauge
+# TYPE mafia_game_ended_total counter
+# TYPE mafia_game_failed_total counter
+# TYPE mafia_game_duration_seconds histogram
+# TYPE mafia_benchmark_run_total counter
+mafia_benchmark_run_total{status="RUNNING"} 0
+mafia_benchmark_run_total{status="COMPLETED"} 1
+mafia_benchmark_run_total{status="CANCELLED"} 0
+mafia_benchmark_run_total{status="FAILED"} 0
+# TYPE mafia_benchmark_run_duration_seconds histogram
+# TYPE mafia_benchmark_run_stranded gauge
+mafia_benchmark_run_stranded 0
+# TYPE mafia_benchmark_games_queued gauge
+# TYPE mafia_llm_request_total counter
+# TYPE mafia_llm_request_duration_seconds histogram
+# TYPE mafia_llm_tokens_total counter
+# TYPE mafia_llm_cost_usd_total counter
+mafia_llm_cost_usd_total{provider="openai",model="gpt-4o-mini"} 61.436456549999996
+mafia_llm_cost_usd_total{provider="openai",model="gpt-4o"} 0.7340266
+mafia_llm_cost_usd_total{provider="openai",model="gpt-4"} 0
+mafia_llm_cost_usd_total{provider="openai",model="claude-3-haiku"} 0
+mafia_llm_cost_usd_total{provider="openai",model="claude-3-sonnet"} 0
+mafia_llm_cost_usd_total{provider="openai",model="claude-3-opus"} 0
+mafia_llm_cost_usd_total{provider="openai",model="gemini-1.5-flash"} 0
+mafia_llm_cost_usd_total{provider="openai",model="gemini-1.5-pro"} 0
+mafia_llm_cost_usd_total{provider="openai",model="other"} 0.03722415
+mafia_llm_cost_usd_total{provider="anthropic",model="gpt-4o-mini"} 0
+mafia_llm_cost_usd_total{provider="anthropic",model="gpt-4o"} 0
+mafia_llm_cost_usd_total{provider="anthropic",model="gpt-4"} 0
+mafia_llm_cost_usd_total{provider="anthropic",model="claude-3-haiku"} 0
+mafia_llm_cost_usd_total{provider="anthropic",model="claude-3-sonnet"} 0
+mafia_llm_cost_usd_total{provider="anthropic",model="claude-3-opus"} 0
+mafia_llm_cost_usd_total{provider="anthropic",model="gemini-1.5-flash"} 0
+mafia_llm_cost_usd_total{provider="anthropic",model="gemini-1.5-pro"} 0
+mafia_llm_cost_usd_total{provider="anthropic",model="other"} 0
+mafia_llm_cost_usd_total{provider="google",model="gpt-4o-mini"} 0
+mafia_llm_cost_usd_total{provider="google",model="gpt-4o"} 0
+mafia_llm_cost_usd_total{provider="google",model="gpt-4"} 0
+mafia_llm_cost_usd_total{provider="google",model="claude-3-haiku"} 0
