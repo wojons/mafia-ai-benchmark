@@ -888,3 +888,4 @@
 {"id":844,"timestamp":"2026-11-17 18:11:04","event_type":"task_created","task_id":"OBS-007","actor":"foreman","detail":"{\"id\":\"OBS-007\",\"status\":\"pending\"}","tick_number":null}
 {"id":845,"timestamp":"2026-11-17 18:15:05","event_type":"task_completed","task_id":"README-014","actor":"foreman","detail":"{\"status\":\"complete\"}","tick_number":null}
 {"id":846,"timestamp":"2026-11-18 01:01:30","event_type":"task_completed","task_id":"OBS-007","actor":"ops-lane","detail":"{\"status\":\"complete\",\"commit\":\"bfc921a\"}","tick_number":null}
+{"id":847,"timestamp":"2026-11-18 01:39:08","event_type":"task_completed","task_id":"OBS-002","actor":"foreman","detail":"{\"status\":\"complete\",\"commit\":\"134b583\",\"verdict\":\"2026-11-18/b707664b\",\"run\":\"47d34b0a\",\"cost_metric\":95.475889,\"cost_db\":95.475889}","tick_number":null}
