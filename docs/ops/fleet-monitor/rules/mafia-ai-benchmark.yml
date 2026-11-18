@@ -1,0 +1,32 @@
+# fleet-monitoring — mafia-ai-benchmark rules (OBS-004).
+#
+# The benchmark server exposes its own /metrics on :3004 (OBS-001 landed the Tier-0
+# families) and is scraped as job="mafia-ai-benchmark". Catalogue and thresholds:
+# wojons/mafia-ai-benchmark docs/observability-spec.md §6.1.
+#
+# Why bridge_spawn specifically: a spawn failure means the game PROCESS never started,
+# so the game is recorded as failed with no duration and no LLM cost. Aggregate counters
+# still look like a finished run, and nothing else in the stack notices. The documented
+# mode is benchmark-runner.ts:1155; the counter carries reason="bridge_spawn".
+
+groups:
+  - name: mafia-ai-benchmark
+    interval: 30s
+    rules:
+      - alert: MafiaBridgeSpawnFailures
+        # rate over 15m keeps a single spawn hiccup from paging immediately; `for: 10m`
+        # means the failure must persist to fire (spec §6.1: rate > 0 for 10m).
+        expr: sum(rate(mafia_game_failed_total{reason="bridge_spawn"}[15m])) > 0
+        for: 10m
+        labels:
+          severity: critical
+          lane: monitoring
+        annotations:
+          summary: "mafia-ai-benchmark cannot spawn game processes"
+          description: |
+            Bridge spawn failures are non-zero over the last 15 minutes: games are being
+            recorded as failed before any LLM call happens. Confirm on the work box with
+            `curl -s http://127.0.0.1:3004/metrics | grep mafia_game_failed_total` and
+            the runner's logs. A missing child binary, an exhausted process table or a
+            full /tmp shows up here first — the run otherwise looks like it completed.
+          runbook: docs/observability-spec.md#61-obs-001-tier-0

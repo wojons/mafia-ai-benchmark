@@ -403,11 +403,19 @@ this product.
 | Extra labels | `host="<docker host>"`, `product="mafia-ai-benchmark"`, `service="mafia-server"` (set via `relabel_configs`, not in-product) |
 
 Ownership note: the scrape job lives in
-`/root/fleet-monitoring/prometheus/prometheus.yml` on `fleet-monitor`, which is
-**outside this repo**. The worker implementing `OBS-001` must not edit it from
-this repo's context; instead file the job patch text in the row's evidence and
-request the fleet owner apply it, or (if the worker has `fleet-monitor` access via
-the sanctioned path) apply it and cite the resulting target health.
+`/root/fleet-monitoring/stack/prometheus/prometheus.yml` on `fleet-monitor` —
+that is the path the `mon-prometheus` container **mounts** as
+`/etc/prometheus/prometheus.yml` (docker inspect, 2026-11-17). A bare mirror
+also exists at `/root/fleet-monitoring/prometheus/prometheus.yml` and was
+byte-identical on that date, but only the mounted path decides what runs;
+edits must land there. Both rule files live under the mounted
+`/root/fleet-monitoring/alerts/rules/` (`mafia-ai-benchmark.yml`, `mafia.yml`).
+
+The canonical copies are now pinned in-repo under `docs/ops/fleet-monitor/`
+(OBS-007), with a drift check (`bash docs/ops/fleet-monitor/drift-check.sh`)
+and an apply/reload runbook in `docs/ops/fleet-monitor/README.md`. Do not edit
+these files only on the host: change the pin in a commit, then apply to the
+mounted paths and reload so repo and host stay in sync.
 
 Logs: this product currently has **no** log shipping. `docker logs` is the only
 sink. If log shipping is wanted later, Alloy can read the Docker socket; that is

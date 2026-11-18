@@ -1,0 +1,18 @@
+  # OBS-004 (mafia-ai-benchmark): the benchmark server serves its own /metrics on :3004
+  # (OBS-001 landed the Tier-0 families: mafia_server_up, mafia_game_active,
+  # mafia_game_ended_total, mafia_game_failed_total, mafia_game_duration_seconds).
+  # This product pushes nothing, so it is SCRAPED — consistent with hermes-cost and
+  # task-router, which are also reachable only over the tailnet.
+  #
+  # Spec: wojons/mafia-ai-benchmark docs/observability-spec.md §5 (15s interval, job name,
+  # product/service labels); alert threshold in §6.1.
+  # Measured 2026-11-16 from this host: GET /metrics = 200 in ~1.6s, 1242 `mafia_` lines,
+  # comfortably inside the global 10s scrape_timeout.
+  - job_name: mafia-ai-benchmark
+    metrics_path: /metrics
+    scrape_interval: 15s
+    static_configs:
+      # `product` rides on the TARGET, not the job: promtool rejects a job-level
+      # `labels` key (field labels not found in type config.ScrapeConfig) — v3.15.
+      - targets: ["100.97.236.14:3004"]
+        labels: { host: karahermes-mde-7840hs, product: mafia-ai-benchmark, service: mafia-server }

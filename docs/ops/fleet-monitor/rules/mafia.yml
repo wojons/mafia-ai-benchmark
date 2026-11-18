@@ -1,0 +1,25 @@
+groups:
+  # OBS-004 (mafia-ai-benchmark): the benchmark server exposes its own /metrics on :3004;
+  # the scrape job lives in the prometheus config. Before this file the product had no
+  # alerting surface at all, so failure modes were invisible until a human looked.
+  #
+  # Dedupe note 2026-11-17 (OBS-004 judge d540ab57): this file previously ALSO defined
+  # MafiaBridgeSpawnFailures (per-target rate(), severity warning), duplicating
+  # mafia-ai-benchmark.yml's summed expression (severity critical) — one bridge_spawn
+  # failure paged twice with different severities. The canonical spawn alert now lives
+  # ONLY in mafia-ai-benchmark.yml (matches spec §6.1's summed form); this file keeps the
+  # collection-liveness alert. Spec: wojons/mafia-ai-benchmark docs/observability-spec.md §6.1.
+  - name: mafia-ai-benchmark
+    interval: 30s
+    rules:
+      # Collection itself. Without this rule the product goes blind silently: the target can
+      # stop scraping and every mafia_ panel just goes stale-green rather than red.
+      - alert: MafiaTargetNotScraped
+        expr: up{job="mafia-ai-benchmark"} == 0
+        for: 15m
+        labels:
+          severity: warning
+          lane: monitoring
+        annotations:
+          summary: "mafia-ai-benchmark /metrics is not scrapeable ({{ $labels.instance }})"
+          description: "Prometheus cannot scrape the benchmark server on :3004. From fleet-monitor: `curl -s -o /dev/null -w '%{http_code}' http://100.97.236.14:3004/metrics` — 200 means the scrape timeout/route is at fault, 000 means the container is down or the port is no longer published. The product pushes nothing, so this scrape is the only telemetry path."
