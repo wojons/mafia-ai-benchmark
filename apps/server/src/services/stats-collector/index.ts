@@ -191,15 +191,52 @@ function storeCachedReport(
 
 export type CompareReport = ReturnType<typeof getCompareReport>;
 
+/**
+ * PERF-MAFIA-5 arm 2 — stale-while-revalidate for the compare report.
+ *
+ * BOUNDED STALENESS CONTRACT (also documented in
+ * docs/performance/PERF-MAFIA-5-compare-refresh.md):
+ *
+ *  - NOTHING is computed on the request path when an entry exists for the
+ *    requested filter. The cached report is served as-is; the watermark
+ *    validation and any rebuild are deferred to a background refresh that
+ *    runs at most once per COMPARE_REFRESH_THROTTLE_MS.
+ *  - DEFERRED inputs = the WHOLE compare fingerprint
+ *    (computeCompareWatermark: the completed-game watermark PLUS
+ *    benchmark_games / model_matchups / players.role /
+ *    player_model_assignments). Staleness bound: one throttle window
+ *    (<= 1 s) + one rebuild (the measured ~2-9 s cold build at the live
+ *    corpus, now off the request path). A queued key is ALWAYS revalidated
+ *    inside that window — the timer is armed when the key is enqueued, so a
+ *    quiet dashboard cannot pin stale data indefinitely.
+ *  - EXCLUDED inputs = rows belonging to games whose status is not ENDED
+ *    (events / players / token_usage / api_calls / agent_sessions /
+ *    player_model_assignments joined to a non-ENDED game, plus the
+ *    benchmark_games rows joined to one). That exclusion predates this row
+ *    (PERF-MAFIA-3/5) and is what lets an in-progress game write freely
+ *    without busting the cache; it is NOT a deferral — those rows are never
+ *    part of the report.
+ *  - A key ends up permanently stale only if every rebuild keeps throwing:
+ *    a failed rebuild keeps the last-good report and the next request
+ *    re-schedules validation, so a transient failure self-heals. A
+ *    fingerprint that cannot be computed at all (null) DROPS the entry, so
+ *    the next request takes the synchronous cold path ("compute fresh,
+ *    never memoize").
+ *  - The synchronous build is retained ONLY for the true cold case (no
+ *    entry for that filter in this process yet).
+ */
 interface CompareCacheEntry {
   watermark: string;
   report: CompareReport;
-  /**
-   * PRAGMA data_version snapshot taken when the report was cached (same
-   * foreign-writer guard as the PERF-MAFIA-2 report cache).
-   */
-  dataVersion: number;
 }
+
+/**
+ * Throttle floor for the deferred compare validation: at most one refresh
+ * cycle per window, per repository. Bounds the fingerprint SQL rate (one
+ * ~0.3 s scan per window at the live corpus instead of one per request)
+ * and therefore bounds the staleness a reader can observe.
+ */
+export const COMPARE_REFRESH_THROTTLE_MS = 1000;
 
 /**
  * One map per GameRepository instance, keyed by the normalized filter:
@@ -305,26 +342,42 @@ function computeCompareWatermark(repo: GameRepository): string | null {
   }
 }
 
-/** Cached-compare lookup; null = compute fresh. */
+/**
+ * Deferred-validation state for one repository.
+ *
+ * `queue` holds the cache keys a request has asked to be re-validated, with
+ * the `?models=` filter they were built under (the rebuild needs the filter,
+ * not just the key). `timer` is the throttle handle, `running` is the cycle
+ * currently executing, and `lastRefreshAt` is the throttle floor.
+ */
+interface CompareRefreshState {
+  repo: GameRepository;
+  queue: Map<string, string[] | undefined>;
+  timer: ReturnType<typeof setTimeout> | null;
+  running: Promise<void> | null;
+  lastRefreshAt: number;
+}
+
+/** Per-repository deferred-validation state (WeakMap — no external dep). */
+const compareRefreshByRepo = new WeakMap<GameRepository, CompareRefreshState>();
+
+/**
+ * States with queued or scheduled work. Only non-idle states live here (a
+ * cycle removes its state when the queue drains), so the registry stays
+ * bounded and `flushCompareRefresh()` — the awaitable test hook — never holds
+ * a finished repository alive.
+ */
+const pendingCompareRefresh = new Set<CompareRefreshState>();
+
+/** Cached-compare lookup; undefined = no report for this key. */
 function getCachedCompareReport(
   repo: GameRepository,
   cacheKey: string,
-): CompareCacheEntry | null {
-  // Same cross-connection guard as the report cache: data_version moves on
-  // any commit BY ANOTHER CONNECTION (foreign writers), while
-  // same-connection writes are caught by the watermark itself.
-  try {
-    const version = repo.getDatabase().pragma('data_version', { simple: true }) as number;
-    const entry = compareCacheByRepo.get(repo)?.get(cacheKey);
-    if (!entry) return null;
-    if (entry.dataVersion !== version) return null;
-    return entry;
-  } catch {
-    return null;
-  }
+): CompareReport | undefined {
+  return compareCacheByRepo.get(repo)?.get(cacheKey)?.report;
 }
 
-/** Store a freshly computed compare report under filter + watermark + version. */
+/** Store a freshly computed compare report under filter + watermark. */
 function storeCachedCompareReport(
   repo: GameRepository,
   cacheKey: string,
@@ -332,15 +385,172 @@ function storeCachedCompareReport(
   report: CompareReport,
 ): void {
   try {
-    const version = repo.getDatabase().pragma('data_version', { simple: true }) as number;
     let byFilter = compareCacheByRepo.get(repo);
     if (!byFilter) {
       byFilter = new Map();
       compareCacheByRepo.set(repo, byFilter);
     }
-    byFilter.set(cacheKey, { watermark, report, dataVersion: version });
+    byFilter.set(cacheKey, { watermark, report });
   } catch {
     // best-effort: cache miss next time
+  }
+}
+
+/** Lazily create the deferred-validation state for a repository. */
+function getCompareRefreshState(repo: GameRepository): CompareRefreshState {
+  let state = compareRefreshByRepo.get(repo);
+  if (!state) {
+    state = { repo, queue: new Map(), timer: null, running: null, lastRefreshAt: 0 };
+    compareRefreshByRepo.set(repo, state);
+  }
+  return state;
+}
+
+/**
+ * Run the queued validation + rebuilds for one repository.
+ *
+ * Everything here is SYNCHRONOUS once the batch starts (no interleaving with
+ * a request), and the whole cycle is prefixed with a `setImmediate` yield so
+ * the request that enqueued the work returns — and its response is written —
+ * before the first fingerprint statement runs.
+ *
+ * Never rejects: a background failure has no caller to observe it, and an
+ * unhandled rejection would take the process down instead of degrading.
+ */
+function runCompareRefresh(state: CompareRefreshState): Promise<void> {
+  if (state.running) return state.running;
+
+  const cycle = (async () => {
+    try {
+      // Yield so the scheduling request/tick finishes first.
+      await new Promise<void>((resolve) => setImmediate(resolve));
+
+      const batch = new Map(state.queue);
+      state.queue.clear();
+      if (batch.size === 0) return;
+
+      // One fingerprint covers every queued key: the watermark is data-wide,
+      // the filter only decides WHICH report is derived from it.
+      const watermark = computeCompareWatermark(state.repo);
+
+      if (watermark === null) {
+        // Fingerprint unavailable (schema variant / broken store): drop the
+        // entries so the NEXT request computes fresh and never memoizes.
+        // Serving the cached report forever is exactly what this branch
+        // exists to prevent.
+        const byFilter = compareCacheByRepo.get(state.repo);
+        for (const cacheKey of batch.keys()) byFilter?.delete(cacheKey);
+        return;
+      }
+
+      for (const [cacheKey, modelFilter] of batch) {
+        const entry = compareCacheByRepo.get(state.repo)?.get(cacheKey);
+        // Entry gone (dropped above / never stored): a concurrent request
+        // owns the cold path for this key.
+        if (!entry || entry.watermark === watermark) continue;
+        try {
+          const report = getCompareReport(state.repo, modelFilter);
+          storeCachedCompareReport(state.repo, cacheKey, watermark, report);
+        } catch {
+          // Keep the last-good report: the next request re-schedules
+          // validation, so a transient failure self-heals instead of
+          // blanking the cache.
+        }
+      }
+    } catch {
+      // Never throw out of the background refresh.
+    }
+  })();
+
+  state.running = cycle;
+  void cycle.finally(() => {
+    state.running = null;
+    state.lastRefreshAt = Date.now();
+    if (state.queue.size === 0 && state.timer === null) {
+      pendingCompareRefresh.delete(state);
+    } else {
+      // Work arrived while this cycle ran — arm the follow-up timer now, or
+      // the queued keys would sit until some other request noticed them.
+      ensureCompareRefreshScheduled(state);
+    }
+  });
+
+  return cycle;
+}
+
+/** Arm the throttle timer if (and only if) there is queued work and no cycle. */
+function ensureCompareRefreshScheduled(state: CompareRefreshState): void {
+  if (state.timer || state.running) return;
+  if (state.queue.size === 0) return;
+
+  const floor = state.lastRefreshAt + COMPARE_REFRESH_THROTTLE_MS;
+  const delay = Math.max(0, floor - Date.now());
+  const timer = setTimeout(() => {
+    if (state.timer === timer) state.timer = null;
+    void runCompareRefresh(state);
+  }, delay);
+  // A pending cache refresh must never hold the process open.
+  (timer as unknown as { unref?: () => void }).unref?.();
+  state.timer = timer;
+}
+
+/**
+ * Queue a key for off-request-path validation. Returns immediately — the
+ * caller's (synchronous) response is never waiting on this.
+ */
+function scheduleCompareRefresh(
+  repo: GameRepository,
+  cacheKey: string,
+  modelFilter: string[] | undefined,
+): void {
+  try {
+    const state = getCompareRefreshState(repo);
+    state.queue.set(cacheKey, modelFilter);
+    pendingCompareRefresh.add(state);
+    ensureCompareRefreshScheduled(state);
+  } catch {
+    // best-effort: the served report simply stays as fresh as its last build
+  }
+}
+
+/**
+ * Await the deferred compare validation — the test hook for the rebuild path.
+ *
+ * Bypasses the throttle (fires the queued cycle immediately) and drains until
+ * the repository goes idle, so a test can assert "the refresh landed" without
+ * sleeping. Pass a repository to drain one; omit it to drain every
+ * repository with pending work.
+ */
+export async function flushCompareRefresh(
+  repo?: GameRepository,
+): Promise<void> {
+  const states: CompareRefreshState[] = [];
+  if (repo) {
+    const state = compareRefreshByRepo.get(repo);
+    if (state) states.push(state);
+  } else {
+    states.push(...pendingCompareRefresh);
+  }
+
+  for (const state of states) {
+    if (state.timer) {
+      clearTimeout(state.timer);
+      state.timer = null;
+    }
+    // A cycle can enqueue follow-up work; each iteration drains one batch.
+    // Bounded so a pathological writer cannot spin this forever.
+    for (let attempt = 0; attempt < 8; attempt += 1) {
+      if (state.running) {
+        await state.running;
+        continue;
+      }
+      if (state.queue.size === 0) break;
+      if (state.timer) {
+        clearTimeout(state.timer);
+        state.timer = null;
+      }
+      await runCompareRefresh(state);
+    }
   }
 }
 
@@ -972,16 +1182,29 @@ export class StatsCollector {
   /**
    * Get comprehensive model comparison report.
    *
-   * PERF-MAFIA-3: the compare report is memoized on the same data-watermark
-   * mechanism the full-fleet report uses (PERF-MAFIA-2) — identical data
-   * re-serves from the cache in microseconds instead of paying ~2.4s of
-   * sequential SQL + per-row JS merge at the 4K+ game corpus. The cache is
-   * keyed per GameRepository (WeakMap) AND per normalized `?models=` filter
-   * (a filtered call never re-serves an unfiltered report), and the extra
-   * fingerprint adds the compare-only sources
-   * (benchmark_games / model_matchups / players.role) so the head-to-head
-   * derivation busts the cache too. A failed fingerprint always recomputes
-   * (fail-safe by construction — never serve stale data).
+   * PERF-MAFIA-3 memoized the compare report on the same data-watermark
+   * mechanism the full-fleet report uses (PERF-MAFIA-2): identical data
+   * re-serves from the cache instead of paying seconds of sequential SQL +
+   * per-row JS merge at the corpus. The cache is keyed per GameRepository
+   * (WeakMap) AND per normalized `?models=` filter (a filtered call never
+   * re-serves an unfiltered report), and the extra fingerprint adds the
+   * compare-only sources (benchmark_games / model_matchups / players.role /
+   * player_model_assignments) so the head-to-head derivation busts it too.
+   *
+   * PERF-MAFIA-5 arm 2: the per-request watermark scan was itself the
+   * head-of-line block (~0.3 s of synchronous SQL on every hit, freezing
+   * every other route on the Node event loop), and a bust rebuilt for
+   * seconds on the caller. This is now stale-while-revalidate: a cached
+   * report is served with ZERO database work on the request path, and the
+   * watermark validation + rebuild are deferred to a throttled background
+   * refresh (see the bounded-staleness contract above
+   * CompareCacheEntry / COMPARE_REFRESH_THROTTLE_MS, and
+   * docs/performance/PERF-MAFIA-5-compare-refresh.md).
+   *
+   * A failed fingerprint still means "compute fresh, never memoize": the
+   * deferred validation drops the entry when it cannot fingerprint, so the
+   * next request takes the synchronous cold path. A failed BUILD propagates
+   * from the cold path unchanged (route 500) and is never memoized.
    */
   getCompareReport(modelFilter?: string[]) {
     // PERF-MAFIA-3: normalized filter key — order-insensitive collapse of
@@ -992,39 +1215,35 @@ export class StatsCollector {
         ? JSON.stringify(modelFilter)
         : 'unfiltered';
 
-    // ---------------- PERF-MAFIA-3 compare memoization ----------------
-    // Fingerprint the data ONCE, BEFORE building: identical data re-serves
-    // the cached report instantly, and the same fingerprint stores the
-    // freshly built report under the exact data it was computed from. A
-    // BROKEN fingerprint (null — schema variant / test double) means
-    // uncacheable: compute fresh every call, NEVER memoize (fail-safe by
-    // construction — the cache can never serve stale data).
-    const currentWatermark = computeCompareWatermark(this.gameRepository);
-    const cached = currentWatermark !== null
-      ? getCachedCompareReport(this.gameRepository, cacheKey)
-      : null;
-    if (cached && cached.watermark === currentWatermark) {
-      // Identical data fingerprint and no foreign commit since cache
-      // time: identical input — identical report. Serve instantly.
-      return cached.report;
+    // ---------------- PERF-MAFIA-5 arm 2: serve, then revalidate ----------
+    // Cache lookup only: no fingerprint SQL, no pragma, no build. Whatever is
+    // here is the last report validated against this store, at most one
+    // throttle window + one build older than the data.
+    const cached = getCachedCompareReport(this.gameRepository, cacheKey);
+    if (cached !== undefined) {
+      scheduleCompareRefresh(this.gameRepository, cacheKey, modelFilter);
+      return cached;
     }
 
-    // Cache miss (foreign write, watermark change, filter change, or the
-    // fingerprint itself failed).
+    // ---------------- TRUE COLD PATH (allowed to block) ----------------
+    // No report for this filter in this process yet: fingerprint once, build
+    // once, store under the pre-build fingerprint. If the data changes
+    // mid-build the stored fingerprint no longer matches and the background
+    // validation rebuilds; if the fingerprint itself is unavailable the
+    // report is returned but never memoized.
+    //
     // PERF-MAFIA-3: no try/catch here — if the underlying
-    // getCompareReport() throws, the error propagates to the route's 500
-    // path UNCHANGED and the store call below is never reached, so an
-    // error fallback is never memoized (the next call retries).
+    // getCompareReport() throws, the error propagates to the route's 500 path
+    // UNCHANGED and the store call below is never reached, so an error
+    // fallback is never memoized (the next call retries).
+    const watermark = computeCompareWatermark(this.gameRepository);
     const report = getCompareReport(this.gameRepository, modelFilter);
 
-    // PERF-MAFIA-3: store the built report under the watermark captured
-    // BEFORE building. If the data changed mid-build the stored
-    // fingerprint no longer matches, so the next call recomputes.
-    if (currentWatermark !== null) {
+    if (watermark !== null) {
       storeCachedCompareReport(
         this.gameRepository,
         cacheKey,
-        currentWatermark,
+        watermark,
         report,
       );
     }
