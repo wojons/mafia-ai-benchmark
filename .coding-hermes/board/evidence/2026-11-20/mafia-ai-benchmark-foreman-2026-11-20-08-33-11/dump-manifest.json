@@ -1,0 +1,57 @@
+{
+  "schema": "mafia-db-backup-manifest/v1",
+  "dump": "mafia-20261120-085632.db",
+  "sha256": "874e41bef387dd44296f020bfafd97a0d9f615174139b03b42882685ff40c806",
+  "bytes": 204926976,
+  "captured_at": "2026-11-20T08:56:38Z",
+  "snapshot_method": "in-container-sqlite-backup",
+  "source": {
+    "container": "mafia-ai-benchmark-server-1",
+    "db_path": "/app/data/mafia.db",
+    "volume_path": "/var/lib/docker/volumes/mafia-ai-benchmark_data/_data"
+  },
+  "live_health_at_capture": {
+    "url": "http://localhost:3004/health",
+    "response": {
+      "status": "healthy",
+      "timestamp": "2026-11-20T08:56:38.073Z",
+      "uptime": 683.657786064,
+      "memory": {
+        "rss": 158867456,
+        "heapTotal": 34668544,
+        "heapUsed": 31375056,
+        "external": 9200890,
+        "arrayBuffers": 5180758
+      },
+      "checks": {
+        "db_write": {
+          "ok": true
+        },
+        "legacy_adapter": {
+          "ok": true
+        }
+      }
+    }
+  },
+  "tables": {
+    "agent_configs": 0,
+    "agent_sessions": 0,
+    "api_calls": 25758,
+    "benchmark_games": 273,
+    "benchmark_reports": 0,
+    "benchmark_runs": 269,
+    "bulk_model_assignments": 0,
+    "events": 200713,
+    "game_snapshots": 0,
+    "games": 5088,
+    "model_aggregate_stats": 0,
+    "model_matchups": 0,
+    "model_presets": 0,
+    "player_config_templates": 0,
+    "player_game_stats": 4650,
+    "player_model_assignments": 1133,
+    "players": 19275,
+    "token_usage": 25668
+  },
+  "produced_by": "backup-db.sh v1.0.0"
+}
