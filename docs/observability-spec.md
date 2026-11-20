@@ -267,11 +267,22 @@ shipped in `seedLlmUsageFromDatabase`):
 
 | Families | Window | Why |
 |---|---|---|
+| `mafia_game_ended_total{outcome,provider}` | **cumulative**: seeded from durable `games` rows (`status IN ('ENDED','CANCELLED')`) at boot, then incremented by the legacy adapter as games reach a terminal status | the question is "are games finishing, and on which side of the success/failure line" — over the benchmark's history, not over this container's uptime. Measured on the live stack (`DF-MAFIA-AI-BENCHMARK-50`): 4,885 ENDED games beside `mafia_game_ended_total{outcome=*} = 0`, because every restart reset the family. `failed` is **not** reconstructible from the schema (a crashed game's row is written `CANCELLED`), so it is never invented by the seed |
+| `mafia_game_active` | **durable gauge**: reconciled with `COUNT(*) FROM games WHERE status = 'IN_PROGRESS'` at boot and at every adapter lifecycle edge (spawn accepted, `done`, child close); the ±1 delta remains the fallback for a repository with no db handle | a gauge has no accumulation problem, so it reads the durable truth: it cannot drift from the table across restarts or a missed child-exit event. A row that exits without a `done` message stays `IN_PROGRESS` on purpose (it is OBS-006's orphan evidence), so `mafia_game_active` still counts it — `mafia_game_in_progress` is the family that separates "running" from "stranded" |
 | `mafia_llm_tokens_total`, `mafia_llm_cost_usd_total` | **cumulative**: seeded from durable `token_usage` at boot, then incremented as this process writes rows | the row's own question is "what have we spent, **cumulatively**, per model". A counter that starts at 0 on each restart answers "what has this process spent", which is a different number — and it makes the §6.2 cross-check unsatisfiable on any stack that has history (measured: the live DB carried `$95.375665` of `token_usage.cost` while a freshly booted counter read `0.000000`) |
 | `mafia_llm_request_total`, `mafia_llm_request_duration_seconds`, `mafia_llm_retry_total`, `mafia_llm_budget_exhausted_total` | **process-lifetime** | there is no durable per-call row to replay: `api_calls` mixes one per-model aggregate, one per-player aggregate and one per failed call, so counting it would double- or triple-count. Reset on restart is the honest reading |
 | `mafia_benchmark_*` | mix: counters/duration are process-lifetime; the two **gauges** are recomputed from durable rows on every transition and every 30 s | a gauge has no accumulation problem, so it reads the durable truth continuously |
 
 Seeding details that matter to a reader:
+
+- `mafia_game_ended_total` seeds in ONE pass (`TERMINAL_GAMES_SEED_SQL`) over
+  `games` joined to its `players` provider hints, folded through the same
+  `normalizeProvider` as a live row — so the raw provider spellings of 5k games
+  never become labels. `CANCELLED` rows seed `outcome="cancelled"`; `ENDED`
+  rows seed `"completed"`, or `"degenerate"` when the DF-18 `config.degenerate`
+  flag is set.
+- `mafia_game_active` is seeded from `ACTIVE_GAMES_COUNT_SQL` at the same moment,
+  which is also the reconciliation query the adapter runs at each lifecycle edge.
 
 - One grouped pass over `token_usage` (`LLM_USAGE_SEED_SQL`:
   `GROUP BY provider, model`) at boot, **before** the listener exists, so no

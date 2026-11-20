@@ -26,7 +26,7 @@ An advanced AI-powered Mafia game simulation that benchmarks different AI models
 - **☀️ Day Phase**: Discussion, voting, lynching
 - **📊 Event Sourcing**: Complete game audit trail with visibility levels
 - **💰 Cost Tracking**: Track API costs per game and player
-- **🧪 1307 Tests**: Comprehensive test coverage (420 shared, 667 server, 116 CLI, 104 web)
+- **🧪 1326 Tests**: Comprehensive test coverage (420 shared, 686 server, 116 CLI, 104 web)
 
 ## 🚀 Quick Start
 
@@ -321,14 +321,14 @@ See **[specs/correct-night-flow.md](specs/correct-night-flow.md)** for complete 
 | Command | Purpose | When to Use |
 | --- | --- | --- |
 | `pnpm --filter @mafia/server dev` | **Start server** | Run REST API + WebSocket |
-| `pnpm --filter @mafia/server test:run` | **Run tests** | Verify server tests (667) |
+| `pnpm --filter @mafia/server test:run` | **Run tests** | Verify server tests (686) |
 
 ### Root Commands
 
 ```bash
 pnpm install              # Install all dependencies
 pnpm build                # Build all packages (4/4)
-pnpm --filter @mafia/server test:run    # Server tests (667)
+pnpm --filter @mafia/server test:run    # Server tests (686)
 pnpm --filter @mafia/shared test:run    # Shared tests (420)
 pnpm --filter @mafia/cli test:run       # CLI tests (116)
 pnpm --filter @mafia/web test:run       # Web tests (104)
@@ -372,7 +372,7 @@ mafia-ai-benchmark/
 
 ```bash
 # All tests from root
-pnpm --filter @mafia/server test:run   # Server (667 tests)
+pnpm --filter @mafia/server test:run   # Server (686 tests)
 pnpm --filter @mafia/shared test:run   # Shared (420 tests)
 pnpm --filter @mafia/cli test:run      # CLI (116 tests)
 pnpm --filter @mafia/web test:run      # Web (104 tests)
@@ -399,8 +399,8 @@ server and pins `TEST_BASE_URL` to it (see `.github/workflows/ci.yml`).
 > the leaderboard. Use a scratch server, or make sure the stack's data is
 > disposable, before setting `TEST_BASE_URL`.
 
-**Test Coverage**: 1307 tests (420 shared, 667 server, 116 CLI, 104 web) —
-**1287 passing, 20 skipped**. Both skip groups are opt-in live-integration
+**Test Coverage**: 1326 tests (420 shared, 686 server, 116 CLI, 104 web) —
+**1306 passing, 20 skipped**. Both skip groups are opt-in live-integration
 suites, so they run only when a server is pinned: server `health.test.ts` (2) +
 `api-live-endpoints.test.ts` (17), and the CLI `benchmark.test.ts` real-game run
 gated on `MAFIA_LIVE_BENCHMARK=1` (1).
@@ -418,12 +418,12 @@ above are:
 
 ```
 shared  Tests  420 passed (420)
-server  Tests  648 passed | 19 skipped (667)
+server  Tests  667 passed | 19 skipped (686)
 cli     Tests  115 passed | 1 skipped (116)
 web     Tests  104 passed (104)
 ```
 
-so the passing figure is `420 + 648 + 115 + 104 = 1287` out of `420 + 667 + 116 + 104 = 1307` collected, with the remaining 20 skipped.
+so the passing figure is `420 + 667 + 115 + 104 = 1306` out of `420 + 686 + 116 + 104 = 1326` collected, with the remaining 20 skipped.
 
 ### Game Events
 
@@ -504,7 +504,7 @@ MIT License - see LICENSE file
 
 ---
 
-**Status**: ✅ Production Ready | ✅ Fully Documented | ✅ 1287 of 1307 Tests passing (20 skipped; 420 shared, 667 server, 116 CLI, 104 web)
+**Status**: ✅ Production Ready | ✅ Fully Documented | ✅ 1306 of 1326 Tests passing (20 skipped; 420 shared, 686 server, 116 CLI, 104 web)
 
 **Quick Start**: See [QUICK_START.md](QUICK_START.md) for 5-minute setup guide!
 
