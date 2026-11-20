@@ -19,6 +19,12 @@ export {
   computeDurationFromEvents,
   getModelComparison,
   getCompareReport,
+  /**
+   * PERF-MAFIA-5 arm 2: await the deferred compare validation+rebuild (the
+   * stale-while-revalidate refresh). Test/ops hook — bypasses the throttle.
+   */
+  flushCompareRefresh,
+  COMPARE_REFRESH_THROTTLE_MS,
   generateRecommendations,
   partitionModelRows,
   isUnattributedModelRow,
