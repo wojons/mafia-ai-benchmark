@@ -1,0 +1,13 @@
+board: file 5 dogfood findings for mafia-ai-benchmark (2026-11-20 tick)
+
+DF-MAFIA-AI-BENCHMARK-41-R3  dashboard wins mix populations per side (88+916 vs completed 4402),
+                             statusBreakdown hardcodes CANCELLED 0 against 206 real rows
+DF-MAFIA-AI-BENCHMARK-50    every mafia_game_* metric serves 0 beside 4885 ENDED games
+PERF-MAFIA-7                /api/v1/dashboard 1.52-1.95s every request, 706ms measured N+1
+DOC-022                     Stage-2 restore recipe hardcodes one prunable dump filename
+DF-MAFIA-AI-BENCHMARK-51    SKIPPED-install-bunker: bunkerd active on bunker-mvp but act=no
+
+Evidence: live :3004 (5092 games), capability under test 2b780d3, probes under
+scratch/df-mab-1120 (n1_probe.py, stats-probe.db copy). No product code touched.
+
+Co-authored-by: Alexis Okuwa <wojonstech@gmail.com>

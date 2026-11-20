@@ -1,0 +1,1 @@
+BACKUP OK file=/mnt/bulk/hermes-backups/mafia-db/mafia-20261120-142323.db sha256=6592d401c10c46fe bytes=205160448 tables=18 games=5092 token_usage=25692 events=200981 method=in-container-sqlite-backup pruned=0

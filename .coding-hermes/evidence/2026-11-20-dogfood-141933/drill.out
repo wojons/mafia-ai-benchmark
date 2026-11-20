@@ -1,0 +1,34 @@
+restore drill — restore-drill.sh v1.0.0
+dump        : /mnt/bulk/hermes-backups/mafia-db/mafia-20261120-142323.db
+scratch copy: /mnt/ssd/tmp/mafia-drill-cTuxQx/mafia-20261120-142323.db (read-only, removed on exit)
+manifest    : /mnt/bulk/hermes-backups/mafia-db/mafia-20261120-142323.json
+captured at : 2026-11-20T14:23:27Z
+snapshot    : in-container-sqlite-backup
+source      : {"container":"mafia-ai-benchmark-server-1","db_path":"/app/data/mafia.db","volume_path":"/var/lib/docker/volumes/mafia-ai-benchmark_data/_data"}
+sha256      : 6592d401c10c46fe9ec5fe5af2e2a656a92e3a8def58ba00fd65a4ece7d3707d (manifest 6592d401c10c46fe9ec5fe5af2e2a656a92e3a8def58ba00fd65a4ece7d3707d)
+bytes       : 205160448 (manifest 205160448)
+integrity   : ok
+
+table                                manifest      drill  match
+----------------------------------------------------------------------
+agent_configs                               0          0  match
+agent_sessions                              0          0  match
+api_calls                               25782      25782  match
+benchmark_games                           273        273  match
+benchmark_reports                           0          0  match
+benchmark_runs                            269        269  match
+bulk_model_assignments                      0          0  match
+events                                 200981     200981  match
+game_snapshots                              0          0  match
+games                                    5092       5092  match
+model_aggregate_stats                       0          0  match
+model_matchups                              0          0  match
+model_presets                               0          0  match
+player_config_templates                     0          0  match
+player_game_stats                        4654       4654  match
+player_model_assignments                 1133       1133  match
+players                                 19295      19295  match
+token_usage                             25692      25692  match
+----------------------------------------------------------------------
+tables compared: 18   mismatches: 0
+DRILL OK: mafia-20261120-142323.db — integrity ok, 18/18 tables match the manifest, sha256 6592d401c10c46fe
