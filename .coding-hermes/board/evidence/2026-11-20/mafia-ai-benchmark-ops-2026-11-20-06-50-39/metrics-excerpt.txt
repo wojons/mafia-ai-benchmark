@@ -1,0 +1,10 @@
+mafia_server_up{version="1.2.0"} 1
+mafia_benchmark_run_stranded 0
+mafia_storage_bytes 204656640
+mafia_storage_rows{table="games"} 5087
+mafia_storage_rows{table="players"} 19270
+mafia_storage_rows{table="events"} 200119
+mafia_storage_rows{table="api_calls"} 25752
+mafia_storage_rows{table="token_usage"} 25662
+mafia_storage_rows{table="benchmark_runs"} 269
+full_scrape_sha256=7f09b95a7ccf7b947f1224108d1321588788f3825a89f1e62db5f4334d35b97f bytes=116617
