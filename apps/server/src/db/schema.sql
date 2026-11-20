@@ -320,6 +320,15 @@ CREATE TABLE IF NOT EXISTS benchmark_games (
 -- Create indexes for performance
 CREATE INDEX IF NOT EXISTS idx_games_status ON games(status);
 CREATE INDEX IF NOT EXISTS idx_games_created ON games(created_at);
+-- PERF-MAFIA-8: GET /api/v1/games?status=… orders by created_at DESC after
+-- filtering on status. With only the single-column idx_games_status, SQLite
+-- had to sort the whole status partition in a TEMP B-TREE before LIMIT could
+-- apply (measured 185-223 ms for 3 rows over 4,402 rows). The composite index
+-- makes the ORDER BY index-satisfied: one forward seek on (status) returns the
+-- rows already newest-first, so LIMIT stops the scan early (<1 ms measured).
+-- created_at is declared DESC so the scan is forward and equal timestamps keep
+-- their ascending rowid order — i.e. the pre-index result order is preserved.
+CREATE INDEX IF NOT EXISTS idx_games_status_created ON games(status, created_at DESC);
 CREATE INDEX IF NOT EXISTS idx_events_game ON events(game_id);
 CREATE INDEX IF NOT EXISTS idx_events_type ON events(type);
 CREATE INDEX IF NOT EXISTS idx_events_sequence ON events(game_id, sequence);

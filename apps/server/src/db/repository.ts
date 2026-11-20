@@ -54,6 +54,84 @@ export interface GameListSummary {
   config: Record<string, unknown>;
 }
 
+/** Filters accepted by `GameRepository.listGameSummaries()`. */
+export interface GameListSummaryFilters {
+  status?: Game['status'];
+  limit?: number;
+  offset?: number;
+}
+
+/**
+ * The exact statement behind `GameRepository.listGameSummaries()`.
+ *
+ * PERF-MAFIA-8: exported so the query-plan test can `EXPLAIN QUERY PLAN` the
+ * REAL statement instead of a copy that silently drifts from the repository.
+ * The row order is contractual — `created_at DESC` over the whole table (or
+ * the status partition when filtered) — and `idx_games_status_created`
+ * (`games(status, created_at DESC)`) exists so SQLite can satisfy it by
+ * scanning the index forward instead of sorting into a TEMP B-TREE that must
+ * consume the whole partition before LIMIT applies.
+ */
+export function buildListGameSummariesQuery(
+  filters?: GameListSummaryFilters,
+): { sql: string; params: unknown[] } {
+  let sql = `
+      SELECT
+        g.id          AS id,
+        g.status      AS status,
+        g.created_at  AS created_at,
+        g.started_at  AS started_at,
+        g.ended_at    AS ended_at,
+        g.duration    AS duration,
+        g.winner      AS winner,
+        g.config      AS config,
+        (
+          SELECT COUNT(*) FROM players p WHERE p.game_id = g.id
+        ) AS player_row_count,
+        (
+          SELECT COUNT(DISTINCT e.actor_id) FROM events e
+          WHERE e.game_id = g.id AND e.actor_id IS NOT NULL
+        ) AS event_actor_count,
+        (
+          SELECT MAX(e.timestamp) FROM events e
+          WHERE e.game_id = g.id
+            AND (e.phase = 'GAME_OVER' OR e.type IN ('GAME_OVER', 'GAME_ENDED'))
+        ) AS terminal_event_at,
+        (
+          SELECT json_extract(e.data, '$.winner') FROM events e
+          WHERE e.game_id = g.id
+            AND (e.phase = 'GAME_OVER' OR e.type IN ('GAME_OVER', 'GAME_ENDED'))
+          ORDER BY e.sequence DESC
+          LIMIT 1
+        ) AS terminal_winner
+      FROM games g`;
+  const conditions: string[] = [];
+  const params: unknown[] = [];
+
+  if (filters?.status) {
+    conditions.push('g.status = ?');
+    params.push(filters.status);
+  }
+
+  if (conditions.length > 0) {
+    sql += ' WHERE ' + conditions.join(' AND ');
+  }
+
+  sql += ' ORDER BY g.created_at DESC';
+
+  if (filters?.limit) {
+    sql += ' LIMIT ?';
+    params.push(filters.limit);
+
+    if (filters?.offset) {
+      sql += ' OFFSET ?';
+      params.push(filters.offset);
+    }
+  }
+
+  return { sql, params };
+}
+
 export class GameRepository {
   private db: Database.Database;
 
@@ -476,66 +554,10 @@ export class GameRepository {
    * terminal timestamp recorded, null winner = undecided, null duration =
    * neither the column nor a computable span. Callers can rely on the shape.
    */
-  listGameSummaries(filters?: {
-    status?: Game['status'];
-    limit?: number;
-    offset?: number;
-  }): GameListSummary[] {
-    let query = `
-      SELECT
-        g.id          AS id,
-        g.status      AS status,
-        g.created_at  AS created_at,
-        g.started_at  AS started_at,
-        g.ended_at    AS ended_at,
-        g.duration    AS duration,
-        g.winner      AS winner,
-        g.config      AS config,
-        (
-          SELECT COUNT(*) FROM players p WHERE p.game_id = g.id
-        ) AS player_row_count,
-        (
-          SELECT COUNT(DISTINCT e.actor_id) FROM events e
-          WHERE e.game_id = g.id AND e.actor_id IS NOT NULL
-        ) AS event_actor_count,
-        (
-          SELECT MAX(e.timestamp) FROM events e
-          WHERE e.game_id = g.id
-            AND (e.phase = 'GAME_OVER' OR e.type IN ('GAME_OVER', 'GAME_ENDED'))
-        ) AS terminal_event_at,
-        (
-          SELECT json_extract(e.data, '$.winner') FROM events e
-          WHERE e.game_id = g.id
-            AND (e.phase = 'GAME_OVER' OR e.type IN ('GAME_OVER', 'GAME_ENDED'))
-          ORDER BY e.sequence DESC
-          LIMIT 1
-        ) AS terminal_winner
-      FROM games g`;
-    const conditions: string[] = [];
-    const params: unknown[] = [];
+  listGameSummaries(filters?: GameListSummaryFilters): GameListSummary[] {
+    const { sql, params } = buildListGameSummariesQuery(filters);
 
-    if (filters?.status) {
-      conditions.push('g.status = ?');
-      params.push(filters.status);
-    }
-
-    if (conditions.length > 0) {
-      query += ' WHERE ' + conditions.join(' AND ');
-    }
-
-    query += ' ORDER BY g.created_at DESC';
-
-    if (filters?.limit) {
-      query += ' LIMIT ?';
-      params.push(filters.limit);
-
-      if (filters?.offset) {
-        query += ' OFFSET ?';
-        params.push(filters.offset);
-      }
-    }
-
-    const rows = this.db.prepare(query).all(...params) as Array<
+    const rows = this.db.prepare(sql).all(...params) as Array<
       Record<string, unknown>
     >;
 
