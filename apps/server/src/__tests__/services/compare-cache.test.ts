@@ -1,28 +1,46 @@
 /**
- * PERF-MAFIA-3 — benchmark compare memoization tests.
+ * PERF-MAFIA-3 / PERF-MAFIA-5 — benchmark compare memoization tests.
  *
  * getCompareReport() is memoized inside the StatsCollector on the same
  * data-watermark mechanism the full-fleet report uses (PERF-MAFIA-2),
  * keyed per GameRepository (WeakMap) AND per normalized `?models=` filter.
+ * PERF-MAFIA-5 arm 2 turned that memo into STALE-WHILE-REVALIDATE: a cached
+ * report is served with ZERO database work on the request path, and the
+ * watermark validation + rebuild run in a throttled background refresh
+ * (COMPARE_REFRESH_THROTTLE_MS) that the tests await via
+ * flushCompareRefresh().
+ *
  * These tests pin BOTH halves of that contract over a REAL StatsCollector
  * backed by an in-memory SQLite repository (same conventions as
  * report-cache.test.ts / stats-collector.test.ts):
  *
  *   1. A second getCompareReport() call on unchanged data returns a payload
  *      IDENTICAL to the first (same object identity — the cache serves the
- *      cached reference).
+ *      cached reference) AND prepares no SQL at all.
  *   2. Mutating a compare source — INSERTing a game, a token_usage row, a
  *      benchmark_games row (head-to-head derivation), changing a players
  *      role in place (rolePerformance cells), and flipping a model in a
- *      player_model_assignments row (legacy trend fallback) — each busts
- *      the cache: the next compare reflects the new data.
- *   3. The `?models=` filter is part of the cache key: a filtered call
+ *      player_model_assignments row (legacy trend fallback) — is served
+ *      stale on the calling path (bounded staleness) and then reflected by
+ *      the deferred refresh: the NEXT report after flushCompareRefresh()
+ *      reflects the new data.
+ *   3. Concurrent callers during a pending rebuild all get the cached
+ *      reference promptly, coalesce into ONE validation cycle, and see the
+ *      rebuilt report afterwards.
+ *   4. The true cold path (no report for that filter) still fingerprints and
+ *      builds synchronously and returns correct data.
+ *   5. The `?models=` filter is part of the cache key: a filtered call
  *      never re-serves the unfiltered report (and vice versa).
- *   4. An error fallback is never memoized: after a failure the next call
- *      retries and recovers.
+ *   6. An error fallback is never memoized, and a broken/absent fingerprint
+ *      destroys the entry instead of serving it forever (compute fresh,
+ *      never memoize); a rebuild that throws keeps the last-good report.
  */
 import { describe, it, expect, beforeEach } from 'vitest';
 import { StatsCollector } from '../../services/stats-collector.js';
+import {
+  flushCompareRefresh,
+  COMPARE_REFRESH_THROTTLE_MS,
+} from '../../services/stats-collector.js';
 import {
   getCompareReport,
   getModelComparison,
@@ -31,6 +49,21 @@ import { createSqliteBackedRepository } from './mocks.js';
 
 // Type alias matching the return shape of createSqliteBackedRepository().
 type FakeRepo = ReturnType<typeof createSqliteBackedRepository>;
+
+/**
+ * Statements that identify the compare fingerprint (base + compare-only).
+ * Matching them is how the tests tell "the store was re-validated" apart
+ * from "the store was fingerprinted inside the request".
+ */
+const FINGERPRINT_MARKERS = ['AS gamesFp', 'AS bgCount'];
+
+/**
+ * The BASE watermark statement (`computeCompletedCompareBaseWatermark`)
+ * prepares exactly one statement per validation cycle, so counting it
+ * counts cycles — the compare-only half is a second statement in the same
+ * cycle and would double-count.
+ */
+const BASE_FINGERPRINT_MARKER = 'AS gamesFp';
 
 describe('StatsCollector compare memoization (PERF-MAFIA-3)', () => {
   let repo: FakeRepo;
@@ -43,6 +76,52 @@ describe('StatsCollector compare memoization (PERF-MAFIA-3)', () => {
     repo = createSqliteBackedRepository() as unknown as FakeRepo;
     stats = new StatsCollector(repo as any);
   });
+
+  /**
+   * Record every statement `prepare()`d while `fn` runs.
+   *
+   * PERF-MAFIA-5 arm 2: a cache HIT must prepare NOTHING — an empty list is
+   * the direct proof that neither the fingerprint scan nor a rebuild happened
+   * on the calling (request) path, which is the whole point of the row.
+   */
+  function capturePreparedStatements<T>(
+    target: FakeRepo,
+    fn: () => T,
+  ): { result: T; sqls: string[] } {
+    const db = target.db as unknown as { prepare: (sql: string) => unknown };
+    const realPrepare = db.prepare.bind(db);
+    const sqls: string[] = [];
+    db.prepare = (sql: string) => {
+      sqls.push(sql);
+      return realPrepare(sql);
+    };
+    try {
+      return { result: fn(), sqls };
+    } finally {
+      db.prepare = realPrepare;
+    }
+  }
+
+  /**
+   * Install a store whose reads fail selectively for `fn`'s lifetime:
+   * `block` decides which prepared statements throw. Returns the failure
+   * count so a test can prove the sabotage actually bit (no vacuous pass).
+   */
+  function withFailingStatements<T>(
+    target: FakeRepo,
+    block: (sql: string) => boolean,
+    fn: () => Promise<T>,
+  ): Promise<T> {
+    const db = target.db as unknown as { prepare: (sql: string) => unknown };
+    const realPrepare = db.prepare.bind(db);
+    db.prepare = (sql: string) => {
+      if (block(sql)) throw new Error('PERF-MAFIA-5 test: statement unavailable');
+      return realPrepare(sql);
+    };
+    return fn().finally(() => {
+      db.prepare = realPrepare;
+    });
+  }
 
   describe('cached path — identical payload on the second call', () => {
     it('returns the SAME object reference on the second call', () => {
@@ -60,8 +139,13 @@ describe('StatsCollector compare memoization (PERF-MAFIA-3)', () => {
       const first = stats.getCompareReport();
       // The second call must serve the CACHED reference — object identity
       // is the direct cache-reuse proof (no recomputation happened).
-      const second = stats.getCompareReport();
+      const { result: second, sqls } = capturePreparedStatements(repo, () =>
+        stats.getCompareReport(),
+      );
       expect(second).toBe(first);
+      // PERF-MAFIA-5 arm 2: and it must do so without touching the store —
+      // no fingerprint scan, no rebuild, not even a pragma.
+      expect(sqls).toEqual([]);
       // Spot-check the shape survived the cache round-trip.
       expect(second.models).toHaveLength(1);
       expect(second.models[0].model).toBe('gpt-4');
@@ -69,8 +153,8 @@ describe('StatsCollector compare memoization (PERF-MAFIA-3)', () => {
     });
   });
 
-  describe('watermark mutation busts the cache', () => {
-    it('ignores events appended to an in-progress game', () => {
+  describe('watermark mutation is picked up by the deferred refresh', () => {
+    it('ignores events appended to an in-progress game', async () => {
       // Live games append events on every turn. Those rows are not part of
       // completed benchmark aggregates, so they must not evict the completed
       // compare report while the game is still running.
@@ -105,9 +189,13 @@ describe('StatsCollector compare memoization (PERF-MAFIA-3)', () => {
       );
 
       expect(stats.getCompareReport()).toBe(first);
+      // The deferred validation must agree: it recomputes the fingerprint,
+      // finds it unchanged, and keeps serving the same report.
+      await flushCompareRefresh(repo);
+      expect(stats.getCompareReport()).toBe(first);
     });
 
-    it('still invalidates when a terminal event changes completed statistics', () => {
+    it('still invalidates when a terminal event changes completed statistics', async () => {
       repo.seedGame({
         id: 'terminal-game',
         status: 'ENDED',
@@ -131,12 +219,18 @@ describe('StatsCollector compare memoization (PERF-MAFIA-3)', () => {
         1, 1, 'GAME_OVER', 1,
       );
 
+      // PERF-MAFIA-5 arm 2: the calling path serves the cached report — it
+      // does not fingerprint and does not rebuild (bounded staleness).
+      expect(stats.getCompareReport()).toBe(first);
+
+      // ...and the deferred refresh reflects the mutation.
+      await flushCompareRefresh(repo);
       const second = stats.getCompareReport();
       expect(second).not.toBe(first);
       expect(second.models[0].wins).toBe(1);
     });
 
-    it('INSERTing a new game changes gamesPlayed on the next call', () => {
+    it('INSERTing a new game changes gamesPlayed after the deferred refresh', async () => {
       repo.seedGame({
         id: 'g1', status: 'ENDED',
         players: [{
@@ -157,13 +251,23 @@ describe('StatsCollector compare memoization (PERF-MAFIA-3)', () => {
         }],
       });
 
+      // Bounded staleness: served from cache, no fingerprint on the caller.
+      const { result: stale, sqls } = capturePreparedStatements(repo, () =>
+        stats.getCompareReport(),
+      );
+      expect(stale).toBe(first);
+      expect(stale.models[0].gamesPlayed).toBe(1);
+      expect(sqls).toEqual([]);
+
+      await flushCompareRefresh(repo);
+
       const second = stats.getCompareReport();
       expect(second).not.toBe(first);
       expect(second.models[0].gamesPlayed).toBe(2);
       expect(second.models[0].wins).toBe(1);
     });
 
-    it('INSERTing a token_usage row changes avgTokensPerGame on the next call', () => {
+    it('INSERTing a token_usage row changes avgTokensPerGame after the deferred refresh', async () => {
       repo.seedGame({
         id: 'g1', status: 'ENDED',
         players: [{
@@ -179,14 +283,18 @@ describe('StatsCollector compare memoization (PERF-MAFIA-3)', () => {
         provider: 'openai', model: 'gpt-4o-mini', promptTokens: 100,
         completionTokens: 50, totalTokens: 150, cost: 0.001, timestamp: Date.now() });
 
+      expect(stats.getCompareReport()).toBe(first);
+
+      await flushCompareRefresh(repo);
+
       const second = stats.getCompareReport();
       expect(second.models[0].avgTokensPerGame).toBe(150);
     });
 
-    it('INSERTing a benchmark_games row changes headToHead on the next call', () => {
+    it('INSERTing a benchmark_games row changes headToHead after the deferred refresh', async () => {
       // The compare-only source: head-to-head is derived from
       // benchmark_games (DF-40) — a table the base report watermark does
-      // not cover. The cache MUST bust on its writes.
+      // not cover. The deferred validation MUST bust on its writes.
       repo.seedGame({
         id: 'g1', status: 'ENDED', winner: 'MAFIA',
         players: [
@@ -210,6 +318,10 @@ describe('StatsCollector compare memoization (PERF-MAFIA-3)', () => {
         winner: 'MAFIA', completed_at: Date.now(), valid: 1,
       });
 
+      expect(stats.getCompareReport()).toBe(first);
+
+      await flushCompareRefresh();
+
       const second = stats.getCompareReport();
       expect(second).not.toBe(first);
       expect(second.headToHead.length).toBeGreaterThan(0);
@@ -219,7 +331,7 @@ describe('StatsCollector compare memoization (PERF-MAFIA-3)', () => {
       expect(pairing.modelAWins).toBe(1);
     });
 
-    it('an in-place players role UPDATE changes rolePerformance on the next call', () => {
+    it('an in-place players role UPDATE changes rolePerformance after the deferred refresh', async () => {
       // rolePerformance cells GROUP BY p.role — a role flip on an EXISTING
       // players row (same count, same provider/model sums) must bust the
       // cache via the role-length fingerprint.
@@ -239,12 +351,16 @@ describe('StatsCollector compare memoization (PERF-MAFIA-3)', () => {
         `UPDATE players SET role = 'MAFIA', is_mafia = 1 WHERE id = ?`,
       ).run('p1');
 
+      expect(stats.getCompareReport()).toBe(first);
+
+      await flushCompareRefresh(repo);
+
       const second = stats.getCompareReport();
       expect(second.models[0].rolePerformance['MAFIA']).toBeDefined();
       expect(second.models[0].rolePerformance['VILLAGER']).toBeUndefined();
     });
 
-    it('an in-place player_model_assignments model UPDATE changes the fallback trends', () => {
+    it('an in-place player_model_assignments model UPDATE changes the fallback trends', async () => {
       // The legacy fallback-trend path derives entries from
       // player_model_assignments — the base report watermark covers only
       // that table's ROW COUNT, so an in-place model UPDATE (same count)
@@ -267,6 +383,10 @@ describe('StatsCollector compare memoization (PERF-MAFIA-3)', () => {
         `UPDATE player_model_assignments SET model = 'gpt-4o' WHERE id = ?`,
       ).run('pma-mut');
 
+      expect(stats.getCompareReport()).toBe(first);
+
+      await flushCompareRefresh(repo);
+
       const second = stats.getCompareReport();
       const trendAfter = second.trends.find(
         (t) => t.model === 'openai/gpt-4o',
@@ -274,6 +394,187 @@ describe('StatsCollector compare memoization (PERF-MAFIA-3)', () => {
       expect(trendAfter).toBeDefined();
       expect(second.trends.find((t) => t.model === 'openai/gpt-4o-mini'))
         .toBeUndefined();
+    });
+  });
+
+  /**
+   * PERF-MAFIA-5 arm 2 — the stale-while-revalidate contract itself:
+   * the request path never fingerprints/rebuilds, the refresh is throttled
+   * and coalesced, and freshness always lands (arm 4 rebuild path).
+   */
+  describe('PERF-MAFIA-5 arm 2 — stale-while-revalidate rebuild path', () => {
+    function seedTwoModels() {
+      repo.seedGame({
+        id: 'g1', status: 'ENDED', winner: 'MAFIA', duration: 60_000,
+        players: [{
+          id: 'p1', name: 'P1', role: 'MAFIA', joinOrder: 0, isMafia: true,
+          provider: 'openai', model: 'gpt-4o-mini', won: 1,
+        }],
+      });
+    }
+
+    it('documents a bounded staleness window (throttle <= 2 s)', () => {
+      // The row's documented bound: validation is deferred by at most one
+      // throttle window. Pin it so a drive-by "make it faster" change cannot
+      // quietly turn the bound into "whenever the next request happens".
+      expect(COMPARE_REFRESH_THROTTLE_MS).toBeGreaterThan(0);
+      expect(COMPARE_REFRESH_THROTTLE_MS).toBeLessThanOrEqual(2000);
+    });
+
+    it('true cold path fingerprints and builds synchronously, then caches', () => {
+      seedTwoModels();
+
+      // No report for this filter yet: this call is ALLOWED to block, and it
+      // must fingerprint (so the entry can be stored against its data).
+      const { result, sqls } = capturePreparedStatements(repo, () =>
+        stats.getCompareReport(),
+      );
+      expect(sqls.some((sql) => FINGERPRINT_MARKERS.some((m) => sql.includes(m))))
+        .toBe(true);
+      expect(result.models).toHaveLength(1);
+      expect(result.models[0].gamesPlayed).toBe(1);
+
+      // ...and the next call rides the cache with zero database work.
+      const { result: warm, sqls: warmSqls } = capturePreparedStatements(repo, () =>
+        stats.getCompareReport(),
+      );
+      expect(warm).toBe(result);
+      expect(warmSqls).toEqual([]);
+    });
+
+    it('concurrent callers during a pending rebuild return promptly, coalesce into ONE cycle, and see the rebuilt report', async () => {
+      seedTwoModels();
+      const first = stats.getCompareReport();
+
+      // An ENDED game finishes while the dashboard is being polled.
+      repo.seedGame({
+        id: 'g2', status: 'ENDED',
+        players: [{
+          id: 'g2p1', name: 'G2P1', role: 'TOWN', joinOrder: 0,
+          provider: 'openai', model: 'gpt-4o-mini', won: 0,
+        }],
+      });
+
+      // Four callers in the same tick: every one gets the cached reference
+      // and NONE of them fingerprints or rebuilds (no head-of-line block).
+      const { result: burst, sqls } = capturePreparedStatements(repo, () => [
+        stats.getCompareReport(),
+        stats.getCompareReport(),
+        stats.getCompareReport(),
+        stats.getCompareReport(),
+      ]);
+      expect(burst).toHaveLength(4);
+      for (const report of burst) expect(report).toBe(first);
+      expect(sqls).toEqual([]);
+      // Still the pre-mutation payload: staleness is real and bounded, not
+      // silently "correct because the caller rebuilt".
+      expect(burst[3].models[0].gamesPlayed).toBe(1);
+
+      // The four requests must have queued ONE validation cycle, not four.
+      let fingerprintRuns = 0;
+      {
+        const db = repo.db as unknown as { prepare: (sql: string) => unknown };
+        const realPrepare = db.prepare.bind(db);
+        db.prepare = (sql: string) => {
+          if (sql.includes(BASE_FINGERPRINT_MARKER)) fingerprintRuns += 1;
+          return realPrepare(sql);
+        };
+        try {
+          await flushCompareRefresh();
+        } finally {
+          db.prepare = realPrepare;
+        }
+      }
+      expect(fingerprintRuns).toBe(1);
+
+      // The rebuild landed: freshness is guaranteed, staleness is not forever.
+      const fresh = stats.getCompareReport();
+      expect(fresh).not.toBe(first);
+      expect(fresh.models[0].gamesPlayed).toBe(2);
+    });
+
+    it('a broken fingerprint destroys the entry — compute fresh, never memoize', async () => {
+      seedTwoModels();
+      const first = stats.getCompareReport();
+      expect(first.models[0].gamesPlayed).toBe(1);
+
+      repo.seedGame({
+        id: 'g2', status: 'ENDED',
+        players: [{
+          id: 'g2p1', name: 'G2P1', role: 'TOWN', joinOrder: 0,
+          provider: 'openai', model: 'gpt-4o-mini', won: 0,
+        }],
+      });
+
+      // Fingerprint reads fail (schema variant / broken store); the report
+      // build itself still works.
+      let uncached: { result: ReturnType<typeof stats.getCompareReport>; sqls: string[] } | null = null;
+      let again: { result: ReturnType<typeof stats.getCompareReport>; sqls: string[] } | null = null;
+      await withFailingStatements(
+        repo,
+        (sql) => FINGERPRINT_MARKERS.some((m) => sql.includes(m)),
+        async () => {
+          // The calling path still serves what it has (zero DB work)...
+          expect(stats.getCompareReport()).toBe(first);
+          // ...but the deferred validation cannot fingerprint, so it DROPS
+          // the entry rather than re-serving it forever.
+          await flushCompareRefresh(repo);
+
+          // Next call is the cold path: with no fingerprint to store under,
+          // the report is computed fresh and NEVER memoized.
+          uncached = capturePreparedStatements(repo, () => stats.getCompareReport());
+          again = capturePreparedStatements(repo, () => stats.getCompareReport());
+        },
+      );
+
+      expect(uncached!.result).not.toBe(first);
+      expect(uncached!.result.models[0].gamesPlayed).toBe(2);
+      // Two consecutive cold calls → two distinct objects (uncached).
+      expect(again!.result).not.toBe(uncached!.result);
+      expect(again!.result.models[0]).toEqual(uncached!.result.models[0]);
+
+      // Once the fingerprint is readable again the report is cacheable again.
+      const recovered = stats.getCompareReport();
+      expect(recovered.models[0].gamesPlayed).toBe(2);
+      expect(stats.getCompareReport()).toBe(recovered);
+    });
+
+    it('a rebuild that throws keeps the last-good report instead of blanking the cache', async () => {
+      seedTwoModels();
+      const first = stats.getCompareReport();
+
+      repo.seedGame({
+        id: 'g2', status: 'ENDED',
+        players: [{
+          id: 'g2p1', name: 'G2P1', role: 'TOWN', joinOrder: 0,
+          provider: 'openai', model: 'gpt-4o-mini', won: 0,
+        }],
+      });
+
+      // Fingerprint readable, build broken — a transient read failure.
+      let buildFailures = 0;
+      await withFailingStatements(
+        repo,
+        (sql) => {
+          if (FINGERPRINT_MARKERS.some((m) => sql.includes(m))) return false;
+          buildFailures += 1;
+          return true;
+        },
+        async () => {
+          expect(stats.getCompareReport()).toBe(first);
+          await flushCompareRefresh(repo);
+        },
+      );
+      // Non-vacuity: the build really was attempted and really failed.
+      expect(buildFailures).toBeGreaterThan(0);
+      // The last-good report survives the failed rebuild...
+      expect(stats.getCompareReport()).toBe(first);
+
+      // ...and the next validation cycle (now that reads work again) heals it.
+      await flushCompareRefresh(repo);
+      const fresh = stats.getCompareReport();
+      expect(fresh).not.toBe(first);
+      expect(fresh.models[0].gamesPlayed).toBe(2);
     });
   });
 
@@ -312,10 +613,45 @@ describe('StatsCollector compare memoization (PERF-MAFIA-3)', () => {
       expect(both.models).toHaveLength(2);
       expect(stats.getCompareReport(['gpt-4o-mini', 'claude-3'])).toBe(both);
     });
+
+    it('the deferred refresh rebuilds each cached filter key from its own filter', async () => {
+      repo.seedGame({
+        id: 'g1', status: 'ENDED',
+        players: [
+          { id: 'p1', name: 'P1', role: 'MAFIA', joinOrder: 0, isMafia: true,
+            provider: 'openai', model: 'gpt-4o-mini', won: 1 },
+        ],
+      });
+
+      const unfiltered = stats.getCompareReport();
+      const filtered = stats.getCompareReport(['gpt-4o-mini']);
+
+      // A new ENDED game with a DIFFERENT model: the unfiltered rebuild must
+      // pick it up, the filtered one must NOT (filter stays in the key, it is
+      // never dropped by the refresh).
+      repo.seedGame({
+        id: 'g2', status: 'ENDED',
+        players: [
+          { id: 'p2', name: 'P2', role: 'TOWN', joinOrder: 0,
+            provider: 'anthropic', model: 'claude-3', won: 1 },
+        ],
+      });
+
+      // Touch both keys so both are queued for the refresh.
+      expect(stats.getCompareReport()).toBe(unfiltered);
+      expect(stats.getCompareReport(['gpt-4o-mini'])).toBe(filtered);
+
+      await flushCompareRefresh();
+
+      expect(stats.getCompareReport().models).toHaveLength(2);
+      const filteredAfter = stats.getCompareReport(['gpt-4o-mini']);
+      expect(filteredAfter.models).toHaveLength(1);
+      expect(filteredAfter.models[0].model).toBe('gpt-4o-mini');
+    });
   });
 
   describe('error fallback is never memoized', () => {
-    it('a failed comparison does not poison the next call', () => {
+    it('a failed comparison does not poison the next call', async () => {
       repo.seedGame({
         id: 'g1', status: 'ENDED', winner: 'TOWN', duration: 60_000,
         players: [{
@@ -367,6 +703,8 @@ describe('StatsCollector compare memoization (PERF-MAFIA-3)', () => {
       expect(recovered.models).toHaveLength(1);
       expect(recovered.models[0].model).toBe('gpt-4o');
       // And the recovered report IS cached (identical on the next call).
+      expect(stats.getCompareReport()).toBe(recovered);
+      await flushCompareRefresh(repo);
       expect(stats.getCompareReport()).toBe(recovered);
     });
   });
