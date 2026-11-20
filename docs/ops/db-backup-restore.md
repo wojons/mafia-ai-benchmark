@@ -47,6 +47,9 @@ the live file: it asks SQLite for a consistent snapshot (see §2).
 
 Cron-safe: one line of stdout on success, everything else on stderr.
 
+Sample output (a captured run, not part of the recipe — the dump filename is
+whatever that run produced):
+
     BACKUP OK file=/mnt/bulk/hermes-backups/mafia-db/mafia-20261120-085632.db sha256=874e41bef387dd44 bytes=204926976 tables=18 games=5088 token_usage=25668 events=200713 method=in-container-sqlite-backup pruned=0
 
 ### How the snapshot is taken
@@ -234,10 +237,24 @@ minutes, dominated by how long it takes an operator to read this page.
 
 Three stages, in increasing order of danger. Do them in order; never start at 3.
 
+No stage names a dump file literally: retention (§3) keeps only the newest
+`MAFIA_DB_BACKUP_RETAIN` (14) dumps, so a hardcoded filename stops existing
+within a day of cron cadence. Derive the newest one in the shell you are about
+to use (re-derive it in every new shell):
+
+    BACKUP_DIR=/mnt/bulk/hermes-backups/mafia-db
+    DUMP=$(ls -t "$BACKUP_DIR"/*.db | head -1)
+    DUMP_NAME=$(basename "$DUMP")
+    echo "$DUMP"        # sanity check: the newest mafia-YYYYMMDD-HHMMSS.db
+
+To restore a specific dump instead (an older one, or one an audit named), set
+`DUMP` to its full path and `DUMP_NAME` to its basename and leave the rest of
+the recipe unchanged.
+
 ### Stage 1 — inspect the dump without a service
 
-    bash scripts/restore-drill.sh /mnt/bulk/hermes-backups/mafia-db/mafia-20261120-085632.db
-    sqlite3 -readonly /mnt/bulk/hermes-backups/mafia-db/mafia-20261120-085632.db \
+    bash scripts/restore-drill.sh "$DUMP"
+    sqlite3 -readonly "$DUMP" \
       "SELECT count(*) FROM games; SELECT count(*) FROM token_usage;"
 
 `sqlite3` can open a published dump directly: dumps are `journal_mode=DELETE`,
@@ -247,13 +264,13 @@ a single file with no `-wal`/`-shm` siblings.
 
 This is the real test: a restored database that a server can boot on.
 
-    # 1. scratch volume + a copy of the dump into it
+    # 1. scratch volume + a copy of the newest dump into it
     docker volume create mafia_restore_drill
     docker run --rm \
       -v mafia_restore_drill:/data \
-      -v /mnt/bulk/hermes-backups/mafia-db:/backup:ro \
+      -v "$BACKUP_DIR":/backup:ro \
       --entrypoint sh mafia-ai-benchmark-server \
-      -c 'cp /backup/mafia-20261120-085632.db /data/mafia.db && ls -la /data'
+      -c "cp /backup/$DUMP_NAME /data/mafia.db && ls -la /data"
 
     # 2. boot a throwaway server against it on a spare port (mirrors the compose
     #    service; only the volume + port differ — PORT must be pinned because the
@@ -289,6 +306,8 @@ no undo except the safety copy in step 2, so take it.
     # 0. take a fresh dump of the CURRENT state first, even if it looks broken:
     #    it is the only forensic copy of whatever the corruption did.
     bash scripts/backup-db.sh
+    #    $DUMP must still point at the PRE-incident dump — do not re-derive it
+    #    after this step, or step 3 restores the broken state.
 
     # 1. quiesce the writer
     cd /home/kara/wojons/mafia-ai-benchmark && docker compose stop server
@@ -302,11 +321,11 @@ no undo except the safety copy in step 2, so take it.
     # 3. replace the DB, removing the stale WAL/SHM pair explicitly — leaving a
     #    -wal next to a restored db replays the OLD transactions into it.
     docker run --rm -v mafia-ai-benchmark_data:/data \
-      -v /mnt/bulk/hermes-backups/mafia-db:/backup:ro \
+      -v "$BACKUP_DIR":/backup:ro \
       --entrypoint sh mafia-ai-benchmark-server \
-      -c 'rm -f /data/mafia.db-wal /data/mafia.db-shm &&
-          cp /backup/mafia-20261120-085632.db /data/mafia.db &&
-          ls -la /data'
+      -c "rm -f /data/mafia.db-wal /data/mafia.db-shm &&
+          cp /backup/$DUMP_NAME /data/mafia.db &&
+          ls -la /data"
 
     # 4. restart and verify
     docker compose up -d server
