@@ -1,0 +1,60 @@
+{
+  "tick_id": "mafia-ai-benchmark-foreman-2026-11-20-16-08-00",
+  "composed_at": "2026-11-20T16:20:00-05:00",
+  "project": "mafia-ai-benchmark",
+  "workdir": "/home/kara/wojons/mafia-ai-benchmark",
+  "base_sha": "fcfdabbafac81fedc7358bb45669211d684bd1e2",
+  "wave_budget": 7,
+  "worker_model": "openai/gpt-6.1-terra",
+  "worker_provider": "xkiro",
+  "independence_check": "all 5 rows have depends_on=null in .coding-hermes/board/tasks.jsonl at base fcfdabb; file-overlap audit: DF-41-R3 (stats.ts:74 region) and DF-52 (stats.ts:147-151 region) share a file in disjoint regions -> serial merge with rebase; no other file overlap",
+  "tasks": [
+    {
+      "id": "PERF-MAFIA-8",
+      "priority": "P2",
+      "worktree": "/home/kara/worktrees/mafia-ai-benchmark-PERF-MAFIA-8",
+      "branch": "wt/PERF-MAFIA-8",
+      "brief_file": "/tmp/mafia-brief-PERF-MAFIA-8.md",
+      "summary": "composite index games(status, created_at) via db/schema.sql + migrate path; EXPLAIN QUERY PLAN drops TEMP B-TREE"
+    },
+    {
+      "id": "DF-MAFIA-AI-BENCHMARK-50",
+      "priority": "P2",
+      "worktree": "/home/kara/worktrees/mafia-ai-benchmark-DF-MAFIA-AI-BENCHMARK-50",
+      "branch": "wt/DF-MAFIA-AI-BENCHMARK-50",
+      "brief_file": "/tmp/mafia-brief-DF-MAFIA-AI-BENCHMARK-50.md",
+      "summary": "wire mafia_game_* counter increments into legacy-game-adapter terminal path; unit test asserts increment"
+    },
+    {
+      "id": "DF-MAFIA-AI-BENCHMARK-41-R3",
+      "priority": "P2",
+      "worktree": "/home/kara/worktrees/mafia-ai-benchmark-DF-MAFIA-AI-BENCHMARK-41-R3",
+      "branch": "wt/DF-MAFIA-AI-BENCHMARK-41-R3",
+      "brief_file": "/tmp/mafia-brief-DF-MAFIA-AI-BENCHMARK-41-R3.md",
+      "summary": "dashboard wins from ONE population (stats.ts:74 ||-fallback), statusBreakdown GROUP BY not hardcoded literals"
+    },
+    {
+      "id": "DF-MAFIA-AI-BENCHMARK-52",
+      "priority": "P3",
+      "worktree": "/home/kara/worktrees/mafia-ai-benchmark-DF-MAFIA-AI-BENCHMARK-52",
+      "branch": "wt/DF-MAFIA-AI-BENCHMARK-52",
+      "brief_file": "/tmp/mafia-brief-DF-MAFIA-AI-BENCHMARK-52.md",
+      "summary": "analytics totals.events/agents real queries, eventBreakdown real distribution, regression test, api-specs.md sync"
+    },
+    {
+      "id": "DOC-022",
+      "priority": "P3",
+      "worktree": "/home/kara/worktrees/mafia-ai-benchmark-DOC-022",
+      "branch": "wt/DOC-022",
+      "brief_file": "/tmp/mafia-brief-DOC-022.md",
+      "summary": "db-backup-restore.md Stage-2 derives newest dump (DUMP=$(ls -t ... | head -1)), no literal timestamped cp target"
+    }
+  ],
+  "excluded_from_wave": [
+    {"id": "PERF-MAFIA-7", "reason": "collides with DF-41-R3 on apps/server/src/routes/stats.ts dashboard handler; deferred to next tick"},
+    {"id": "DF-MAFIA-AI-BENCHMARK-51", "reason": "bunker infra leg, not a repo code task; dogfood delivery-3 evidence says designated-host install is PROVEN and row is closeable on that evidence - foreman evaluates at closeout, not wave dispatch"},
+    {"id": "DF-MAFIA-AI-BENCHMARK-53", "reason": "live demo-data repair touches production DB content; P3, deferred pending explicit repair-script design"}
+  ],
+  "merge_plan": "serial merge in listed order after worker exit; per-merge gates: pnpm install --frozen-lockfile + targeted tests + full server test:run on merged main; single live deploy (docker compose up -d --build server) AFTER all merges; live probes once for all rows; ONE async gitreins judge this tick, remaining judged next tick via DuckBrain handoff",
+  "gitreins_tasks": "create+start for all 5 at dispatch time"
+}
