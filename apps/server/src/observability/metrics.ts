@@ -259,6 +259,255 @@ export function recordGameTerminal(state: MetricsGameRecord, record: TerminalRec
 }
 
 // ===========================================================================
+// OBS-001 — the DURABLE side of the game counters (boot seed + gauge source)
+// ===========================================================================
+//
+// DF-MAFIA-AI-BENCHMARK-50: the live deployment served `mafia_game_ended_total{
+// outcome=*} 0` beside 4,885 ENDED games. Two related holes, both fixed here:
+//
+//   1. `mafia_game_ended_total` is cumulative by definition ("how many games
+//      have ended"), but the counter only knew about games THIS process
+//      observed. Every restart reset the family to 0 while `games` held the
+//      durable truth — exactly the observation in the ticket. The seed below
+//      replays the durable rows once at boot, the same doctrine OBS-002
+//      already applies to the cumulative LLM counters.
+//   2. `mafia_game_active` was a pure process-local delta (+1 on spawn, -1 on
+//      terminal), so it disagreed with the games table whenever a row left
+//      IN_PROGRESS without a 'done' message, and it started at 0 on a stack
+//      whose DB still held live rows. The gauge is now RECONCILED from the
+//      same table the orphan gauge reads (IN_PROGRESS rows) at every
+//      lifecycle edge; the delta remains the fallback for repositories with
+//      no db handle.
+
+/**
+ * The source of truth behind mafia_game_active: the games table the adapter
+ * writes. Deliberately the plain IN_PROGRESS count — `mafia_game_in_progress`
+ * (OBS-006) is the ORPHAN view of the same rows, so the two answer different
+ * questions over one predicate family.
+ */
+export const ACTIVE_GAMES_COUNT_SQL = `SELECT COUNT(*) AS count
+ FROM games
+ WHERE status = 'IN_PROGRESS'`;
+
+/**
+ * Durable terminal rows for the boot seed, with the provider hint the
+ * {provider} label needs. `providers` is the distinct set of the game's
+ * per-player provider specs (players.provider is written from roleModels and
+ * backfilled from real usage rows); the fold picks the first one that maps
+ * into the closed prefix set, mirroring providerFromUsageRows' rule.
+ *
+ * ENDED and CANCELLED are the only durable terminal statuses this schema has:
+ * a failed game's row is written CANCELLED by the adapter's close handler, so
+ * 'failed' is NOT reconstructible here and is never invented.
+ */
+export const TERMINAL_GAMES_SEED_SQL = `SELECT
+   g.id AS id,
+   g.status AS status,
+   g.config AS config,
+   (SELECT GROUP_CONCAT(DISTINCT TRIM(p.provider))
+      FROM players p
+     WHERE p.game_id = g.id
+       AND p.provider IS NOT NULL
+       AND TRIM(p.provider) != '') AS providers
+ FROM games g
+ WHERE g.status IN ('ENDED', 'CANCELLED')`;
+
+/** One raw terminal row as it comes back out of `games`. */
+export interface TerminalGameSeedRow {
+  id?: unknown;
+  status?: unknown;
+  config?: unknown;
+  providers?: unknown;
+}
+
+/** One series in the CLOSED {outcome, provider} label set after folding. */
+export interface GameSeedSeries {
+  outcome: GameOutcome;
+  provider: GameProvider;
+  count: number;
+}
+
+/** Result of folding raw terminal rows into the bounded label set. */
+export interface GameSeedAggregate {
+  /** Terminal rows read. */
+  terminal: number;
+  /** Rows that landed on a series. */
+  seeded: number;
+  /** Rows with a status outside {ENDED, CANCELLED} (never counted). */
+  skipped: number;
+  ended: number;
+  cancelled: number;
+  degenerate: number;
+  series: GameSeedSeries[];
+  /**
+   * mafia_game_active after the seed (the IN_PROGRESS row count), or null when
+   * the gauge read failed. Only set by seedGameCountersFromDatabase.
+   */
+  active: number | null;
+}
+
+/** True when a games.config payload carries the DF-18 degenerate flag. */
+function isDegenerateConfig(raw: unknown): boolean {
+  if (typeof raw !== 'string' || !raw.trim()) return false;
+  try {
+    const parsed = JSON.parse(raw) as { degenerate?: unknown };
+    const flag = parsed?.degenerate;
+    return flag === 1 || flag === true || flag === '1';
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Resolve the {provider} label from the seed row's provider list: the first
+ * spec whose prefix is in the closed set wins, else 'unknown'. Raw specs never
+ * become labels (spec 3.2 cardinality policy) — this is providerFromUsageRows'
+ * rule applied to a players-derived list.
+ */
+function providerFromSeedRow(raw: unknown): GameProvider {
+  if (typeof raw === 'string') {
+    for (const part of raw.split(',')) {
+      const candidate = normalizeProvider(part);
+      if (candidate !== 'unknown') return candidate;
+    }
+  }
+  return 'unknown';
+}
+
+/** Map a durable games.status (+ DF-18 flag) onto the closed outcome set. */
+function seedRowOutcome(row: TerminalGameSeedRow): GameOutcome | null {
+  const status = typeof row.status === 'string' ? row.status.trim().toUpperCase() : '';
+  if (status === 'CANCELLED') return 'cancelled';
+  if (status === 'ENDED') return isDegenerateConfig(row.config) ? 'degenerate' : 'completed';
+  return null;
+}
+
+/**
+ * Fold raw terminal games rows into the SAME closed label sets the live
+ * recorder uses. Pure: no counters are touched, so a test can call it freely.
+ */
+export function aggregateTerminalGameRows(rows: unknown): GameSeedAggregate {
+  const list = Array.isArray(rows) ? (rows as TerminalGameSeedRow[]) : [];
+  const byLabels = new Map<string, GameSeedSeries>();
+  const aggregate: GameSeedAggregate = {
+    terminal: list.length,
+    seeded: 0,
+    skipped: 0,
+    ended: 0,
+    cancelled: 0,
+    degenerate: 0,
+    series: [],
+    active: null,
+  };
+
+  for (const row of list) {
+    if (!row || typeof row !== 'object') {
+      aggregate.skipped += 1;
+      continue;
+    }
+    const outcome = seedRowOutcome(row);
+    if (!outcome) {
+      aggregate.skipped += 1;
+      continue;
+    }
+    const provider = providerFromSeedRow(row.providers);
+    const key = `${outcome}\u0000${provider}`;
+    const series = byLabels.get(key) ?? { outcome, provider, count: 0 };
+    series.count += 1;
+    byLabels.set(key, series);
+    aggregate.seeded += 1;
+    if (outcome === 'cancelled') aggregate.cancelled += 1;
+    else aggregate.ended += 1;
+    if (outcome === 'degenerate') aggregate.degenerate += 1;
+  }
+
+  aggregate.series = Array.from(byLabels.values());
+  return aggregate;
+}
+
+/** Minimal slice of the DB a game-metric read needs (all + get). */
+export interface MetricsGameSeedDatabase extends MetricsSeedDatabase {
+  prepare(sql: string): {
+    all(...params: unknown[]): unknown;
+    get(...params: unknown[]): unknown;
+  };
+}
+
+/** Set once the game-counter seed has run, so a second call cannot double-count. */
+let gameCountersSeeded = false;
+
+/** True once seedGameCountersFromDatabase has applied (exported for the boot log). */
+export function gameCountersSeedApplied(): boolean {
+  return gameCountersSeeded;
+}
+
+/**
+ * Recompute mafia_game_active from the games table (ACTIVE_GAMES_COUNT_SQL).
+ *
+ * Returns the count that was set, or null when the read failed — in which case
+ * the gauge keeps its previous value and the caller falls back to the delta.
+ * Never throws: a wedged DB must not break a game's lifecycle handling.
+ */
+export function syncGameActiveFromDatabase(db: MetricsGameSeedDatabase): number | null {
+  try {
+    const row = db.prepare(ACTIVE_GAMES_COUNT_SQL).get() as { count?: unknown } | undefined;
+    const count = countOf(row?.count);
+    activeGameCount = count;
+    gameActiveGauge.set(count);
+    return count;
+  } catch (error) {
+    console.error(
+      `[metrics] mafia_game_active reconcile failed: ${
+        error instanceof Error ? error.message : String(error)
+      }`,
+    );
+    return null;
+  }
+}
+
+/**
+ * Seed the CUMULATIVE game counters (and the active gauge) from durable rows.
+ *
+ * Contract, mirroring seedLlmUsageFromDatabase:
+ *   - Runs ONCE per process, at boot, before the listener exists, so the
+ *     counter is (history at boot) + (games this process ends).
+ *   - Idempotent: a second call returns null and touches nothing.
+ *   - Never throws: reads happen first (both statements), the applied flag is
+ *     set before any increment (increments cannot fail), and a wedged DB just
+ *     leaves the pre-registered zeros plus a logged error.
+ *   - Seeds mafia_game_ended_total and mafia_game_active only. Duration
+ *     observations, mafia_game_failed_total and every Tier-1 family are
+ *     per-observation evidence with no faithful durable replay, so they stay
+ *     process-lifetime.
+ */
+export function seedGameCountersFromDatabase(
+  db: MetricsGameSeedDatabase,
+): GameSeedAggregate | null {
+  if (gameCountersSeeded) return null;
+  try {
+    const aggregate = aggregateTerminalGameRows(db.prepare(TERMINAL_GAMES_SEED_SQL).all());
+    const activeRow = db.prepare(ACTIVE_GAMES_COUNT_SQL).get() as { count?: unknown } | undefined;
+    const active = countOf(activeRow?.count);
+
+    gameCountersSeeded = true;
+    for (const series of aggregate.series) {
+      gameEndedCounter.inc({ outcome: series.outcome, provider: series.provider }, series.count);
+    }
+    activeGameCount = active;
+    gameActiveGauge.set(active);
+    aggregate.active = active;
+    return aggregate;
+  } catch (error) {
+    console.error(
+      `[metrics] game counter seed failed: ${
+        error instanceof Error ? error.message : String(error)
+      }`,
+    );
+    return null;
+  }
+}
+
+// ===========================================================================
 // OBS-002 — Tier 1: benchmark-run and LLM depth (spec section 3.2)
 // ===========================================================================
 

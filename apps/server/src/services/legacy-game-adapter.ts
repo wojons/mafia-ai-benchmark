@@ -34,6 +34,8 @@ import {
   recordFailedGameRequests,
   recordGameTerminal,
   recordLlmUsage,
+  syncGameActiveFromDatabase,
+  type MetricsGameSeedDatabase,
   type TerminalRecord,
 } from '../observability/metrics.js';
 
@@ -360,8 +362,12 @@ export class LegacyGameAdapter extends EventEmitter {
     };
     
     this.activeGames.set(gameId, gameState);
-    // OBS-001: spawn accepted -> one active game.
-    gameActive(1);
+    // OBS-001: spawn accepted -> one active game. The games row inserted above
+    // is the source of truth, so the gauge is RECONCILED with the table when a
+    // db is available (a restart must not leave mafia_game_active describing a
+    // different world than the DB); the +1 delta is the fallback for
+    // repositories with no db handle (tests, stand-ins).
+    if (!this.syncActiveGaugeFromDb()) gameActive(1);
 
     // Handle stdout - JSON events
     let buffer = '';
@@ -687,6 +693,10 @@ export class LegacyGameAdapter extends EventEmitter {
           provider: state.provider,
           durationSeconds: (state.endedAt.getTime() - state.startedAt.getTime()) / 1000,
         });
+        // OBS-001: the row is ENDED by now (updated above, before this
+        // recording) — reconcile mafia_game_active with it rather than trusting
+        // the process-local delta alone.
+        this.syncActiveGaugeFromDb();
         break;
         
       case 'error':
@@ -698,6 +708,21 @@ export class LegacyGameAdapter extends EventEmitter {
       default:
         console.log(`[LegacyAdapter:${gameId}] Unknown message type:`, message.type);
     }
+  }
+
+  /**
+   * OBS-001: reconcile mafia_game_active with its source of truth (the games
+   * table) at a lifecycle edge.
+   *
+   * Returns false when this repository has no db handle (test stand-ins) or the
+   * read failed — the caller then keeps the +1/-1 delta, which is exactly the
+   * pre-DF-50 behaviour. Never throws.
+   */
+  private syncActiveGaugeFromDb(): boolean {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const db = (this.gameRepository as any).db as MetricsGameSeedDatabase | undefined;
+    if (!db) return false;
+    return syncGameActiveFromDatabase(db) !== null;
   }
 
   /**
@@ -727,6 +752,12 @@ export class LegacyGameAdapter extends EventEmitter {
           db.prepare(`UPDATE games SET status = 'CANCELLED', ended_at = ? WHERE id = ?`)
             .run(Date.now(), gameId);
         }
+        // NOTE (DF-MAFIA-AI-BENCHMARK-50): a child that exits cleanly without a
+        // 'done' message leaves its row IN_PROGRESS on purpose — OBS-006's
+        // mafia_game_in_progress orphan detector uses exactly that stranded row
+        // as its signal, and metrics-tier2 asserts it stays IN_PROGRESS. The
+        // emitted outcome is still 'cancelled' (classifyTerminalClose); only the
+        // durable status keeps the evidence.
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       } catch (e: any) {
         console.error(`[LegacyAdapter] Failed to update game status: ${e?.message || e}`);
@@ -745,6 +776,10 @@ export class LegacyGameAdapter extends EventEmitter {
       if (recorded && terminal.outcome === 'failed') {
         recordFailedGameRequests(this.configuredModels(gameId));
       }
+      // OBS-001: the games row is now terminal (ENDED/CANCELLED) — reconcile
+      // the active gauge with it. recordGameTerminal already applied the -1
+      // delta, so this is an absolute correction, not a second decrement.
+      this.syncActiveGaugeFromDb();
     }
     // No terminal record (already-completed game): the buffered stderr tail
     // is dead weight either way.

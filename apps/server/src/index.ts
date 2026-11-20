@@ -36,7 +36,9 @@ import {
   httpMetricsMiddleware,
   refreshStorageGauges,
   registry,
+  seedGameCountersFromDatabase,
   seedLlmUsageFromDatabase,
+  type MetricsGameSeedDatabase,
   type MetricsSeedDatabase,
   type MetricsStorageDatabase,
 } from './observability/metrics.js';
@@ -182,6 +184,23 @@ async function main(): Promise<void> {
     );
   } else {
     logger.warn('LLM usage seed skipped (already applied or the database refused the read)');
+  }
+
+  // OBS-001 (DF-MAFIA-AI-BENCHMARK-50): mafia_game_ended_total is cumulative
+  // too, and the live stack served 0 on every {outcome} beside 4,885 ENDED
+  // games — a counter that only knows about THIS process' games. Seed it (and
+  // the active gauge, which reads the same games table) from the durable rows
+  // once, before the listener exists, exactly like the LLM spend seed above.
+  const gameSeed = seedGameCountersFromDatabase(metricsDb as unknown as MetricsGameSeedDatabase);
+  if (gameSeed) {
+    logger.info(
+      'game counters seeded into metrics: ' +
+        `${gameSeed.seeded}/${gameSeed.terminal} terminal games -> ${gameSeed.series.length} series ` +
+        `(${gameSeed.ended} ended, ${gameSeed.cancelled} cancelled, ${gameSeed.degenerate} degenerate), ` +
+        `mafia_game_active=${gameSeed.active ?? 'unread'}`,
+    );
+  } else {
+    logger.warn('game counter seed skipped (already applied or the database refused the read)');
   }
 
   refreshStorageGauges({ db: metricsDb, dbPath, liveGameIds });
