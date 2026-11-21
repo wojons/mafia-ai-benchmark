@@ -39,6 +39,11 @@ The DB runs in **WAL** mode, so the live on-disk state is the `mafia.db` +
 potentially stale and potentially torn. That is why `backup-db.sh` never copies
 the live file: it asks SQLite for a consistent snapshot (see §2).
 
+> **Writing to this data?** Read
+> [db-write-convention.md](./db-write-convention.md) first: never issue raw SQL
+> against the live DB or `docker exec` writes into the running container — use
+> the HTTP API, or snapshot to a throwaway copy and work there.
+
 ---
 
 ## 2. Taking a backup

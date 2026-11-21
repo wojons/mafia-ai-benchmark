@@ -7,10 +7,21 @@
 import Database from 'better-sqlite3';
 import { v4 as uuidv4 } from 'uuid';
 import { Game, Player, GameEvent, GameConfig, PlayerStats } from '@mafia/shared/types';
+import { logger } from '../utils/logger.js';
 import {
   extractPlayersFromEvents,
   extractedPlayerToPlayer,
 } from './player-extraction.js';
+
+/**
+ * True for an event that records a decided outcome. Matches the terminal-event
+ * predicate the list projection and the lifecycle reconciler use, so the detail
+ * read and the stats guards agree on what "this game is over" means.
+ */
+function isTerminalEvent(event: GameEvent): boolean {
+  if (event.type === 'GAME_ENDED') return true;
+  return event.metadata?.phase === 'GAME_OVER';
+}
 
 /** Row shape from player_model_assignments table. */
 export interface PlayerModelAssignmentRow {
@@ -401,7 +412,10 @@ export class GameRepository {
       parsedConfig?.winner === 'MAFIA' || parsedConfig?.winner === 'TOWN'
         ? (parsedConfig.winner as 'MAFIA' | 'TOWN')
         : undefined;
-    const winner = columnWinner ?? configWinner;
+    const terminalEvent = [...events].reverse().find(isTerminalEvent);
+    const eventWinner = (terminalEvent?.data as { winner?: unknown } | undefined)?.winner;
+    const winner = columnWinner ?? configWinner ??
+      (eventWinner === 'TOWN' || eventWinner === 'MAFIA' ? eventWinner : undefined);
 
     // DF-MAFIA-AI-BENCHMARK-4: a live game's phase must come from the
     // event stream, never a hardcoded SETUP. addEvent() persists each
@@ -412,12 +426,46 @@ export class GameRepository {
     // day/turn 1.
     const lastEvent = events[events.length - 1];
 
+    // DF-MAFIA-AI-BENCHMARK-53: an IN_PROGRESS row whose transcript already
+    // carries a decided outcome is a CORRUPTED record (a measurement script
+    // wrote raw SQL and left status/ended_at/started_at NULL while appending a
+    // GAME_ENDED event). The detail endpoint used to serve it as
+    // `status: "IN_PROGRESS"` alongside a transcript-derived `winner` — a
+    // self-contradiction on a product surface. Detect it, warn with the id and
+    // the shape, and serve it as ENDED (with the terminal event's timestamp as
+    // endedAt) so every served field agrees. Read-only: the repair belongs to
+    // the foreman, never to the read path.
+    const rowStatus = row.status as Game['status'];
+    const inconsistentLiveRow =
+      rowStatus === 'IN_PROGRESS' && (winner !== undefined || terminalEvent !== undefined);
+    if (inconsistentLiveRow) {
+      logger.warn(
+        `[repository] inconsistent game row ${row.id}: status=IN_PROGRESS but ` +
+          `winner=${winner ?? 'NULL'}, terminal_event=${terminalEvent ? terminalEvent.type : 'none'}, ` +
+          `started_at=${row.started_at ?? 'NULL'}, ended_at=${row.ended_at ?? 'NULL'} — ` +
+          'serving as ENDED, not live',
+      );
+    }
+    const servedStatus: Game['status'] = inconsistentLiveRow ? 'ENDED' : rowStatus;
+    let servedEndedAt: Date | undefined;
+    if (row.ended_at) {
+      servedEndedAt = new Date(row.ended_at as number);
+    } else if (inconsistentLiveRow && terminalEvent) {
+      const rawTs = terminalEvent.timestamp as unknown;
+      servedEndedAt =
+        rawTs instanceof Date
+          ? rawTs
+          : typeof rawTs === 'number'
+            ? new Date(rawTs)
+            : undefined;
+    }
+
     return {
       id: row.id as string,
       createdAt: new Date(row.created_at as number),
       startedAt: row.started_at ? new Date(row.started_at as number) : undefined,
-      endedAt: row.ended_at ? new Date(row.ended_at as number) : undefined,
-      status: row.status as Game['status'],
+      endedAt: servedEndedAt,
+      status: servedStatus,
       ...(winner ? { winner } : {}),
       players: playersWithDeaths,
       config: parsedConfig,
@@ -426,7 +474,7 @@ export class GameRepository {
         // DF-MAFIA-AI-BENCHMARK-4: otherwise report the last event's phase
         // (SETUP when the stream is empty) instead of freezing at SETUP.
         phase:
-          row.status === 'ENDED'
+          servedStatus === 'ENDED'
             ? 'GAME_OVER'
             : (lastEvent?.metadata?.phase ?? 'SETUP'),
         dayNumber: lastEvent?.metadata?.dayNumber ?? 1,
@@ -606,7 +654,9 @@ export class GameRepository {
 
     return {
       id: row.id as string,
-      status: row.status as Game['status'],
+      status: row.status === 'IN_PROGRESS' && (winner !== null || row.terminal_event_at != null)
+        ? 'ENDED'
+        : row.status as Game['status'],
       // Same fallback the list route used inline: the players table is empty
       // for live adapter games (rows land at ROLES_ASSIGNED), so the event
       // stream's distinct actorIds stand in until real rows exist.
