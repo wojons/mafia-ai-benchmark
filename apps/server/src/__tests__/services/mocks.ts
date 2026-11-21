@@ -436,6 +436,21 @@ export function createFakeGameRepository(options: FakeRepositoryOptions = {}): G
     getDatabase() {
       return null as any;
     },
+
+    // DF-MAFIA-AI-BENCHMARK-52: /api/v1/analytics derives totals.events and
+    // eventBreakdown from this. The fake keeps the same contract as the real
+    // repository (one count per type, summing to the total) over its
+    // in-memory event list.
+    getEventStats() {
+      const byType: Record<string, number> = {};
+      let total = 0;
+      for (const e of events) {
+        const type = e.type ?? 'UNKNOWN';
+        byType[type] = (byType[type] ?? 0) + 1;
+        total += 1;
+      }
+      return { total, byType };
+    },
   };
 
   return repo as GameRepository & typeof repo;
