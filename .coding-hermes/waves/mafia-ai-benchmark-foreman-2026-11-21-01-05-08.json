@@ -1,0 +1,52 @@
+{
+  "wave_id": "mafia-ai-benchmark-foreman-2026-11-21-01-05-08",
+  "tick": "mafia-ai-benchmark-foreman-2026-11-21-01-05-08",
+  "project": "mafia-ai-benchmark",
+  "workdir": "/home/kara/wojons/mafia-ai-benchmark",
+  "composed_at": "2026-11-21T01:40:00Z",
+  "wave_budget": 4,
+  "wave_size": 2,
+  "base_ref": "origin/main",
+  "base_sha": "108da897743afa21776facf0f3c136244ef84ea6",
+  "worker_model": "openai/gpt-6.1-terra",
+  "worker_provider": "xkiro",
+  "recovery_of": "mafia-ai-benchmark-foreman-2026-11-20-16-08-00",
+  "recovery_summary": "16-08 wave: PERF-MAFIA-8 merged+closed; DF-50 + DOC-022 code merged (cbe7e6a/49a6d94), rows pending awaiting judges; 41-R3 + DF-52 branches sat at base fcfdabb with ZERO commits (dead legs) — worktrees reaped, 12 merged branches deleted, residue diffs saved to .coding-hermes/evidence/wt-*-residue-diff-20261121.patch, manifests 16-08/11-17-17-45/11-18-18-12-30 closed with finished_at.",
+  "workers": [
+    {
+      "task_id": "DF-MAFIA-AI-BENCHMARK-41-R3",
+      "priority": "P2",
+      "worktree": "/home/kara/worktrees/mafia-ai-benchmark-DF-MAFIA-AI-BENCHMARK-41-R3",
+      "branch": "wt/DF-MAFIA-AI-BENCHMARK-41-R3",
+      "base_sha": "108da897743afa21776facf0f3c136244ef84ea6",
+      "brief": "/tmp/maf-wave-20261121-0105/brief-DF-MAFIA-AI-BENCHMARK-41-R3.txt",
+      "summary": "dashboard win totals single population + statusBreakdown GROUP BY (stats.ts :74 region)"
+    },
+    {
+      "task_id": "DF-MAFIA-AI-BENCHMARK-52",
+      "priority": "P3",
+      "worktree": "/home/kara/worktrees/mafia-ai-benchmark-DF-MAFIA-AI-BENCHMARK-52",
+      "branch": "wt/DF-MAFIA-AI-BENCHMARK-52",
+      "base_sha": "108da897743afa21776facf0f3c136244ef84ea6",
+      "brief": "/tmp/maf-wave-20261121-0105/brief-DF-MAFIA-AI-BENCHMARK-52.txt",
+      "summary": "analytics totals.events/agents real queries + eventBreakdown GROUP BY (stats.ts :147-151 region) + api-specs.md sync"
+    }
+  ],
+  "independence": "Both rows depends_on=null. File overlap: both touch apps/server/src/routes/stats.ts but DISJOINT regions (dashboard handler ~:74 vs analytics handler ~:147-151) — same pairing the 11-20 wave judged wave-eligible; 41-R3 also touches dashboard tests, DF-52 analytics tests + specs/api-specs.md. Merge serially: 41-R3 first, then DF-52 with rebase + gates on the merged tree.",
+  "gitreins_state": "DF-MAFIA-AI-BENCHMARK-50 and DOC-022 in-progress since 11-20 dispatch; ONE async judge (DF-50) this tick per the one-judge-per-checkout doctrine; DOC-022 next (sequential) if the tick budget allows, else next tick via DuckBrain handoff. 41-R3/DF-52 gitreins tasks already in-progress; task complete after merges next tick or this tick if capacity remains.",
+  "deferred": [
+    {"task_id": "PERF-MAFIA-7", "reason": "collides with DF-41-R3 on apps/server/src/routes/stats.ts dashboard handler — not wave-eligible"},
+    {"task_id": "DF-MAFIA-AI-BENCHMARK-53", "reason": "repairs live production DB content (may need container restart) — would collide with the DF-50 tier-1 judge driving TEST_BASE_URL at the live server; sequenced after the judge settles"},
+    {"task_id": "DF-MAFIA-AI-BENCHMARK-51", "reason": "bunker-qa ops battery, not a repo code task; foreman evaluates bunker-qa status this tick if budget remains"}
+  ],
+  "merge_plan": "serial merge 41-R3 then DF-52; per-merge gates: targeted server tests + full (cd apps/server && pnpm test:run) on the merged tree; single live deploy (docker compose up -d --build server) AFTER all merges AND after the DF-50 judge settles (judge drives the live server); then live gate arms for 41-R3/DF-52/DF-50; sync-test-counts.mjs; board closeouts with evidence-run-id as verdicts arrive; push after every commit",
+  "outcomes": {
+    "DF-MAFIA-AI-BENCHMARK-50": {"status": "complete", "row_closed": true, "product_commit": "a15927f", "merge": "cbe7e6a", "judge": "PASS run 59fe5c1e (job-d53df6b6)", "live_arm": "probe game 5f9a6afb ENDED -> mafia_game_ended_total{outcome=completed,provider=openai} 3696->3697; mafia_game_active 1 == DB IN_PROGRESS 1"},
+    "DOC-022": {"status": "complete", "row_closed": true, "product_commit": "8637f55", "merge": "49a6d94", "judge": "PASS run cbdd5f06 (job-e27432cb)"},
+    "DF-MAFIA-AI-BENCHMARK-41-R3": {"status": "merged", "worker_commit": "a09dbb8", "merge": "0f5f3f1", "worktree_gate": "685 passed / 19 skipped", "merged_gate": "690 passed / 19 skipped (709)", "judge": "PASS run 5030d6e2 (job-b4ac65cc)", "live_arms": "wins reconcile delta=0; statusBreakdown.cancelled 206==206; no || gameStats fallback remains"},
+    "DF-MAFIA-AI-BENCHMARK-52": {"status": "merged", "worker_commit": "5e08ee5 (rebased 720c8e8)", "merge": "248bbba", "worktree_gate": "682/19 then rebased 690/19", "merged_gate": "690 passed / 19 skipped (709)", "judge": "job-a0a641ce (pending at manifest write)", "live_arms": "totals.events 201176 == COUNT(*) 201176; eventBreakdown 15 types sum 201176; totals.agents 10 == performance.agents len 10"},
+    "deploy": {"commit": "248bbba", "method": "docker compose up -d --build server", "rc": 0, "health": "healthy"}
+  },
+  "dispatch_note": "hermes chat workers died instantly with 'Gateway did not answer session.create' (state.db 70GB starvation) — both workers re-dispatched via the hermes -z oneshot fallback (--in <worktree>), attempt 1 rc=0 both, model cx/gpt-6.1-terra via 9router terra lane (seat-verified in state.db)",
+  "finished_at": "2026-11-21T02:05:00Z"
+}

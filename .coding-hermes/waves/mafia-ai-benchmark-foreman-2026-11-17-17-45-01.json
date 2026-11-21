@@ -1,0 +1,57 @@
+{
+  "tick_id": "mafia-ai-benchmark-foreman-2026-11-17-17-45-01",
+  "project": "mafia-ai-benchmark",
+  "started_at": "2026-11-17T17:45:01-05:00",
+  "wave_budget": 8,
+  "base": "origin/main",
+  "base_sha": "a9467ee",
+  "workers": [
+    {
+      "task_id": "OBS-002",
+      "kind": "new-dispatch",
+      "branch": "wt/OBS-002",
+      "worktree": "/home/kara/worktrees/mafia-ai-benchmark-OBS-002",
+      "base": "origin/main",
+      "base_sha": "a9467ee",
+      "model": "openai/gpt-6.1-terra",
+      "provider": "xkiro",
+      "stack_exclusive": true,
+      "brief": "$TMPDIR/obs-002-brief-20261117-1745.txt",
+      "judge_status": "pending",
+      "outcome": null
+    },
+    {
+      "task_id": "README-014",
+      "kind": "new-dispatch",
+      "branch": "wt/README-014",
+      "worktree": "/home/kara/worktrees/mafia-ai-benchmark-README-014",
+      "base": "origin/main",
+      "base_sha": "a9467ee",
+      "model": "openai/gpt-6.1-terra",
+      "provider": "xkiro",
+      "stack_exclusive": false,
+      "brief": "$TMPDIR/readme-014-brief-20261117-1745.txt",
+      "judge_status": "pending",
+      "outcome": null
+    }
+  ],
+  "foreman_direct": [
+    {
+      "task_id": "OBS-004",
+      "kind": "ops-remote",
+      "surface": "fleet-monitor:/root/fleet-monitoring/prometheus/prometheus.yml (+ alert rules)",
+      "reason": "no repo surface exists for this row — remote Prometheus config on fleet-monitor; coding worker cannot change the shipped surface (worker-brief-authoring premise rule); trivial one-file-ish ops edit routed foreman-direct with manual AC verification (MAF-GAP-006 precedent)",
+      "judge_status": "manual-verification",
+      "outcome": null
+    }
+  ],
+  "deferred": [
+    {
+      "task_id": "PERF-MAFIA-5",
+      "reason": "closure needs live-game remeasurement on :3004 (3 calls 30s apart while a game is live) — collides with OBS-002's exclusive stack use (container rebuild + benchmark run); prior foreman note (07:42) sequenced OBS-002 first with the stack to itself"
+    }
+  ],
+  "lane_note": "workers dispatched openai/gpt-6.1-terra@xkiro per lane config (AUTHORITATIVE pin)",
+  "finished_at": "2026-11-21T01:35:00Z",
+  "reconciliation": "Reconciled by tick 2026-11-21-01-05-08: OBS-002 merged 53d85a6 and README-014 merged 2cf6090 (both rows complete on main); OBS-004 foreman-direct ops row complete. Manifest was left open by its tick; closed now."
+}

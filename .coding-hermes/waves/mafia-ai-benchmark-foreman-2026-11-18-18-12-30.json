@@ -1,0 +1,27 @@
+{
+  "wave_id": "mafia-ai-benchmark-foreman-2026-11-18-18-12-30",
+  "project": "mafia-ai-benchmark",
+  "workdir": "/home/kara/wojons/mafia-ai-benchmark",
+  "mode": "serial-single-worker",
+  "wave_budget": 1,
+  "base_ref": "origin/main",
+  "base_sha": "e9f49d7",
+  "workers": [
+    {
+      "row": "PERF-MAFIA-5",
+      "arms": [
+        "2-async-non-blocking-rebuild",
+        "4-rebuild-path-proof"
+      ],
+      "worktree": "/home/kara/worktrees/mafia-ai-benchmark-PERF-MAFIA-5-R2",
+      "branch": "wt/PERF-MAFIA-5-R2",
+      "model": "openai/gpt-6.1-terra",
+      "provider": "xkiro",
+      "brief": "/tmp/mafia-perfmafia5-r2-brief-20261118.md",
+      "status": "dispatched"
+    }
+  ],
+  "notes": "Board had 0 ready rows; PERF-MAFIA-5 was the only remaining row (in_progress, closure blocked on live-game remeasurement + arms 2/4). Prior worker's watermark fix (ENDED-scoped compare fingerprint) already on main; this wave covers the deferred/background rebuild and its proof.",
+  "finished_at": "2026-11-21T01:35:00Z",
+  "reconciliation": "Reconciled by tick 2026-11-21-01-05-08: PERF-MAFIA-5 R2 landed via 4fbbf8a/merge 91a9cc2 (COS-directed), row closed 74a4328 with tier-2 PASS 1993f1b8. Leftover WIP branch wt/PERF-MAFIA-5 (886fa46, arm-2 materialization) preserved as evidence. Manifest was left open by its tick; closed now."
+}

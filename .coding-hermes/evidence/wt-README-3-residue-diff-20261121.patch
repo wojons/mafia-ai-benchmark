@@ -1,0 +1,13 @@
+diff --git a/pnpm-lock.yaml b/pnpm-lock.yaml
+index 10ecf4a..2c4c64a 100644
+--- a/pnpm-lock.yaml
++++ b/pnpm-lock.yaml
+@@ -87,7 +87,7 @@ importers:
+         specifier: ^20.19.43
+         version: 20.19.43
+       '@types/uuid':
+-        specifier: ^9.0.0
++        specifier: ^9.0.8
+         version: 9.0.8
+       '@types/ws':
+         specifier: ^8.18.2

@@ -51,10 +51,24 @@
     }
   ],
   "excluded_from_wave": [
-    {"id": "PERF-MAFIA-7", "reason": "collides with DF-41-R3 on apps/server/src/routes/stats.ts dashboard handler; deferred to next tick"},
-    {"id": "DF-MAFIA-AI-BENCHMARK-51", "reason": "bunker infra leg, not a repo code task; dogfood delivery-3 evidence says designated-host install is PROVEN and row is closeable on that evidence - foreman evaluates at closeout, not wave dispatch"},
-    {"id": "DF-MAFIA-AI-BENCHMARK-53", "reason": "live demo-data repair touches production DB content; P3, deferred pending explicit repair-script design"}
+    {
+      "id": "PERF-MAFIA-7",
+      "reason": "collides with DF-41-R3 on apps/server/src/routes/stats.ts dashboard handler; deferred to next tick"
+    },
+    {
+      "id": "DF-MAFIA-AI-BENCHMARK-51",
+      "reason": "bunker infra leg, not a repo code task; dogfood delivery-3 evidence says designated-host install is PROVEN and row is closeable on that evidence - foreman evaluates at closeout, not wave dispatch"
+    },
+    {
+      "id": "DF-MAFIA-AI-BENCHMARK-53",
+      "reason": "live demo-data repair touches production DB content; P3, deferred pending explicit repair-script design"
+    }
   ],
   "merge_plan": "serial merge in listed order after worker exit; per-merge gates: pnpm install --frozen-lockfile + targeted tests + full server test:run on merged main; single live deploy (docker compose up -d --build server) AFTER all merges; live probes once for all rows; ONE async gitreins judge this tick, remaining judged next tick via DuckBrain handoff",
-  "gitreins_tasks": "create+start for all 5 at dispatch time"
+  "gitreins_tasks": "create+start for all 5 at dispatch time",
+  "finished_at": "2026-11-21T01:35:00Z",
+  "recovery": {
+    "tick": "mafia-ai-benchmark-foreman-2026-11-21-01-05-08",
+    "outcome": "PERF-MAFIA-8: merged 44b0f5e, tier-2 PASS 8e1816a9/a319ae8f, row complete (044629e/8489bb0). DF-MAFIA-AI-BENCHMARK-50: merged cbe7e6a, row pending awaiting async judge (dispatched this tick). DOC-022: merged 49a6d94, row pending awaiting judge. DF-MAFIA-AI-BENCHMARK-41-R3 + DF-MAFIA-AI-BENCHMARK-52: worker branches sat at base fcfdabb with zero commits (workers never delivered); dead worktrees reaped, fresh wave re-dispatched by tick 2026-11-21-01-05-08."
+  }
 }

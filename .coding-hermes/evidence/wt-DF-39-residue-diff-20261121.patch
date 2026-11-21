@@ -1,0 +1,171 @@
+diff --git a/apps/web/src/__tests__/benchmarkLeaderboard.test.tsx b/apps/web/src/__tests__/benchmarkLeaderboard.test.tsx
+index 305d6cd..cad0af9 100644
+--- a/apps/web/src/__tests__/benchmarkLeaderboard.test.tsx
++++ b/apps/web/src/__tests__/benchmarkLeaderboard.test.tsx
+@@ -75,6 +75,56 @@ describe('BenchmarkLeaderboard', () => {
+     expect(html).toMatch(/\$0\.0129/);
+   });
+ 
++  it('renders role and player-count breakdowns and warns about dominated seat assignment', () => {
++    const html = renderToString(
++      <BenchmarkLeaderboard
++        payload={{
++          models: [
++            {
++              provider: 'openai',
++              model: 'gpt-4o-mini',
++              gamesPlayed: 100,
++              wins: 84,
++              winRate: 0.84,
++              rolePerformance: {
++                MAFIA: { gamesPlayed: 25, wins: 18, winRate: 0.72 },
++                DOCTOR: { gamesPlayed: 25, wins: 22, winRate: 0.88 },
++                SHERIFF: { gamesPlayed: 25, wins: 21, winRate: 0.84 },
++                VILLAGER: { gamesPlayed: 25, wins: 23, winRate: 0.92 },
++              },
++              byNumPlayers: {
++                '5': { gamesPlayed: 95, wins: 82, winRate: 0.8632 },
++                '10': { gamesPlayed: 5, wins: 2, winRate: 0.4 },
++              },
++            },
++          ],
++        }}
++        loading={false}
++      />,
++    );
++
++    expect(html).toContain('MAFIA');
++    expect(html).toContain('DOCTOR');
++    expect(html).toContain('5');
++    expect(html).toContain('10');
++    expect(html).toContain('72.0%');
++    expect(html).toContain('Headline rate reflects seat assignment');
++  });
++
++  it('renders a model without optional breakdowns without crashing', () => {
++    const html = renderToString(
++      <BenchmarkLeaderboard
++        payload={{
++          models: [{ provider: 'openai', model: 'legacy-model', gamesPlayed: 1, wins: 1, winRate: 1 }],
++        }}
++        loading={false}
++      />,
++    );
++
++    expect(html).toContain('legacy-model');
++    expect(html).toContain('—');
++  });
++
+   it('renders real zero metrics as-is (never as em-dash placeholders)', () => {
+     const html = renderToString(<BenchmarkLeaderboard payload={liveShapedEnvelope} loading={false} />);
+     // avgTokensPerGame: 0 on the gpt-4o-mini live-shaped row -> literal "0".
+diff --git a/apps/web/src/components/BenchmarkLeaderboard.tsx b/apps/web/src/components/BenchmarkLeaderboard.tsx
+index d08950c..16aca17 100644
+--- a/apps/web/src/components/BenchmarkLeaderboard.tsx
++++ b/apps/web/src/components/BenchmarkLeaderboard.tsx
+@@ -1,5 +1,11 @@
+ import React from 'react';
+ 
++export interface PerformanceBreakdown {
++  gamesPlayed: number;
++  wins: number;
++  winRate: number;
++}
++
+ export interface CompareModelRow {
+   provider: string;
+   model: string;
+@@ -9,6 +15,8 @@ export interface CompareModelRow {
+   avgTokensPerGame?: number;
+   avgCostPerGame?: number;
+   avgLatency?: number;
++  rolePerformance?: Record<string, PerformanceBreakdown>;
++  byNumPlayers?: Record<string, PerformanceBreakdown>;
+ }
+ 
+ /**
+@@ -74,6 +82,28 @@ function sanitizeRows(models: unknown): CompareModelRow[] {
+   );
+ }
+ 
++function breakdownEntries(
++  breakdown: Record<string, PerformanceBreakdown> | undefined,
++): [string, PerformanceBreakdown][] {
++  return breakdown ? Object.entries(breakdown) : [];
++}
++
++function formatWinRate(winRate: number): string {
++  return `${(winRate * 100).toFixed(1)}%`;
++}
++
++function dominantPlayerCount(
++  breakdown: Record<string, PerformanceBreakdown> | undefined,
++): { playerCount: string; share: number } | undefined {
++  const entries = breakdownEntries(breakdown);
++  const totalGames = entries.reduce((total, [, stats]) => total + stats.gamesPlayed, 0);
++  if (totalGames <= 0) return undefined;
++  const [playerCount, stats] = entries.reduce((current, entry) =>
++    entry[1].gamesPlayed > current[1].gamesPlayed ? entry : current,
++  );
++  return { playerCount, share: stats.gamesPlayed / totalGames };
++}
++
+ // Leaderboard order: most games played first (wins as tiebreak).
+ export function sortLeaderboardRows(rows: CompareModelRow[]): CompareModelRow[] {
+   return [...rows].sort((a, b) => b.gamesPlayed - a.gamesPlayed || b.wins - a.wins);
+@@ -137,6 +167,12 @@ const BenchmarkLeaderboard: React.FC<BenchmarkLeaderboardProps> = ({ payload, lo
+             <th className="text-right py-2 px-2 font-semibold border-b-2 border-[var(--color-border)] whitespace-nowrap">
+               Win Rate
+             </th>
++            <th className="text-left py-2 px-2 font-semibold border-b-2 border-[var(--color-border)] whitespace-nowrap">
++              Role Win Rates
++            </th>
++            <th className="text-left py-2 px-2 font-semibold border-b-2 border-[var(--color-border)] whitespace-nowrap">
++              Player Count Win Rates
++            </th>
+             <th className="text-right py-2 px-2 font-semibold border-b-2 border-[var(--color-border)] whitespace-nowrap">
+               Avg Tokens/Game
+             </th>
+@@ -159,7 +195,41 @@ const BenchmarkLeaderboard: React.FC<BenchmarkLeaderboardProps> = ({ payload, lo
+               <td className="py-2 px-2 text-right text-[var(--color-text-secondary)]">{m.gamesPlayed}</td>
+               <td className="py-2 px-2 text-right text-[var(--color-text-secondary)]">{m.wins}</td>
+               <td className="py-2 px-2 text-right text-[var(--color-text-secondary)]">
+-                {(m.winRate * 100).toFixed(1)}%
++                {formatWinRate(m.winRate)}
++              </td>
++              <td className="py-2 px-2 text-[var(--color-text-secondary)] align-top">
++                {breakdownEntries(m.rolePerformance).length > 0 ? (
++                  <div className="space-y-1">
++                    {breakdownEntries(m.rolePerformance).map(([role, stats]) => (
++                      <div key={role} className="whitespace-nowrap">
++                        <span className="font-medium">{role}</span>: {formatWinRate(stats.winRate)}
++                      </div>
++                    ))}
++                  </div>
++                ) : (
++                  '—'
++                )}
++              </td>
++              <td className="py-2 px-2 text-[var(--color-text-secondary)] align-top">
++                {breakdownEntries(m.byNumPlayers).length > 0 ? (
++                  <div className="space-y-1">
++                    {breakdownEntries(m.byNumPlayers).map(([playerCount, stats]) => (
++                      <div key={playerCount} className="whitespace-nowrap">
++                        <span className="font-medium">{playerCount}-player</span>: {formatWinRate(stats.winRate)}
++                      </div>
++                    ))}
++                    {(() => {
++                      const dominant = dominantPlayerCount(m.byNumPlayers);
++                      return dominant && dominant.share >= 0.9 ? (
++                        <div className="text-xs text-[var(--color-text-muted)] max-w-48">
++                          Headline rate reflects seat assignment ({dominant.playerCount}-player games: {(dominant.share * 100).toFixed(1)}%).
++                        </div>
++                      ) : null;
++                    })()}
++                  </div>
++                ) : (
++                  '—'
++                )}
+               </td>
+               {/* Live data can carry real zeros here — render them as-is, never as '—'. */}
+               <td className="py-2 px-2 text-right text-[var(--color-text-secondary)]">
