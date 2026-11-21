@@ -1179,9 +1179,9 @@ recorded.
 {
   "success": true,
   "data": {
-    "totals": { "total": 2875, "active": 97, "completed": 2759 },
-    "statusBreakdown": { "ENDED": 2759, "IN_PROGRESS": 97, "CANCELLED": 0 },
-    "wins": { "mafia": 5, "town": 994 },
+    "totals": { "total": 2885, "active": 1, "completed": 2759 },
+    "statusBreakdown": { "ENDED": 2760, "IN_PROGRESS": 1, "CANCELLED": 124, "cancelled": 124 },
+    "wins": { "mafia": 512, "town": 2247 },
     "avgDuration": 150,
     "recentGames": [
       {
@@ -1197,8 +1197,20 @@ recorded.
 
 **Notes:**
 
-- `wins.mafia`/`wins.town` come from the aggregated-wins collector (falling
-  back to the raw game stats); `statusBreakdown.CANCELLED` is always `0`.
+- `wins.mafia` + `wins.town` equal `totals.completed`: both sides come from ONE
+  SQL aggregate over one population — games with status `ENDED` that are
+  neither mock nor degenerate (the same WHERE family as `completed`). The
+  winner per game is `games.winner`, with that game's `GAME_OVER` event as the
+  fallback when the column is empty, so a legacy database resolves every game
+  the same way. A game whose winner cannot be decided is attributed to neither
+  side (DF-MAFIA-AI-BENCHMARK-41).
+- `statusBreakdown` is a census of `games.status` (one GROUP BY over the same
+  rows `totals.total` counts), so `CANCELLED` is the real number of cancelled
+  games and `ENDED + IN_PROGRESS + CANCELLED` summarizes `totals.total`.
+  `ENDED` therefore includes the mock/degenerate rows that `totals.completed`
+  excludes — those stay auditable through `mockGames`/`degenerateGames` on
+  `GET /api/v1/stats`. The lowercase `cancelled` key mirrors `CANCELLED`
+  (same value, both always present).
 - `recentGames` is the 10 most recent games with **epoch-millisecond**
   `createdAt`/`endedAt` (numbers, not ISO strings).
 
