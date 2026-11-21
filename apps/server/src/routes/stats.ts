@@ -9,6 +9,16 @@ import { ServerContext } from '../index.js';
 import { getAggregatedWins } from '../services/stats-collector/wins.js';
 import { getStatusCensus } from '../services/stats-collector/status-census.js';
 
+/**
+ * Cap on the agent rows `/api/v1/analytics` echoes under `performance.agents`
+ * (DF-MAFIA-AI-BENCHMARK-52). The benchmark DB carries one agent row per
+ * (player, provider, model) — >20k on the live database — so the response
+ * keeps the historical 10-row cap, and `totals.agents` reports the size of the
+ * list actually served so the two numbers always agree.
+ */
+const MAX_AGENT_ROWS = 10;
+const MAX_MODEL_ROWS = 10;
+
 export function createStatsRouter(context: ServerContext): Router {
   const { statsCollector, gameRepository } = context;
   const router = Router();
@@ -132,16 +142,29 @@ export function createStatsRouter(context: ServerContext): Router {
     }
   });
 
+  // Get analytics data
+  //
+  // DF-MAFIA-AI-BENCHMARK-52: `totals.events`, `totals.agents` and
+  // `eventBreakdown` used to be hardcoded (`0`, `0`, `{}`) while the same
+  // database held hundreds of thousands of events. They are now derived from
+  // the database:
+  //   totals.events    = COUNT(*) FROM events (repository.getEventStats)
+  //   eventBreakdown   = GROUP BY events.type — its values sum to totals.events
+  //   totals.agents    = the number of agent rows the same response reports
+  //                      under performance.agents (one source array, capped at
+  //                      MAX_AGENT_ROWS for payload size), so the two fields
+  //                      cannot drift apart or be read as different quantities.
   router.get('/api/v1/analytics', (req: Request, res: Response) => {
     try {
       const gameStats = statsCollector.getGameStats();
       const modelComparison = statsCollector.getModelComparison();
       const agentStats = statsCollector.getAgentStats();
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      const eventDist = (statsCollector as any).getEventDistribution
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        ? (statsCollector as any).getEventDistribution()
-        : {};
+      const eventStats = gameRepository.getEventStats();
+
+      // The agent list is capped for payload size (the live benchmark DB has
+      // >20k per-player/per-model agent rows); totals.agents reports the size
+      // of the list actually served, never a separate population.
+      const agents = agentStats.slice(0, MAX_AGENT_ROWS);
 
       const recentGames = gameRepository
         .listGames({ limit: 50, offset: 0 })
@@ -160,15 +183,15 @@ export function createStatsRouter(context: ServerContext): Router {
         data: {
           totals: {
             games: gameStats.totalGames,
-            events: 0,
-            agents: 0,
+            events: eventStats.total,
+            agents: agents.length,
             models: modelComparison.length,
           },
-          eventBreakdown: eventDist,
+          eventBreakdown: eventStats.byType,
           gameTimeline: recentGames,
           performance: {
-            models: modelComparison.slice(0, 10),
-            agents: agentStats.slice(0, 10),
+            models: modelComparison.slice(0, MAX_MODEL_ROWS),
+            agents,
           },
         },
       });

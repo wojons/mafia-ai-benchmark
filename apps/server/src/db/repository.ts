@@ -945,6 +945,38 @@ export class GameRepository {
   }
 
   /**
+   * Event totals and per-type distribution (DF-MAFIA-AI-BENCHMARK-52).
+   *
+   * `/api/v1/analytics` used to report `totals.events = 0` and
+   * `eventBreakdown = {}` as hardcoded literals while this database held
+   * hundreds of thousands of event rows. Both numbers now come from ONE
+   * pass over `events` (GROUP BY type), so the breakdown values sum to the
+   * total by construction. A NULL type (defensive: the column is NOT NULL
+   * in the schema, but legacy/importer rows have appeared elsewhere) is
+   * bucketed under 'UNKNOWN' rather than dropped, so the sum cannot drift
+   * below the COUNT(*).
+   *
+   * Insertion order: counts descending, then type ascending — a stable
+   * order for clients that render the breakdown directly.
+   */
+  getEventStats(): { total: number; byType: Record<string, number> } {
+    const rows = this.db.prepare(
+      `SELECT COALESCE(type, 'UNKNOWN') AS type, COUNT(*) AS count
+         FROM events
+        GROUP BY COALESCE(type, 'UNKNOWN')
+        ORDER BY count DESC, type ASC`,
+    ).all() as Array<{ type: string; count: number }>;
+
+    const byType: Record<string, number> = {};
+    let total = 0;
+    for (const row of rows) {
+      byType[row.type] = row.count;
+      total += row.count;
+    }
+    return { total, byType };
+  }
+
+  /**
    * True when EVERY ENDED game has a non-NULL games.winner (MAF-GAP-060).
    *
    * This is the completeness switch between the two winner sources: the

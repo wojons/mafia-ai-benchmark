@@ -1226,12 +1226,20 @@ recorded.
 
 **Response (200 OK):** `{ success, data }` envelope.
 
+Every number is derived from the server's database (no hardcoded literals,
+DF-MAFIA-AI-BENCHMARK-52). Counts below are illustrative.
+
 ```json
 {
   "success": true,
   "data": {
-    "totals": { "games": 2875, "events": 0, "agents": 0, "models": 5 },
-    "eventBreakdown": {},
+    "totals": { "games": 5095, "events": 200981, "agents": 10, "models": 6 },
+    "eventBreakdown": {
+      "AGENT_SAYS_BROADCASTED": 121432,
+      "VOTE_CAST": 30211,
+      "PHASE_CHANGED": 19999,
+      "GAME_STARTED": 5095
+    },
     "gameTimeline": [
       {
         "id": "1692df5c-f844-4abd-ad78-ae7e00d2fe64",
@@ -1250,11 +1258,28 @@ recorded.
 
 **Notes:**
 
-- `totals.events` / `totals.agents` are currently always `0`; `models` is the
-  number of rows in the model comparison.
-- `eventBreakdown` is `{}` unless the collector exposes an event distribution.
-- `gameTimeline` is the 50 most recent games with epoch-millisecond
-  `createdAt`.
+- `totals` is always an object of four **numbers** (never `null`, never
+  omitted): `games`, `events`, `agents`, `models`.
+  - `totals.events` is `SELECT COUNT(*) FROM events` — the whole table, not a
+    sample and not a per-game sum.
+  - `totals.agents` is the number of agent rows the SAME response reports in
+    `performance.agents` (i.e. `data.performance.agents.length`, capped at 10
+    for payload size — the underlying population is one row per
+    player/provider/model and can exceed 20k). The two fields therefore always
+    agree and cannot be read as two different quantities.
+  - `totals.models` is the number of rows in the model comparison (the full
+    population — `performance.models` is the 10-row projection of it).
+- `eventBreakdown` is an object mapping **event type name → integer count**
+  (`GROUP BY events.type`, counts descending, then type ascending). It is
+  non-empty whenever the `events` table has rows, and its values always sum to
+  `totals.events`. It is `{}` only when the `events` table is empty. Values
+  are numbers, never strings.
+- `gameTimeline` is the 50 most recent games with epoch-millisecond numeric
+  `createdAt` (not an ISO string); `players` is the player-row count.
+- `performance.models` / `performance.agents` are arrays (possibly empty),
+  each capped at 10 rows. Agent rows carry `agentId`, `provider`, `model`,
+  `executions`, `successes`, `totalLatency`, `totalTokens`, `totalCost`
+  (same shape as `GET /api/v1/agents/stats`).
 
 **Errors:** `500` — `{ "success": false, "error": "Failed to get analytics data" }`.
 
