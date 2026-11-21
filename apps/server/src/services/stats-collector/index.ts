@@ -1064,12 +1064,17 @@ export class StatsCollector {
     }
 
     let activeGames: number;
+    // Exclude decided rows even when the outcome exists only in the transcript.
     if (this.gameLifecycle) {
       // The lifecycle seam has already retired rows with stale heartbeat/event
       // evidence and preserved rows owned by a live in-memory engine. Count
-      // exactly the remaining persisted IN_PROGRESS population.
+      // exactly the remaining persisted, undecided IN_PROGRESS population.
       const activeRow = this.gameRepository.getDatabase().prepare(`
-        SELECT COUNT(*) as count FROM games WHERE status = 'IN_PROGRESS'
+        SELECT COUNT(*) as count FROM games g
+        WHERE status = 'IN_PROGRESS' AND winner IS NULL
+          AND (NOT json_valid(g.config) OR COALESCE(json_extract(g.config, '$.winner'), '') NOT IN ('TOWN', 'MAFIA'))
+          AND NOT EXISTS (SELECT 1 FROM events e WHERE e.game_id = g.id
+            AND (e.phase = 'GAME_OVER' OR e.type IN ('GAME_OVER', 'GAME_ENDED')))
       `).get() as { count: number };
       activeGames = activeRow.count;
     } else {
@@ -1077,8 +1082,12 @@ export class StatsCollector {
       // without the production lifecycle seam (older embedders/tests).
       try {
         const freshRow = this.gameRepository.getDatabase().prepare(`
-          SELECT COUNT(*) as count FROM games
+          SELECT COUNT(*) as count FROM games g
           WHERE status = 'IN_PROGRESS'
+            AND winner IS NULL
+            AND (NOT json_valid(g.config) OR COALESCE(json_extract(g.config, '$.winner'), '') NOT IN ('TOWN', 'MAFIA'))
+            AND NOT EXISTS (SELECT 1 FROM events e WHERE e.game_id = g.id
+              AND (e.phase = 'GAME_OVER' OR e.type IN ('GAME_OVER', 'GAME_ENDED')))
             AND started_at IS NOT NULL
             AND started_at >= ?
         `).get(Date.now() - ACTIVE_FRESHNESS_MS) as { count: number };
@@ -1089,11 +1098,12 @@ export class StatsCollector {
     }
 
     // MAF-GAP-050 reconciliation identity (total = active + completed +
-    // failed) must keep holding. With the lifecycle seam, stale rows are
-    // CANCELLED before this point and are already included in failedGames.
-    const demotedFromActive = this.gameLifecycle
-      ? 0
-      : Math.max(0, stats.activeGames - activeGames);
+    // failed) must keep holding. Whatever this method removed from the raw
+    // repository active count (stale rows without the lifecycle seam, and —
+    // since DF-MAFIA-AI-BENCHMARK-53 — corrupt winner-set IN_PROGRESS rows in
+    // BOTH branches) has to land in failedGames, otherwise the identity loses
+    // a row. The row itself is never rewritten here.
+    const demotedFromActive = Math.max(0, stats.activeGames - activeGames);
     const failedGames = stats.failedGames + demotedFromActive;
 
     return {
