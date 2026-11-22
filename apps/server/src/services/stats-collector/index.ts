@@ -32,6 +32,50 @@ import {
 } from './models.js';
 import { getMatchups } from './matchups.js';
 import { getPlayersFromEvents, calculateRolePerformance } from './players.js';
+import { getAggregatedWins } from './wins.js';
+import { getStatusCensus } from './status-census.js';
+
+type DashboardAggregates = {
+  gameStats: GameStats;
+  aggregatedWins: ReturnType<typeof getAggregatedWins>;
+  statusCensus: ReturnType<typeof getStatusCensus>;
+};
+
+type AggregateCacheEntry<T> = {
+  watermark: string;
+  dataVersion: number;
+  totalChanges: number;
+  owner: StatsCollector;
+  value: T;
+};
+
+const gameStatsCacheByRepo = new WeakMap<GameRepository, AggregateCacheEntry<GameStats>>();
+const dashboardCacheByRepo = new WeakMap<GameRepository, AggregateCacheEntry<DashboardAggregates>>();
+
+function cachedAggregate<T>(repo: GameRepository, owner: StatsCollector, cache: WeakMap<GameRepository, AggregateCacheEntry<T>>, compute: () => T): T {
+  if (repo.getDatabase().inTransaction) return compute();
+  let watermark: string | null = null;
+  let dataVersion: number;
+  let totalChanges: number;
+  try {
+    watermark = computeReportWatermark(repo);
+    dataVersion = repo.getDatabase().pragma('data_version', { simple: true }) as number;
+    totalChanges = (repo.getDatabase().prepare('SELECT total_changes() AS value').get() as { value: number }).value;
+    const entry = cache.get(repo);
+    if (watermark !== null && entry && entry.owner === owner && entry.watermark === watermark && entry.dataVersion === dataVersion && entry.totalChanges === totalChanges) {
+      return entry.value;
+    }
+  } catch {
+    return compute();
+  }
+  const value = compute();
+  // Do not retain a snapshot if the computation itself wrote to the database.
+  const after = (repo.getDatabase().prepare('SELECT total_changes() AS value').get() as { value: number }).value;
+  if (watermark !== null && after === totalChanges) {
+    cache.set(repo, { watermark, dataVersion, totalChanges, owner, value });
+  }
+  return value;
+}
 
 // ==================== REPORT MEMOIZATION (PERF-MAFIA-2) ====================
 
@@ -1007,6 +1051,30 @@ export class StatsCollector {
    * events for the other — produced impossible totals like mafiaWins=48 +
    * townWins=13 != completedGames.
    */
+  getCachedGameStats(): GameStats {
+    this.gameLifecycle?.reconcile();
+    // Without a lifecycle reconciler, active counts also depend on wall time.
+    if (!this.gameLifecycle && this.gameRepository.getDatabase().prepare("SELECT 1 FROM games WHERE status = 'IN_PROGRESS' LIMIT 1").get()) {
+      return this.getGameStats();
+    }
+    return cachedAggregate(this.gameRepository, this, gameStatsCacheByRepo, () => this.getGameStats());
+  }
+
+  getCachedDashboardAggregates(): DashboardAggregates {
+    this.gameLifecycle?.reconcile();
+    const compute = (): DashboardAggregates => {
+      const gameStats = this.getGameStats();
+      const aggregatedWins = getAggregatedWins(this.gameRepository);
+      // Read the census AFTER getGameStats(): lifecycle demotion happens first.
+      const statusCensus = getStatusCensus(this.gameRepository);
+      return { gameStats, aggregatedWins, statusCensus };
+    };
+    if (!this.gameLifecycle && this.gameRepository.getDatabase().prepare("SELECT 1 FROM games WHERE status = 'IN_PROGRESS' LIMIT 1").get()) {
+      return compute();
+    }
+    return cachedAggregate(this.gameRepository, this, dashboardCacheByRepo, compute);
+  }
+
   getGameStats(): GameStats {
     // Reconcile persisted lifecycle state before calculating any aggregate so
     // stats and the games read surface observe the same population.

@@ -6,8 +6,6 @@
 
 import { Router, Request, Response } from 'express';
 import { ServerContext } from '../index.js';
-import { getAggregatedWins } from '../services/stats-collector/wins.js';
-import { getStatusCensus } from '../services/stats-collector/status-census.js';
 
 /**
  * Cap on the agent rows `/api/v1/analytics` echoes under `performance.agents`
@@ -28,7 +26,7 @@ export function createStatsRouter(context: ServerContext): Router {
   // Get game statistics
   router.get('/api/v1/stats', (req: Request, res: Response) => {
     try {
-      const stats = statsCollector.getGameStats();
+      const stats = statsCollector.getCachedGameStats();
 
       res.json({
         success: true,
@@ -81,18 +79,10 @@ export function createStatsRouter(context: ServerContext): Router {
 
   router.get('/api/v1/dashboard', (req: Request, res: Response) => {
     try {
-      const gameStats = statsCollector.getGameStats();
-      // DF-MAFIA-AI-BENCHMARK-41: both win sides come from ONE population
-      // (ENDED, non-mock, non-degenerate — the same WHERE family that
-      // produces totals.completed), computed in SQL. The old per-side
-      // fallback onto gameStats mixed an event walk over the newest 1000
-      // games with the raw column aggregate, so the two sides could not
-      // reconcile with this response's own completed count.
-      const aggregatedWins = getAggregatedWins(gameRepository);
-      // Read the census AFTER getGameStats(): when the lifecycle seam is
-      // wired it demotes stale IN_PROGRESS rows to CANCELLED first, so the
-      // breakdown describes the same population as totals/recentGames.
-      const statusCensus = getStatusCensus(gameRepository);
+      // The cached bundle reads the census AFTER getGameStats(): lifecycle
+      // reconciliation demotes stale rows before either aggregate is read.
+      const { gameStats, aggregatedWins, statusCensus } =
+        statsCollector.getCachedDashboardAggregates();
 
       const recentGames = gameRepository
         .listGames({ limit: 10, offset: 0 })

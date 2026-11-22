@@ -23,7 +23,7 @@
  * Hermetic: the real stats router (routes/stats.ts) boots on an ephemeral
  * port over the in-memory SQLite repository the other stats suites use.
  */
-import { describe, it, expect, beforeEach, afterEach } from 'vitest';
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import express from 'express';
 import type { Server } from 'http';
 import fs from 'fs';
@@ -140,6 +140,29 @@ describe('GET /api/v1/dashboard — one population for wins + real status census
     // Fresh active game (counts as IN_PROGRESS, never as a win).
     repo.seedGame({ id: 'active-1', status: 'IN_PROGRESS' });
   }
+
+  it('reuses identical stats and dashboard aggregates on consecutive requests', async () => {
+    repo.seedGame({ id: 'cached', status: 'ENDED', winner: 'TOWN', duration: 240_000, endedAt: Date.now() });
+    const compute = vi.spyOn(stats, 'getGameStats');
+    for (const endpoint of ['stats', 'dashboard']) {
+      const first = await (await fetch(`${baseUrl}/api/v1/${endpoint}`)).json();
+      const second = await (await fetch(`${baseUrl}/api/v1/${endpoint}`)).json();
+      expect(second).toEqual(first);
+    }
+    expect(compute).toHaveBeenCalledTimes(2);
+  });
+
+  it('invalidates both endpoint aggregates immediately on a committed game insert', async () => {
+    const beforeStats = await (await fetch(`${baseUrl}/api/v1/stats`)).json() as { data: { totalGames: number } };
+    const before = await getDashboard();
+    repo.seedGame({ id: 'inserted', status: 'ENDED', winner: 'TOWN', duration: 240_000, endedAt: Date.now() });
+    const afterStats = await (await fetch(`${baseUrl}/api/v1/stats`)).json() as { data: { totalGames: number } };
+    const after = await getDashboard();
+    expect(afterStats.data.totalGames).toBe(beforeStats.data.totalGames + 1);
+    expect(after.data.totals.total).toBe(before.data.totals.total + 1);
+    expect(Object.keys(after.data.statusBreakdown)).toEqual(['ENDED', 'IN_PROGRESS', 'CANCELLED']);
+    expect(Object.values(after.data.statusBreakdown).reduce((a, b) => a + b, 0)).toBe(after.data.totals.total);
+  });
 
   // --------------------------------------------------------------------------
   // (a) wins reconcile with the response's own completed count
@@ -303,6 +326,6 @@ describe('GET /api/v1/dashboard — one population for wins + real status census
     const routeSource = fs.readFileSync(path.resolve(here, '../../routes/stats.ts'), 'utf-8');
     expect(routeSource).not.toMatch(/\|\|\s*gameStats/);
     expect(routeSource).not.toMatch(/aggregatedWins\.(mafiaWins|townWins)\s*\|\|/);
-    expect(routeSource).toContain('const aggregatedWins = getAggregatedWins(gameRepository);');
+    expect(routeSource).toContain('statsCollector.getCachedDashboardAggregates()');
   });
 });
