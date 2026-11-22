@@ -10,9 +10,8 @@
  *
  * Contract under test (the row's required regression coverage):
  *  (a) on a seeded fixture, `wins.mafia + wins.town === totals.completed`;
- *  (b) `statusBreakdown` is a real census — `.CANCELLED` (and the AC's
- *      lowercase `.cancelled` mirror) equals the number of CANCELLED rows,
- *      and the three buckets sum to `totals.total`;
+ *  (b) `statusBreakdown` is a real census — `.CANCELLED` equals the number
+ *      of CANCELLED rows, and exactly three buckets sum to `totals.total`;
  *  (c) both win sides derive from ONE population: a game excluded from the
  *      benchmark population (mock / degenerate) contributes to NEITHER side
  *      even when its column and its GAME_OVER event disagree, and a
@@ -54,8 +53,6 @@ interface DashboardBody {
       ENDED: number;
       IN_PROGRESS: number;
       CANCELLED: number;
-      /** DF-41 acceptance-probe mirror of CANCELLED. */
-      cancelled: number;
     };
     wins: { mafia: number; town: number };
     avgDuration: number;
@@ -175,7 +172,7 @@ describe('GET /api/v1/dashboard — one population for wins + real status census
   // (b) statusBreakdown is a census, not a literal
   // --------------------------------------------------------------------------
 
-  it('reports the real CANCELLED count in .CANCELLED and the lowercase .cancelled mirror', async () => {
+  it('reports the real CANCELLED count without a lowercase mirror', async () => {
     seedMixedPopulation();
 
     const body = await getDashboard();
@@ -185,9 +182,8 @@ describe('GET /api/v1/dashboard — one population for wins + real status census
     // cannot pass this assertion.
     expect(body.data.totals.total).toBe(10);
     expect(breakdown.CANCELLED).toBe(2);
-    expect(breakdown.cancelled).toBe(2);
-    // Uppercase wire keys stay the documented shape; the mirror must not drift.
-    expect(breakdown.cancelled).toBe(breakdown.CANCELLED);
+    expect(Object.keys(breakdown)).toHaveLength(3);
+    expect(Object.prototype.hasOwnProperty.call(breakdown, 'cancelled')).toBe(false);
   });
 
   it('reconciles statusBreakdown with totals.total on the same response', async () => {

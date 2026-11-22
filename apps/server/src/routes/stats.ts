@@ -116,16 +116,10 @@ export function createStatsRouter(context: ServerContext): Router {
             completed: gameStats.completedGames,
           },
           statusBreakdown: {
-            // A literal census of games.status (DF-41): the CANCELLED arm is
-            // the real count, not a 0 literal, so the buckets reconcile with
-            // totals.total.
+            // Literal census: one key per status, reconciling with totals.total.
             ENDED: statusCensus.ENDED,
             IN_PROGRESS: statusCensus.IN_PROGRESS,
             CANCELLED: statusCensus.CANCELLED,
-            // DF-41 acceptance probe reads `.statusBreakdown.cancelled`
-            // (lowercase). The documented uppercase keys above are unchanged;
-            // this mirror carries the identical census count.
-            cancelled: statusCensus.CANCELLED,
           },
           wins: {
             mafia: aggregatedWins.mafiaWins,
