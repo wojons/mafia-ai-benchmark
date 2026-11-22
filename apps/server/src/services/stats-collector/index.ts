@@ -54,7 +54,7 @@ const dashboardCacheByRepo = new WeakMap<GameRepository, AggregateCacheEntry<Das
 
 function cachedAggregate<T>(repo: GameRepository, owner: StatsCollector, cache: WeakMap<GameRepository, AggregateCacheEntry<T>>, compute: () => T): T {
   if (repo.getDatabase().inTransaction) return compute();
-  let watermark: string | null = null;
+  let watermark: string | null;
   let dataVersion: number;
   let totalChanges: number;
   try {
