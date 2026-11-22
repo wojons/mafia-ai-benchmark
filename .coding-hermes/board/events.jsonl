@@ -923,3 +923,5 @@
 {"id":879,"timestamp":"2026-11-21 22:34:51","event_type":"task_updated","task_id":"QA-MAFIA-AI-BENCHMARK-25","actor":"cos-card-manager","detail":"{\"acceptance_criteria\":\"authored by COS card manager from the row measured evidence\"}","tick_number":null}
 {"id":880,"timestamp":"2026-11-21 22:34:51","event_type":"task_updated","task_id":"QA-MAFIA-AI-BENCHMARK-26","actor":"cos-card-manager","detail":"{\"acceptance_criteria\":\"authored by COS card manager from the row measured evidence\"}","tick_number":null}
 {"id":881,"timestamp":"2026-11-21 22:34:51","event_type":"task_updated","task_id":"DF-MAFIA-AI-BENCHMARK-054","actor":"cos-card-manager","detail":"{\"acceptance_criteria\":\"authored by COS card manager from the row evidence\",\"status\":\"pending\"}","tick_number":null}
+{"id":882,"timestamp":"2026-11-22 00:21:38","event_type":"task_completed","task_id":"DF-MAFIA-AI-BENCHMARK-054","actor":"foreman","detail":"{\"status\":\"complete\"}","tick_number":null}
+{"id":883,"timestamp":"2026-11-22 00:26:47","event_type":"task_completed","task_id":"QA-MAFIA-AI-BENCHMARK-24","actor":"foreman","detail":"{\"status\":\"complete\"}","tick_number":null}
