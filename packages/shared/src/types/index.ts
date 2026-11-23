@@ -389,5 +389,65 @@ export interface ModelStats {
   avgDuration: number;
 }
 
+// Run-record corpus types (MAF-LAYER-1)
+//
+// Wire shapes for the per-run JSONL corpus: every ENDED game is exported as
+// one JSONL file (data/runs/<gameId>.jsonl) whose line 1 is a RunRecord and
+// whose following lines are RunEventLine entries in game order, plus a runs
+// index (data/runs/index.jsonl) with one RunIndexEntry per exported game.
+// All fields use snake_case — these are on-disk artifact schemas, independent
+// of the camelCase REST API shapes they are derived from.
+
+/** One seat (player) summary in a run record / index entry. */
+export interface RunSeat {
+  /** 1-based seat number, derived from Player.joinOrder. */
+  seat: number;
+  player_id: string;
+  /** Model attribution as reported by the API; null when unattributable. */
+  provider: string | null;
+  model: string | null;
+  role: string;
+  /** Player was alive when the game ended. */
+  survived: boolean;
+  /** 1 when the player's side won, 0 when it lost, null when undecided. */
+  won: number | null;
+}
+
+/** Line 1 of a per-run JSONL file. */
+export interface RunRecord {
+  game_id: string;
+  /**
+   * Game start timestamp. Legacy games never record one, so the game's
+   * createdAt stands in (same fallback the server's legacy list serves).
+   */
+  started_at: string | null;
+  ended_at: string | null;
+  num_players: number;
+  /** 'MAFIA' | 'TOWN'; null when the game had no decided outcome. */
+  winner: string | null;
+  seats: RunSeat[];
+}
+
+/** One event line of a per-run JSONL file (fixed projection, game order). */
+export interface RunEventLine {
+  id: string;
+  type: string;
+  timestamp: string;
+  actor_id: string | null;
+  visibility: string | null;
+  data: Record<string, unknown> | null;
+  metadata: Record<string, unknown> | null;
+}
+
+/** One line of data/runs/index.jsonl. */
+export interface RunIndexEntry {
+  game_id: string;
+  /** Path of the run file relative to the index file's directory. */
+  path: string;
+  started_at: string | null;
+  winner: string | null;
+  seats: RunSeat[];
+}
+
 // Re-export GameEvent from events module for backward compatibility
 export type { GameEvent } from '../events/index.js';

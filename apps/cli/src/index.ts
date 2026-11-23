@@ -13,6 +13,7 @@ import { ListGamesCommand } from './commands/list-games.js';
 import { ConfigCommand } from './commands/config.js';
 import { StatsCommand } from './commands/stats.js';
 import { BenchmarkCommand } from './commands/benchmark.js';
+import { RunsCommand } from './commands/runs.js';
 import { InitCommand } from './commands/init.js';
 
 const program = new Command();
@@ -40,6 +41,7 @@ program.addCommand(new ListGamesCommand());
 program.addCommand(new ConfigCommand());
 program.addCommand(new StatsCommand());
 program.addCommand(new BenchmarkCommand());
+program.addCommand(new RunsCommand());
 
 // Default command - show help
 program.action(() => {
@@ -65,6 +67,8 @@ program.on('--help', () => {
   console.log('  $ mafiactl benchmark --quick    # Show accumulated benchmark report');
   console.log('  $ mafiactl benchmark --games 2 --models openai/gpt-4o-mini,openai/gpt-4o');
   console.log('  $ mafiactl benchmark export        # Export benchmark data');
+  console.log('  $ mafiactl runs export <game-id>   # Export one ENDED game as a JSONL run file');
+  console.log('  $ mafiactl runs backfill           # Export every ENDED game as run files');
   console.log('');
   console.log('🔗 Links:');
   console.log('  Docs:  https://github.com/wojons/mafia-ai-benchmark');
