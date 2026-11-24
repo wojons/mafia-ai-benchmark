@@ -449,5 +449,112 @@ export interface RunIndexEntry {
   seats: RunSeat[];
 }
 
+// Metrics corpus types (MAF-LAYER-2)
+//
+// Derived FROM the MAF-LAYER-1 run-record corpus only (never from the legacy
+// win-flag aggregates): the deriver reads run files and emits one metrics
+// file per run — <out>/<game_id>/metrics.jsonl, a single RunMetricsRecord
+// line. The aggregator consumes those metrics files and emits a per-model
+// table. All fields snake_case, matching the run-record corpus convention.
+
+/**
+ * One player's metrics for one run. Rate/count semantics are documented on
+ * the deriver (apps/cli/src/metrics-format.ts); null always means "not
+ * measurable for this player" — never fabricated as 0.
+ */
+export interface RunPlayerMetrics {
+  player_id: string;
+  provider: string | null;
+  model: string | null;
+  role: string;
+  /** 1 when the player's side won, 0 when it lost, null when undecided. */
+  won: number | null;
+  /** Player was alive when the game ended (copied from the run header). */
+  survived: boolean;
+  /** VOTE_CAST events attributed to this player. */
+  votes_cast: number;
+  /** Votes whose target ended the game with role MAFIA. */
+  votes_correct: number;
+  /** Votes whose target was lynched that day and was NOT mafia. */
+  voted_out_incorrect: number;
+  /**
+   * Fraction of this player's votes on days that ended in a lynch whose
+   * target was the lynched player. null when the player cast no vote on any
+   * lynch day (no majority position existed to follow).
+   */
+  majority_follow_rate: number | null;
+  /**
+   * Times the player's vote target changed between consecutive votes (each
+   * vote is a public statement carrying its own think/says). First vote
+   * never counts — there is no prior public position to flip from.
+   */
+  speech_flip_events: number;
+  /**
+   * Night kill actions by this player (MAFIA/VIGILANTE, actor-attributed)
+   * whose target was dead in the following MORNING_REVEAL. Night actions
+   * without actor_id (mafia group decisions) are not attributable and are
+   * skipped; kills with no following MORNING_REVEAL are uncounted.
+   */
+  night_kill_correct: number;
+  /**
+   * Fraction of measurable THINK/SAYS speak-turn pairs where the public
+   * statement diverges from the private thought (word-level Jaccard
+   * similarity below the deriver's threshold). null when the player has no
+   * measurable pairs.
+   */
+  think_says_lie_rate: number | null;
+  /** Always null: the run corpus records no per-player token usage. */
+  tokens: number | null;
+  /** Always null: the run corpus records no per-player cost data. */
+  cost_usd: number | null;
+  /** AGENT_SAYS_BROADCASTED events by this player (persuasion denominator). */
+  speeches: number;
+  /**
+   * Voters who voted the same target as this player's own vote on a day
+   * where this player also spoke, after one of this player's speeches
+   * (persuasion numerator).
+   */
+  followers_gained: number;
+  /** Measurable THINK/SAYS turn pairs (think_says_lie_rate denominator). */
+  think_says_pairs: number;
+  /** Pairs whose public statement diverged from the private thought. */
+  think_says_lies: number;
+}
+
+/** The single line of one run's metrics file (<out>/<game_id>/metrics.jsonl). */
+export interface RunMetricsRecord {
+  game_id: string;
+  per_player: RunPlayerMetrics[];
+}
+
+/** One measured aggregate value: the rate/mean, its sample size, marker. */
+export interface MetricValue {
+  /** null when no sample exists (never fabricated as 0). */
+  value: number | null;
+  /** Sample size backing the value (denominator of the pooled ratio). */
+  n: number;
+  /** true when n < 5 — the metric carries a low-sample marker. */
+  low_sample: boolean;
+}
+
+/** Per-model aggregate row (the aggregator's output unit). */
+export interface ModelAggregate {
+  model: string;
+  /** Runs (distinct game_ids) in which the model held at least one seat. */
+  games_played: number;
+  /** Fraction of decided seats that won; n = decided seats. */
+  win_rate: MetricValue;
+  /** Overall survived fraction; n = seats. */
+  survival: MetricValue;
+  /** Survival broken out per role; n = seats of that role. */
+  survival_by_role: Record<string, MetricValue>;
+  /** Pooled correct votes / votes cast; n = votes cast. */
+  vote_accuracy: MetricValue;
+  /** Pooled followers gained / speeches; n = speeches. */
+  persuasion: MetricValue;
+  /** Pooled diverged THINK/SAYS pairs / measurable pairs; n = pairs. */
+  lie_rate: MetricValue;
+}
+
 // Re-export GameEvent from events module for backward compatibility
 export type { GameEvent } from '../events/index.js';

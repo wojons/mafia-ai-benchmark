@@ -14,6 +14,7 @@ import { ConfigCommand } from './commands/config.js';
 import { StatsCommand } from './commands/stats.js';
 import { BenchmarkCommand } from './commands/benchmark.js';
 import { RunsCommand } from './commands/runs.js';
+import { MetricsCommand } from './commands/metrics.js';
 import { InitCommand } from './commands/init.js';
 
 const program = new Command();
@@ -42,6 +43,7 @@ program.addCommand(new ConfigCommand());
 program.addCommand(new StatsCommand());
 program.addCommand(new BenchmarkCommand());
 program.addCommand(new RunsCommand());
+program.addCommand(new MetricsCommand());
 
 // Default command - show help
 program.action(() => {
@@ -69,6 +71,8 @@ program.on('--help', () => {
   console.log('  $ mafiactl benchmark export        # Export benchmark data');
   console.log('  $ mafiactl runs export <game-id>   # Export one ENDED game as a JSONL run file');
   console.log('  $ mafiactl runs backfill           # Export every ENDED game as run files');
+  console.log('  $ mafiactl metrics derive data/runs  # Derive one metrics.jsonl per run (MAF-LAYER-2)');
+  console.log('  $ mafiactl metrics aggregate         # Print the per-model metrics table');
   console.log('');
   console.log('🔗 Links:');
   console.log('  Docs:  https://github.com/wojons/mafia-ai-benchmark');
