@@ -26,7 +26,7 @@ An advanced AI-powered Mafia game simulation that benchmarks different AI models
 - **☀️ Day Phase**: Discussion, voting, lynching
 - **📊 Event Sourcing**: Complete game audit trail with visibility levels
 - **💰 Cost Tracking**: Track API costs per game and player
-- **🧪 1375 Tests**: Comprehensive test coverage (420 shared, 715 server, 136 CLI, 104 web)
+- **🧪 1407 Tests**: Comprehensive test coverage (420 shared, 715 server, 168 CLI, 104 web)
 
 ## 🚀 Quick Start
 
@@ -330,7 +330,7 @@ pnpm install              # Install all dependencies
 pnpm build                # Build all packages (4/4)
 pnpm --filter @mafia/server test:run    # Server tests (715)
 pnpm --filter @mafia/shared test:run    # Shared tests (420)
-pnpm --filter @mafia/cli test:run       # CLI tests (136)
+pnpm --filter @mafia/cli test:run       # CLI tests (168)
 pnpm --filter @mafia/web test:run       # Web tests (104)
 ```
 
@@ -374,7 +374,7 @@ mafia-ai-benchmark/
 # All tests from root
 pnpm --filter @mafia/server test:run   # Server (715 tests)
 pnpm --filter @mafia/shared test:run   # Shared (420 tests)
-pnpm --filter @mafia/cli test:run      # CLI (136 tests)
+pnpm --filter @mafia/cli test:run      # CLI (168 tests)
 pnpm --filter @mafia/web test:run      # Web (104 tests)
 ```
 
@@ -399,8 +399,8 @@ server and pins `TEST_BASE_URL` to it (see `.github/workflows/ci.yml`).
 > the leaderboard. Use a scratch server, or make sure the stack's data is
 > disposable, before setting `TEST_BASE_URL`.
 
-**Test Coverage**: 1375 tests (420 shared, 715 server, 136 CLI, 104 web) —
-**1355 passing, 20 skipped**. Both skip groups are opt-in live-integration
+**Test Coverage**: 1407 tests (420 shared, 715 server, 168 CLI, 104 web) —
+**1387 passing, 20 skipped**. Both skip groups are opt-in live-integration
 suites, so they run only when a server is pinned: server `health.test.ts` (2) +
 `api-live-endpoints.test.ts` (17), and the CLI `benchmark.test.ts` real-game run
 gated on `MAFIA_LIVE_BENCHMARK=1` (1).
@@ -419,11 +419,11 @@ above are:
 ```
 shared  Tests  420 passed (420)
 server  Tests  696 passed | 19 skipped (715)
-cli     Tests  135 passed | 1 skipped (136)
+cli     Tests  167 passed | 1 skipped (168)
 web     Tests  104 passed (104)
 ```
 
-so the passing figure is `420 + 696 + 135 + 104 = 1355` out of `420 + 715 + 136 + 104 = 1375` collected, with the remaining 20 skipped.
+so the passing figure is `420 + 696 + 167 + 104 = 1387` out of `420 + 715 + 168 + 104 = 1407` collected, with the remaining 20 skipped.
 
 ### Game Events
 
@@ -504,7 +504,7 @@ MIT License - see LICENSE file
 
 ---
 
-**Status**: ✅ Production Ready | ✅ Fully Documented | ✅ 1355 of 1375 Tests passing (20 skipped; 420 shared, 715 server, 136 CLI, 104 web)
+**Status**: ✅ Production Ready | ✅ Fully Documented | ✅ 1387 of 1407 Tests passing (20 skipped; 420 shared, 715 server, 168 CLI, 104 web)
 
 **Quick Start**: See [QUICK_START.md](QUICK_START.md) for 5-minute setup guide!
 
