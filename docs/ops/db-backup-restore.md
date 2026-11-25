@@ -295,12 +295,34 @@ This is the real test: a restored database that a server can boot on.
       for (const t of ['games','token_usage','events'])
         console.log(t, db.prepare('SELECT count(*) c FROM \"'+t+'\"').get().c);"
 
-    # 4. tear the rehearsal down
+    # 4. tear the rehearsal down. Settle the stop before touching the volume:
+    #    `docker stop` can return while the daemon is still finishing the
+    #    auto-removed container, and the immediate `docker volume rm` then
+    #    fails with "volume is in use" and leaves the drill volume behind
+    #    (reproduced verbatim 2026-11-25: 4 of 6 cycles). Force-remove the
+    #    container (it is usually already gone via --rm; the error is fine)
+    #    and wait until it no longer lists, then drop the volume.
     docker stop mafia-restore-drill
+    docker rm -f mafia-restore-drill 2>/dev/null || true
+    until [ -z "$(docker ps -a -q --filter name=mafia-restore-drill)" ]; do sleep 1; done
     docker volume rm mafia_restore_drill
 
 The rehearsal volume is disposable: it shares nothing with
 `mafia-ai-benchmark_data`.
+
+Verified 2026-11-25 (newest published dump, manifest sha256
+`fc11dc55ac833022`): the block above, run verbatim including the settled
+teardown, exits 0 end to end, and a 6-cycle stress repeat of create → boot →
+stop → settled teardown is 6/6 clean, with the post-teardown listing
+
+    docker volume ls -q | grep '^mafia_restore_drill$'
+
+printing zero rows for the drill name. For contrast, the block as it stood
+before the settle (bare `docker stop` immediately followed by
+`docker volume rm`) failed 4 of those 6 cycles with
+`Error response from daemon: remove mafia_restore_drill: volume is in use - [id]`
+and left the drill volume behind — which is the failure mode the settle step
+exists to prevent.
 
 ### Stage 3 — in-place restore (disruptive, explicit operator decision)
 
