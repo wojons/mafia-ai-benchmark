@@ -26,6 +26,8 @@ import {
   createFakeLegacyGameAdapter,
   type FakeLegacyGameAdapter,
 } from './mocks';
+// MAF-L3-FM-001: the league reconcile reuses the benchmark policy backstop.
+import { STALE_RUN_MAX_MS } from '../../services/benchmark-runner.js';
 import type { GameEvent } from '@mafia/shared/events';
 import type { EventEmitter } from 'events';
 
@@ -648,6 +650,183 @@ describe('LeagueRunner', () => {
         'league to complete',
       );
       expect(runner.cancel(result.leagueId)).toBe(false);
+    });
+  });
+
+  // ==========================================================================
+  // Stranded-run reconciliation (MAF-L3-FM-001)
+  //
+  // Fixtures are written straight into the durable tables the reconcile
+  // reads (league_runs / league_games), exactly as a crash mid-loop would
+  // have left them: a non-terminal run row plus per-game rows that may or
+  // may not carry terminal evidence.
+  // ==========================================================================
+
+  describe('stranded-run reconciliation (MAF-L3-FM-001)', () => {
+    type FixtureConfig = {
+      models: string[];
+      numPlayers: number;
+      games: number;
+      budgetUsd: number;
+      seatSeed: number;
+    };
+
+    function insertStrandedRun(
+      id: string,
+      status: 'QUEUED' | 'RUNNING',
+      config: Partial<FixtureConfig> = {},
+      createdAt: number = Date.now(),
+    ): void {
+      const full: FixtureConfig = {
+        models: ['a', 'b'],
+        numPlayers: 5,
+        games: 1,
+        budgetUsd: 10,
+        seatSeed: 1,
+        ...config,
+      };
+      const now = Date.now();
+      repo.db
+        .prepare(
+          'INSERT INTO league_runs (id, config, status, created_at, updated_at) VALUES (?, ?, ?, ?, ?)',
+        )
+        .run(id, JSON.stringify(full), status, createdAt, now);
+    }
+
+    function insertLeagueGameRow(
+      leagueId: string,
+      gameId: string,
+      round: number,
+      fields: { winner?: string | null; completedAt?: number | null; error?: string | null } = {},
+    ): void {
+      // league_games.game_id is an FK to games(id) — seed the game first.
+      repo.seedGame({ id: gameId, status: fields.error ? 'FAILED' : 'ENDED' });
+      repo.db
+        .prepare(
+          `INSERT INTO league_games (game_id, league_run_id, round, seat_map, seat_seed, winner, completed_at, error)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+        )
+        .run(
+          gameId,
+          leagueId,
+          round,
+          JSON.stringify({ MAFIA: 'a', SHERIFF: 'b', DOCTOR: 'a', VILLAGER: 'b' }),
+          round,
+          fields.winner ?? null,
+          fields.completedAt ?? null,
+          fields.error ?? null,
+        );
+    }
+
+    function readRunRow(id: string): {
+      status: string;
+      completed_at: number | null;
+      summary: string | null;
+      error: string | null;
+    } {
+      return repo.db
+        .prepare('SELECT status, completed_at, summary, error FROM league_runs WHERE id = ?')
+        .get(id) as {
+        status: string;
+        completed_at: number | null;
+        summary: string | null;
+        error: string | null;
+      };
+    }
+
+    it('reconciles a stranded RUNNING league whose durable game rows prove it terminal', () => {
+      insertStrandedRun('lg-stranded', 'RUNNING', { games: 1 });
+      insertLeagueGameRow('lg-stranded', 'game-done-1', 1, {
+        winner: 'MAFIA',
+        completedAt: Date.now(),
+      });
+
+      const summary = runner.reconcileStrandedRuns();
+      expect(summary).toEqual({ inspected: 1, reconciled: 1, leftActive: 0, staleFailed: 0 });
+
+      const row = readRunRow('lg-stranded');
+      expect(row.status).toBe('COMPLETED');
+      expect(row.completed_at).not.toBeNull();
+      expect(row.error).toBeNull();
+      // Summary is the same shape the live loop's terminalize() writes, so
+      // the recovered run is self-describing like a live-completed one.
+      expect(JSON.parse(row.summary ?? '{}')).toMatchObject({
+        totalGames: 1,
+        completedGames: 1,
+        failedGames: 0,
+        roundsScheduled: 1,
+      });
+      // The recovered run is served through the normal read path.
+      const status = runner.getStatus('lg-stranded')!;
+      expect(status.status).toBe('COMPLETED');
+      expect(runner.getDetail('lg-stranded')!.games[0].winner).toBe('MAFIA');
+    });
+
+    it('reconciles a stranded RUNNING league to FAILED when a game row carries the error', () => {
+      insertStrandedRun('lg-errored', 'RUNNING', { games: 2 });
+      insertLeagueGameRow('lg-errored', 'game-ok-1', 1, { winner: 'TOWN', completedAt: Date.now() });
+      insertLeagueGameRow('lg-errored', 'game-bad-2', 2, { error: 'bridge died mid-game' });
+
+      const summary = runner.reconcileStrandedRuns();
+      expect(summary.reconciled).toBe(1);
+
+      const row = readRunRow('lg-errored');
+      expect(row.status).toBe('FAILED');
+      expect(row.error).toContain('game-bad-2: bridge died mid-game');
+      expect(row.completed_at).not.toBeNull();
+      expect(JSON.parse(row.summary ?? '{}')).toMatchObject({
+        totalGames: 2,
+        completedGames: 1,
+        failedGames: 1,
+      });
+    });
+
+    it('preserves a RUNNING league with no durable terminal evidence (genuinely active shape)', () => {
+      // Mid-flight shape: the loop launched round 1 of 2 and the game row
+      // has neither completed_at nor error — inconclusive, left untouched.
+      insertStrandedRun('lg-active', 'RUNNING', { games: 2 });
+      insertLeagueGameRow('lg-active', 'game-inflight-1', 1);
+
+      // QUEUED with zero game rows is equally non-conclusive.
+      insertStrandedRun('lg-queued', 'QUEUED', { games: 1 });
+
+      const summary = runner.reconcileStrandedRuns();
+      expect(summary).toEqual({ inspected: 2, reconciled: 0, leftActive: 2, staleFailed: 0 });
+
+      expect(readRunRow('lg-active').status).toBe('RUNNING');
+      expect(readRunRow('lg-queued').status).toBe('QUEUED');
+      expect(readRunRow('lg-active').completed_at).toBeNull();
+    });
+
+    it('is idempotent: a second pass finds nothing and leaves the reconciled row untouched', () => {
+      insertStrandedRun('lg-once', 'RUNNING', { games: 1 });
+      insertLeagueGameRow('lg-once', 'game-once-1', 1, { winner: 'MAFIA', completedAt: Date.now() });
+
+      const first = runner.reconcileStrandedRuns();
+      expect(first.reconciled).toBe(1);
+
+      const before = readRunRow('lg-once');
+      const second = runner.reconcileStrandedRuns();
+      expect(second).toEqual({ inspected: 0, reconciled: 0, leftActive: 0, staleFailed: 0 });
+      expect(readRunRow('lg-once')).toEqual(before);
+    });
+
+    it('sweeps a non-terminal league older than STALE_RUN_MAX_MS to FAILED (same backstop as benchmark)', () => {
+      insertStrandedRun(
+        'lg-stale',
+        'RUNNING',
+        { games: 2 },
+        Date.now() - (STALE_RUN_MAX_MS + 60_000),
+      );
+      insertLeagueGameRow('lg-stale', 'game-stale-1', 1, { winner: 'MAFIA', completedAt: Date.now() });
+
+      const summary = runner.reconcileStrandedRuns();
+      expect(summary).toEqual({ inspected: 1, reconciled: 0, leftActive: 0, staleFailed: 1 });
+
+      const row = readRunRow('lg-stale');
+      expect(row.status).toBe('FAILED');
+      expect(row.error).toContain('abandoned');
+      expect(row.completed_at).not.toBeNull();
     });
   });
 });

@@ -40,6 +40,12 @@ import { v4 as uuidv4 } from 'uuid';
 import type { EventBus } from './event-bus.js';
 import type { GameRepository } from '../db/repository.js';
 import type { LegacyGameAdapter } from './legacy-game-adapter.js';
+// MAF-L3-FM-001: the league reconcile shares the benchmark reconcile's policy
+// constant and summary shape on purpose — one stranded-run policy, one
+// startup log vocabulary. (benchmark-runner imports nothing from here, so
+// this is not a cycle.)
+import { STALE_RUN_MAX_MS } from './benchmark-runner.js';
+import type { ReconcileSummary } from './benchmark-runner.js';
 
 /** Status vocabulary for a league run. BUDGET_CAPPED is league-specific. */
 export type LeagueRunStatusValue =
@@ -387,6 +393,176 @@ export class LeagueRunner {
       .run(now, now, leagueId);
     console.log(`[LeagueRunner] League ${leagueId} cancelled`);
     return true;
+  }
+
+  /**
+   * Startup reconciliation for league runs stranded non-terminal by a
+   * previous shutdown (MAF-L3-FM-001).
+   *
+   * A league's loop lives on in-process event subscriptions and awaited game
+   * promises, so a server crash mid-loop leaves the league_runs row RUNNING
+   * (or QUEUED) forever — nothing is left alive to drive it terminal. The
+   * recovery here mirrors BenchmarkRunner.reconcileStrandedRuns' durable-
+   * DB-evidence policy: process state (subscriptions, pending promises,
+   * timers) died with the old process and proves nothing, so ONLY persisted
+   * rows are read.
+   *
+   * A non-terminal run (QUEUED/RUNNING) is reconciled ONLY when the durable
+   * evidence proves it terminal:
+   *   1. Every league_games row has completed_at or error AND the run's
+   *      persisted config.games rounds are all present — the loop provably
+   *      played its full schedule to game-end, so the run is terminal too:
+   *        - any game error -> FAILED (error + completed_at persisted),
+   *        - otherwise      -> COMPLETED (summary + completed_at persisted).
+   *   2. Any other shape is NOT conclusive and the run is left untouched —
+   *      a game row without completed_at/error may genuinely still be in
+   *      flight on a live loop, and fewer games than the schedule may mean
+   *      the loop is between rounds. This is deliberately the same
+   *      conservative posture as the benchmark reconcile (a crashed
+   *      between-rounds league is the documented limitation there too);
+   *      runs past STALE_RUN_MAX_MS are swept to FAILED by the same
+   *      backstop, since only the dead process could ever have given their
+   *      missing rounds terminal evidence.
+   *
+   * IDEMPOTENT: the update targets only the stranded status values, so a
+   * second pass finds nothing to do; completed_at/summary/error are
+   * recomputed from the same durable rows on every pass.
+   */
+  reconcileStrandedRuns(): ReconcileSummary {
+    const rows = this.db
+      .prepare(
+        `SELECT id, config, created_at FROM league_runs
+          WHERE status IN ('QUEUED', 'RUNNING')
+          ORDER BY created_at ASC`,
+      )
+      .all() as Array<{ id: string; config: string; created_at: number }>;
+
+    const summary: ReconcileSummary = {
+      inspected: rows.length,
+      reconciled: 0,
+      leftActive: 0,
+      staleFailed: 0,
+    };
+
+    const now = Date.now();
+
+    for (const row of rows) {
+      const games = this.db
+        .prepare(
+          'SELECT game_id, completed_at, error FROM league_games WHERE league_run_id = ?',
+        )
+        .all(row.id) as Array<{ game_id: string; completed_at: number | null; error: string | null }>;
+
+      let config: NormalizedLeagueConfig | null = null;
+      try {
+        config = JSON.parse(row.config) as NormalizedLeagueConfig;
+      } catch {
+        // A corrupt config cannot prove the schedule was ever satisfied —
+        // same posture as any other non-conclusive shape: leave it.
+        config = null;
+      }
+      const terminal = (g: { completed_at: number | null; error: string | null }) =>
+        g.completed_at !== null || g.error !== null;
+      const provenTerminal =
+        config !== null &&
+        games.length > 0 &&
+        games.length === config.games &&
+        games.every(terminal);
+
+      if (provenTerminal) {
+        this.reconcileTerminalLeagueRun(row.id, config!, games);
+        summary.reconciled++;
+      } else if (now - row.created_at >= STALE_RUN_MAX_MS) {
+        // Stale-run sweep, same policy backstop as the benchmark reconcile:
+        // age is measured from the run's persisted created_at, the only
+        // durable timestamp a stranded run carries.
+        this.db
+          .prepare(
+            `UPDATE league_runs
+               SET status = 'FAILED', error = ?, completed_at = ?, updated_at = ?
+             WHERE id = ? AND status IN ('QUEUED', 'RUNNING')`,
+          )
+          .run(
+            `Run abandoned: still non-terminal with no completed league-game evidence after ` +
+              `${Math.floor(STALE_RUN_MAX_MS / 86_400_000)} days (swept by startup reconciliation)`,
+            now,
+            now,
+            row.id,
+          );
+        summary.staleFailed++;
+        console.log(
+          `[LeagueRunner] League ${row.id} marked FAILED: no terminal league-game evidence after ` +
+            `${Math.floor(STALE_RUN_MAX_MS / 86_400_000)} days (stale-run sweep)`,
+        );
+      } else {
+        summary.leftActive++;
+      }
+    }
+
+    if (summary.reconciled > 0 || summary.staleFailed > 0) {
+      console.log(
+        `[LeagueRunner] Reconciled ${summary.reconciled} stranded league run(s) after restart ` +
+          `(${summary.staleFailed} stale FAILED, ${summary.leftActive} left active, ` +
+          `${summary.inspected} inspected)`,
+      );
+    }
+
+    return summary;
+  }
+
+  /**
+   * Reconcile one league run to a terminal status from its game rows.
+   * Caller has proven the run terminal (see reconcileStrandedRuns); this
+   * derives WHICH terminal status and persists it. Evidence-derived states:
+   * FAILED when any game row carries an error, COMPLETED otherwise.
+   * BUDGET_CAPPED is deliberately NOT derivable here — the cap is the
+   * loop's own decision (the gate refusing a NEW game), and durable rows
+   * cannot distinguish "cap fired" from "schedule finished"; a stranded
+   * capped run falls to the stale sweep instead.
+   */
+  private reconcileTerminalLeagueRun(
+    leagueId: string,
+    config: NormalizedLeagueConfig,
+    games: Array<{ game_id: string; completed_at: number | null; error: string | null }>,
+  ): void {
+    const now = Date.now();
+    const failedGames = games.filter((g) => g.error !== null);
+    const completedGames = games.filter((g) => g.completed_at !== null).length;
+    const errored = failedGames.length > 0;
+    const status: LeagueRunStatusValue = errored ? 'FAILED' : 'COMPLETED';
+    const error = errored
+      ? failedGames.map((g) => `game ${g.game_id}: ${g.error}`).join('; ')
+      : null;
+    const spendUsd = this.leagueSpend(leagueId);
+
+    // Summary persisted from the same evidence getDetail() reports, in the
+    // same shape the live loop's terminalize() writes, so a
+    // restart-recovered league is self-describing exactly like a
+    // live-completed one (launchFailures: 0 — a launch failure always
+    // drives the run FAILED in-process and can never strand terminal).
+    const summary: Record<string, unknown> = {
+      totalGames: games.length,
+      completedGames,
+      failedGames: failedGames.length,
+      launchFailures: 0,
+      roundsScheduled: config.games,
+      spendUsd,
+      budgetUsd: config.budgetUsd,
+      capped: false,
+    };
+
+    this.db
+      .prepare(
+        `UPDATE league_runs
+           SET status = ?, error = ?, completed_at = ?, summary = ?, updated_at = ?
+         WHERE id = ? AND status IN ('QUEUED', 'RUNNING')`,
+      )
+      .run(status, error, now, JSON.stringify(summary), now, leagueId);
+
+    console.log(
+      `[LeagueRunner] League ${leagueId} reconciled to ${status}: ${completedGames} completed, ` +
+        `${failedGames.length} failed, spend $${spendUsd.toFixed(6)} of $${config.budgetUsd}`,
+    );
   }
 
   // ==================== League loop ====================
