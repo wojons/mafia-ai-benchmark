@@ -1,0 +1,13 @@
+{
+  "scheduler_tick_id": "mafia-ai-benchmark-foreman-2026-11-25-07-38-30",
+  "created_at_utc": "2026-11-25T07:45:00Z",
+  "wave_budget": 3,
+  "base_sha": "318d446",
+  "workers": [
+    {"task_id": "MAF-LAYER-4", "priority": "P2", "worktree": "/home/kara/worktrees/mafia-ai-benchmark-MAF-LAYER-4", "branch": "wt/MAF-LAYER-4", "model": "glm-5.3-flash", "provider": "opencode-go", "brief": "/tmp/mafia-brief-MAF-LAYER-4.md"},
+    {"task_id": "PERF-MAFIA-009", "priority": "P2", "worktree": "/home/kara/worktrees/mafia-ai-benchmark-PERF-MAFIA-009", "branch": "wt/PERF-MAFIA-009", "model": "glm-5.3-flash", "provider": "opencode-go", "brief": "/tmp/mafia-brief-PERF-MAFIA-009.md"},
+    {"task_id": "DOC-024", "priority": "P2", "worktree": "/home/kara/worktrees/mafia-ai-benchmark-DOC-024", "branch": "wt/DOC-024", "model": "glm-5.3-flash", "provider": "opencode-go", "brief": "/tmp/mafia-brief-DOC-024.md"}
+  ],
+  "independence": "MAF-LAYER-4 adds a new site/ tree + scripts generator; PERF-MAFIA-009 touches apps/server stats-collector watermark; DOC-024 is README/QUICK_START docs only. No shared files; no depends_on edges among them.",
+  "deferred": "HARNESS rows QA-22/23/25/26 + QA-27 and MAF-INIT-003 are blocked on a fleet-level bunker-qa.sh fix (owner-gated, outside this repo); MAF-INIT-002 waits on MAF-LAYER-4."
+}
