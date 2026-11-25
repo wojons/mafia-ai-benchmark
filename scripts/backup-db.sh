@@ -35,6 +35,7 @@
 #   MAFIA_DB_BACKUP_RETAIN=30 scripts/backup-db.sh
 #   MAFIA_DB_BACKUP_METHOD=trio scripts/backup-db.sh   # force the fallback arm
 #   MAFIA_DB_BACKUP_DIR=/some/dir scripts/backup-db.sh # alternate destination
+#   MAFIA_DB_BACKUP_WAIT_S=0 ...                       # no wait for a down container
 #
 # EXIT CODES
 #   0  published and verified dump (manifest written)
@@ -102,8 +103,25 @@ command -v jq        >/dev/null 2>&1 || fail "jq not found in PATH (needed for t
 command -v mktemp    >/dev/null 2>&1 || fail "mktemp not found in PATH" 2
 command -v sha256sum >/dev/null 2>&1 || fail "sha256sum not found in PATH" 2
 
-[[ "$(docker inspect -f '{{.State.Running}}' "$CONTAINER" 2>/dev/null || echo false)" == "true" ]] \
-  || fail "container '$CONTAINER' is not running — refusing to fake a backup" 2
+# The 04:30 daily run can land inside a deploy-refresh recreate window: the
+# server container is DOWN for seconds-to-minutes while compose replaces it
+# (observed 2026-11-25 09:30Z: instant refusal while the recreate was in
+# flight, and no backup that morning). A hard-dying container stays dead, so
+# wait a bounded window for it to come back before refusing; both ends stay
+# fail-closed. Override with MAFIA_DB_BACKUP_WAIT_S (0 = old behavior).
+BACKUP_WAIT_S="${MAFIA_DB_BACKUP_WAIT_S:-300}"
+container_running() {
+  [[ "$(docker inspect -f '{{.State.Running}}' "$CONTAINER" 2>/dev/null || echo false)" == "true" ]]
+}
+if ! container_running; then
+  log "container '$CONTAINER' not running — waiting up to ${BACKUP_WAIT_S}s for the deploy-refresh recreate to settle"
+  waited=0
+  while ! container_running && (( waited < BACKUP_WAIT_S )); do
+    sleep 30; waited=$((waited + 30))
+  done
+  container_running \
+    || fail "container '$CONTAINER' is not running after ${waited}s — refusing to fake a backup" 2
+fi
 
 mkdir -p "$DEST_DIR" || fail "cannot create destination '$DEST_DIR'" 2
 [[ -w "$DEST_DIR" ]] || fail "destination '$DEST_DIR' is not writable" 2
