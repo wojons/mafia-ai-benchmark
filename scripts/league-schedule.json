@@ -1,0 +1,9 @@
+{
+  "models": ["openai/qwen3.6-35b-fast", "openai/gpt-4o-mini"],
+  "numPlayers": 10,
+  "gamesPerRun": 2,
+  "budgetUsdPerRun": 0.80,
+  "dailyCapUsd": 5.00,
+  "pollIntervalS": 30,
+  "pollTimeoutS": 5400
+}
