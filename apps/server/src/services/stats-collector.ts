@@ -14,6 +14,12 @@ export {
   GameStats,
   PlayerStatsSummary,
   AgentStats,
+  /**
+   * PERF-MAFIA-009: the bounded data fingerprint, exported for the
+   * regression tests that pin its invalidation semantics and for the
+   * isolated cost benchmark against a copy of the live corpus.
+   */
+  computeReportWatermark,
   getAggregatedWins,
   getGameWinnerFromEvents,
   computeDurationFromEvents,

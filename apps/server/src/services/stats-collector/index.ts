@@ -89,10 +89,20 @@ interface ReportCacheEntry {
   /**
    * PRAGMA data_version snapshot taken when the report was cached. It moves
    * on any cross-connection commit (other processes / connections), while
-   * same-connection writes are caught by the per-table watermark itself.
+   * same-connection writes are caught by totalChanges below.
    * Checking both is cheap and closes the foreign-writer hole.
    */
   dataVersion: number;
+  /**
+   * PERF-MAFIA-009: total_changes() snapshot taken when the report was
+   * cached. The bounded watermark (per-table COUNT + MAX(rowid)) cannot see
+   * an in-place UPDATE on this connection (status/winner/config-mock flips
+   * change no counts or rowids); total_changes() is monotonic per
+   * connection and moves on every INSERT/UPDATE/DELETE, so the report cache
+   * check-and-store below pins it — the same guard cachedAggregate has
+   * always applied.
+   */
+  totalChanges: number;
 }
 
 /**
@@ -115,70 +125,60 @@ const reportCacheByRepo = new WeakMap<GameRepository, ReportCacheEntry>();
 
 /**
  * The data fingerprint ALL report inputs (getGameStats / getModelComparison /
- * getAgentStats / getFailedGames / recommendations) are derived from:
- *   - games: count, per-status count, winner/ended_at/duration/day_count/
- *     total_turns/total_events/total_tokens/total_cost sums, and the sum of
- *     config+status lengths — the length sums catch IN-PLACE mutations the
- *     per-table rowid/timestamp watermark cannot see (e.g. the write-time
- *     mock/degenerate markers flipped later via UPDATE games SET config =
- *     json_set(config, '$.mock', 1): same rows, same statuses, different
- *     bytes),
- *   - players: count + provider/model/alive/mafia/won/tokens_used sums
- *     (models.ts win attribution reads these columns),
- *   - events: count + phase length/type length/turn/day sums (winner-from-
- *     events and degenerate classification read events),
- *   - token_usage / api_calls / agent_sessions: count + max(rowid, timestamp)
- *     + token/cost/latency sums,
- *   - player_model_assignments (legacy model path).
- * Stringified so equality is one === compare. A single query keeps the
- * cache-key cost (~1ms even at 4K games) far below the ~1.3s it guards.
- * Any read failure returns null: the caller then skips the cache entirely
- * (never serving stale data on a broken fingerprint).
+ * getAgentStats / getFailedGames / recommendations) are derived from.
+ *
+ * PERF-MAFIA-009 — the fingerprint is BOUNDED: per-table COUNT(*) plus
+ * MAX(rowid) over the seven source tables, one query, index-only scans
+ * (COUNT(*) walks the smallest secondary index; MAX(rowid) is a rowid
+ * B-tree seek). The previous fingerprint summed LENGTH()/column values
+ * across every row of every table, which cost 250-320 ms of synchronous
+ * SQL per request at the live corpus (200,649 events / 19,310 players /
+ * 25,710 token_usage rows) — paid on EVERY cachedAggregate hit, i.e. on
+ * every /api/v1/stats and /api/v1/dashboard request, with the endpoint
+ * bar at 0.300 s. The bounded fingerprint measures ≤ 30 ms at the same
+ * corpus (measured in isolation against a copy of the live database).
+ *
+ * Semantics preserved:
+ *   - any NEW row in any covered table raises that table's MAX(rowid)
+ *     and its COUNT(*) — the fingerprint changes and every cache keyed
+ *     on it invalidates;
+ *   - any DELETE changes the COUNT(*) of the table it touched;
+ *   - in-place UPDATEs (games.status/winner/config-mock flips, players.won)
+ *     change neither counts nor rowids — they are caught at the CACHE
+ *     layer instead: PRAGMA data_version moves on any other connection's
+ *     commit, and total_changes() (monotonic per connection, checked by
+ *     BOTH cachedAggregate and — since this change — the report cache)
+ *     moves on every same-connection INSERT/UPDATE/DELETE. The report
+ *     cache's in-place-update tests in report-cache.test.ts pin this.
+ *   - MAX(timestamp) is deliberately NOT fingerprinted: no timestamp
+ *     column carries an index, so MAX(timestamp) is a full payload scan —
+ *     the exact cost this fix removes — and it adds no new-row coverage
+ *     beyond COUNT + MAX(rowid).
+ *
+ * Stringified so equality is one === compare. A single bounded query
+ * keeps the cache-key cost an order of magnitude under the aggregates it
+ * guards. Any read failure returns null: the caller then skips the cache
+ * entirely (never serving stale data on a broken fingerprint).
  */
-function computeReportWatermark(repo: GameRepository): string | null {
+export function computeReportWatermark(repo: GameRepository): string | null {
   try {
     const db = repo.getDatabase();
     const row = db.prepare(`
       SELECT
         (SELECT COUNT(*) FROM games) AS gamesCount,
-        (SELECT COUNT(*) FROM games WHERE status = 'IN_PROGRESS') AS gamesActive,
-        (SELECT COUNT(*) FROM games WHERE status = 'ENDED') AS gamesEnded,
-        (SELECT COUNT(*) FROM games WHERE status NOT IN ('IN_PROGRESS','ENDED')) AS gamesFailed,
-        (SELECT COUNT(*) FROM games WHERE winner IS NOT NULL) AS gamesWcol,
-        (SELECT COALESCE(SUM(ended_at IS NULL), 0) FROM games) AS gamesEndedNull,
-        (SELECT COALESCE(SUM(duration), 0) FROM games) AS gamesDurationSum,
-        (SELECT COALESCE(SUM(day_count), 0) FROM games) AS gamesDaySum,
-        (SELECT COALESCE(SUM(total_turns), 0) FROM games) AS gamesTurnsSum,
-        (SELECT COALESCE(SUM(total_events), 0) FROM games) AS gamesEventsSum,
-        (SELECT COALESCE(SUM(total_tokens), 0) FROM games) AS gamesTokensSum,
-        (SELECT COALESCE(SUM(total_cost), 0) FROM games) AS gamesCostSum,
-        (SELECT COALESCE(SUM(LENGTH(config) + LENGTH(status)), 0) FROM games) AS gamesCfgLen,
+        (SELECT COALESCE(MAX(rowid), 0) FROM games) AS gamesMaxRowid,
         (SELECT COUNT(*) FROM players) AS playersCount,
-        (SELECT COALESCE(SUM(LENGTH(COALESCE(provider, '')) + LENGTH(COALESCE(model, ''))), 0) FROM players) AS playersTextLen,
-        (SELECT COALESCE(SUM(is_alive), 0) FROM players) AS playersAliveSum,
-        (SELECT COALESCE(SUM(is_mafia), 0) FROM players) AS playersMafiaSum,
-        (SELECT COALESCE(SUM(COALESCE(won, -1)), 0) FROM players) AS playersWonSum,
-        (SELECT COALESCE(SUM(tokens_used), 0) FROM players) AS playersTokensSum,
+        (SELECT COALESCE(MAX(rowid), 0) FROM players) AS playersMaxRowid,
         (SELECT COUNT(*) FROM events) AS eventsCount,
-        (SELECT COALESCE(SUM(LENGTH(COALESCE(type, ''))), 0) FROM events) AS eventsTypeLen,
-        (SELECT COALESCE(SUM(LENGTH(COALESCE(phase, ''))), 0) FROM events) AS eventsPhaseLen,
-        (SELECT COALESCE(SUM(COALESCE(turn_number, -1)), 0) FROM events) AS eventsTurnSum,
-        (SELECT COALESCE(SUM(COALESCE(day_number, -1)), 0) FROM events) AS eventsDaySum,
+        (SELECT COALESCE(MAX(rowid), 0) FROM events) AS eventsMaxRowid,
         (SELECT COUNT(*) FROM token_usage) AS tuCount,
         (SELECT COALESCE(MAX(rowid), 0) FROM token_usage) AS tuMaxRowid,
-        (SELECT COALESCE(MAX(timestamp), 0) FROM token_usage) AS tuMaxTs,
-        (SELECT COALESCE(SUM(total_tokens), 0) FROM token_usage) AS tuTokensSum,
-        (SELECT COALESCE(SUM(cost), 0) FROM token_usage) AS tuCostSum,
         (SELECT COUNT(*) FROM api_calls) AS acCount,
         (SELECT COALESCE(MAX(rowid), 0) FROM api_calls) AS acMaxRowid,
-        (SELECT COALESCE(MAX(timestamp), 0) FROM api_calls) AS acMaxTs,
-        (SELECT COALESCE(SUM(latency), 0) FROM api_calls) AS acLatencySum,
         (SELECT COUNT(*) FROM agent_sessions) AS sessCount,
         (SELECT COALESCE(MAX(rowid), 0) FROM agent_sessions) AS sessMaxRowid,
-        (SELECT COALESCE(MAX(timestamp), 0) FROM agent_sessions) AS sessMaxTs,
-        (SELECT COALESCE(SUM(tokens_used), 0) FROM agent_sessions) AS sessTokensSum,
-        (SELECT COALESCE(SUM(cost), 0) FROM agent_sessions) AS sessCostSum,
-        (SELECT COUNT(*) FROM player_model_assignments) AS pmaCount
+        (SELECT COUNT(*) FROM player_model_assignments) AS pmaCount,
+        (SELECT COALESCE(MAX(rowid), 0) FROM player_model_assignments) AS pmaMaxRowid
     `).get() as Record<string, unknown> | undefined;
     if (!row) return null;
     return JSON.stringify(row);
@@ -189,34 +189,65 @@ function computeReportWatermark(repo: GameRepository): string | null {
   }
 }
 
-/** Cached-report lookup; null = compute fresh. */
+/**
+ * Snapshot the two write guards that gate report-cache reuse (PRAGMA
+ * data_version + total_changes()). Null = either read failed: the caller
+ * must not reuse or populate the cache.
+ */
+function snapshotReportCacheGuards(
+  repo: GameRepository,
+): { dataVersion: number; totalChanges: number } | null {
+  try {
+    const db = repo.getDatabase();
+    return {
+      dataVersion: db.pragma('data_version', { simple: true }) as number,
+      totalChanges: (db.prepare('SELECT total_changes() AS value').get() as { value: number }).value,
+    };
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Cached-report lookup; null = compute fresh.
+ *
+ * PERF-MAFIA-009: both write guards are checked here — PRAGMA data_version
+ * (commits by OTHER connections) and total_changes() (rows modified by THIS
+ * connection, which data_version does not move). Before this change the
+ * same-connection leg lived inside the wide watermark's LENGTH() sums; the
+ * bounded fingerprint delegates it to this monotonic counter instead —
+ * the same guard cachedAggregate has always applied.
+ */
 function getCachedReport(
   repo: GameRepository,
 ): ReportCacheEntry | null {
-  // data_version bumps on every transaction COMMITTED BY ANOTHER CONNECTION;
-  // it does not move for same-connection writes. Skip the cache on any
-  // cross-connection commit since the last report — covers foreign writers
-  // without paying a checksum on every hit.
   try {
-    const version = repo.getDatabase().pragma('data_version', { simple: true }) as number;
+    const guards = snapshotReportCacheGuards(repo);
+    if (!guards) return null;
     const entry = reportCacheByRepo.get(repo);
     if (!entry) return null;
-    if (entry.dataVersion !== version) return null;
+    if (entry.dataVersion !== guards.dataVersion) return null;
+    if (entry.totalChanges !== guards.totalChanges) return null;
     return entry;
   } catch {
     return null;
   }
 }
 
-/** Store a freshly computed full report under its watermark + data_version. */
+/** Store a freshly computed full report under its watermark + write guards. */
 function storeCachedReport(
   repo: GameRepository,
   watermark: string,
   report: Record<string, unknown>,
+  guards: { dataVersion: number; totalChanges: number },
 ): void {
   try {
-    const version = repo.getDatabase().pragma('data_version', { simple: true }) as number;
-    reportCacheByRepo.set(repo, { watermark, report, dataVersion: version });
+    reportCacheByRepo.set(repo, {
+      watermark,
+      report,
+      dataVersion: guards.dataVersion,
+      totalChanges: guards.totalChanges,
+    });
   } catch {
     // best-effort: cache miss next time
   }
@@ -1352,19 +1383,28 @@ export class StatsCollector {
     // missed, so the freshly built report can be stored under the exact
     // data it was computed from.
     let pendingWatermark: string | null = null;
+    let pendingGuards: { dataVersion: number; totalChanges: number } | null = null;
     if (!gameId) {
       const cached = getCachedReport(this.gameRepository);
       if (cached) {
         const currentWatermark = computeReportWatermark(this.gameRepository);
         if (currentWatermark !== null && currentWatermark === cached.watermark) {
-          // Identical data fingerprint and no foreign commit since cache
-          // time: identical input — identical report. Serve instantly.
+          // Identical data fingerprint and no write (same- or
+          // cross-connection) since cache time: identical input — identical
+          // report. Serve instantly.
           return cached.report;
         }
       }
-      // No usable cache entry (foreign write, watermark change, or the
+      // No usable cache entry (write guard moved, watermark change, or the
       // fingerprint itself failed).
       pendingWatermark = computeReportWatermark(this.gameRepository);
+      if (pendingWatermark !== null) {
+        // Snapshot the write guards AFTER the fingerprint read: anything
+        // that writes before this snapshot is already reflected in the
+        // report built below; the store-time re-check then refuses to
+        // memoize a report whose inputs changed mid-build.
+        pendingGuards = snapshotReportCacheGuards(this.gameRepository);
+      }
     }
 
     try {
@@ -1485,12 +1525,22 @@ export class StatsCollector {
         }
       }
       
-      // PERF-MAFIA-2: store the built report under the watermark captured
-      // BEFORE building. If the data changed mid-build the stored
-      // fingerprint no longer matches, so the next call recomputes —
-      // fail-safe by construction, never serves stale data.
-      if (!gameId && pendingWatermark !== null) {
-        storeCachedReport(this.gameRepository, pendingWatermark, report);
+      // PERF-MAFIA-2 / PERF-MAFIA-009: store the built report under the
+      // watermark captured BEFORE building — and only if NEITHER write
+      // guard moved while the report was being built (a same-connection
+      // write or a foreign commit mid-build means the report no longer
+      // matches the snapshot it would be pinned to, so the next call
+      // recomputes instead). Fail-safe by construction, never serves
+      // stale data.
+      if (!gameId && pendingWatermark !== null && pendingGuards !== null) {
+        const current = snapshotReportCacheGuards(this.gameRepository);
+        if (
+          current !== null &&
+          current.dataVersion === pendingGuards.dataVersion &&
+          current.totalChanges === pendingGuards.totalChanges
+        ) {
+          storeCachedReport(this.gameRepository, pendingWatermark, report, current);
+        }
       }
       return report;
     } catch (error) {
