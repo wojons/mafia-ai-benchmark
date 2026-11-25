@@ -1,0 +1,17 @@
+{
+  "scheduler_tick_id": "mafia-ai-benchmark-foreman-2026-11-25-09-40-20",
+  "wave_budget": 1,
+  "workers": [
+    {
+      "task_id": "DF-MAFIA-AI-BENCHMARK-22-R3",
+      "worktree": "/home/kara/worktrees/mafia-ai-benchmark-DF-MAFIA-AI-BENCHMARK-22-R3",
+      "branch": "wt/DF-MAFIA-AI-BENCHMARK-22-R3",
+      "base_sha": "facf446",
+      "model": "glm-5.3-flash",
+      "provider": "opencode-go",
+      "brief": "/tmp/mafia-brief-DF-MAFIA-AI-BENCHMARK-22-R3.md",
+      "board": "/home/kara/wojons/mafia-ai-benchmark/.coding-hermes/board/tasks.jsonl"
+    }
+  ],
+  "dispatched_at": "2026-11-25T09:45:00Z"
+}
