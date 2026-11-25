@@ -140,10 +140,14 @@ export function createStatsRouter(context: ServerContext): Router {
   //                      cannot drift apart or be read as different quantities.
   router.get('/api/v1/analytics', (req: Request, res: Response) => {
     try {
-      const gameStats = statsCollector.getGameStats();
-      const modelComparison = statsCollector.getModelComparison();
-      const agentStats = statsCollector.getAgentStats();
-      const eventStats = gameRepository.getEventStats();
+      // PERF-MAFIA-010: the four aggregate pipelines below used to re-run
+      // uncached on EVERY request (~2 s at the live corpus) while the
+      // memoized siblings /api/v1/stats and /api/v1/dashboard answered in
+      // ~0.22 s. The bundle is now memoized on the same
+      // computeReportWatermark cachedAggregate machinery — identical data
+      // re-serves instantly; any write to a source table busts the cache.
+      const { gameStats, modelComparison, agentStats, eventStats } =
+        statsCollector.getCachedAnalyticsAggregates();
 
       // The agent list is capped for payload size (the live benchmark DB has
       // >20k per-player/per-model agent rows); totals.agents reports the size

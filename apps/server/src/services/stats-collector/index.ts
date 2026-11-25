@@ -49,8 +49,24 @@ type AggregateCacheEntry<T> = {
   value: T;
 };
 
+/**
+ * PERF-MAFIA-010: the aggregate bundle GET /api/v1/analytics serves. The
+ * route used to re-run every uncached pipeline (getGameStats /
+ * getModelComparison / getAgentStats / getEventStats) on EVERY request —
+ * ~2 s at the live corpus while its memoized siblings /api/v1/stats and
+ * /api/v1/dashboard answer in ~0.22 s. The bundle is now memoized on the
+ * same computeReportWatermark cachedAggregate machinery the siblings use.
+ */
+type AnalyticsAggregates = {
+  gameStats: GameStats;
+  modelComparison: ReturnType<typeof getModelComparison>;
+  agentStats: AgentStats[];
+  eventStats: ReturnType<GameRepository['getEventStats']>;
+};
+
 const gameStatsCacheByRepo = new WeakMap<GameRepository, AggregateCacheEntry<GameStats>>();
 const dashboardCacheByRepo = new WeakMap<GameRepository, AggregateCacheEntry<DashboardAggregates>>();
+const analyticsCacheByRepo = new WeakMap<GameRepository, AggregateCacheEntry<AnalyticsAggregates>>();
 
 function cachedAggregate<T>(repo: GameRepository, owner: StatsCollector, cache: WeakMap<GameRepository, AggregateCacheEntry<T>>, compute: () => T): T {
   if (repo.getDatabase().inTransaction) return compute();
@@ -1089,6 +1105,33 @@ export class StatsCollector {
       return this.getGameStats();
     }
     return cachedAggregate(this.gameRepository, this, gameStatsCacheByRepo, () => this.getGameStats());
+  }
+
+  /**
+   * PERF-MAFIA-010: the aggregate bundle GET /api/v1/analytics serves,
+   * memoized on the same computeReportWatermark cachedAggregate machinery
+   * getCachedGameStats/getCachedDashboardAggregates use. A cache hit costs
+   * only the bounded watermark query (~0.5 ms, PERF-MAFIA-009) + write
+   * guards; any write to a source table (new event/usage row, status or
+   * winner flip via data_version + total_changes) busts the cache.
+   *
+   * Unlike getCachedGameStats there is NO no-lifecycle/wall-time guard:
+   * the analytics response consumes only gameStats.totalGames from the
+   * stats bundle — a count that does not depend on wall time or on which
+   * IN_PROGRESS games exist (those land in activeGames, which analytics
+   * never serves). Lifecycle reconciliation still runs on every call, so
+   * a cache hit observes the same demoted population the siblings serve.
+   */
+  getCachedAnalyticsAggregates(): AnalyticsAggregates {
+    this.gameLifecycle?.reconcile();
+    const compute = (): AnalyticsAggregates => {
+      const gameStats = this.getGameStats();
+      const modelComparison = this.getModelComparison();
+      const agentStats = this.getAgentStats();
+      const eventStats = this.gameRepository.getEventStats();
+      return { gameStats, modelComparison, agentStats, eventStats };
+    };
+    return cachedAggregate(this.gameRepository, this, analyticsCacheByRepo, compute);
   }
 
   getCachedDashboardAggregates(): DashboardAggregates {

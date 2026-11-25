@@ -21,7 +21,7 @@
  * services/degenerate-games.test.ts) — no live server, no writes outside the
  * process.
  */
-import { describe, it, expect, beforeEach, afterEach } from 'vitest';
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import express from 'express';
 import type { Server } from 'http';
 import { StatsCollector } from '../../services/stats-collector.js';
@@ -237,6 +237,57 @@ describe('GET /api/v1/analytics — DB-derived totals (DF-MAFIA-AI-BENCHMARK-52)
     // while the agent table has rows.
     expect(data.totals.agents).toBe(data.performance.agents.length);
     expect(data.totals.agents).toBeGreaterThan(0);
+  });
+
+  // ==========================================================================
+  // PERF-MAFIA-010: the analytics aggregates are memoized on the report
+  // watermark machinery — a second request on identical data must NOT
+  // re-run the uncached pipeline.
+  // ==========================================================================
+
+  it('serves a second request from the watermark cache without re-running the uncached pipeline (PERF-MAFIA-010)', async () => {
+    repo.seedGame({
+      id: 'g1',
+      status: 'ENDED',
+      winner: 'TOWN',
+      duration: 300_000,
+      events: fixtureEventsA(),
+    });
+    seedThreeAgents(repo);
+    await bootRouter();
+
+    // Spy on the UNCACHED pipeline the memoized bundle wraps: the route must
+    // run it exactly once for the cold request and never again while the
+    // data watermark + write guards are unchanged.
+    const pipelineSpy = vi.spyOn(stats, 'getGameStats');
+    const first = await getAnalytics();
+    expect(pipelineSpy).toHaveBeenCalled();
+    pipelineSpy.mockClear();
+
+    // Second request on identical data: served from the cached bundle —
+    // the uncached pipeline must not re-run, and the response must be
+    // identical (same shape, same numbers).
+    const second = await getAnalytics();
+    expect(pipelineSpy).not.toHaveBeenCalled();
+    expect(second).toEqual(first);
+    expect(pipelineSpy).not.toHaveBeenCalled();
+
+    // Any write to a covered source table busts the cache: the next
+    // request re-runs the pipeline and observes the new row.
+    repo.insertTokenUsage({
+      gameId: 'g1',
+      playerId: 'bust-p1',
+      turnNumber: 9,
+      provider: 'openai',
+      model: 'bust-model',
+      promptTokens: 10,
+      completionTokens: 5,
+      totalTokens: 15,
+      cost: 0.0001,
+    });
+    const third = await getAnalytics();
+    expect(pipelineSpy).toHaveBeenCalled();
+    expect(third.totals.agents).toBe(first.totals.agents + 1);
   });
 
   // ==========================================================================
