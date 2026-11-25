@@ -94,3 +94,7 @@ mafia.config.json
 .gitreins/logs/
 .gitreins/qa-ledger.jsonl
 .lock
+.gitreins/review-state.json
+.gitreins/review-state.lock
+.gitreins/tasks.yaml.lock
+.gitreins/rescued-*/
