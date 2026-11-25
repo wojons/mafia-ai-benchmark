@@ -27,6 +27,12 @@ export class ExportCommand extends Command {
     this.option('-g, --games <n>', 'Number of games to include (default: 50)', parseInt);
     this.option('-o, --output <file>', 'Write output to file instead of stdout');
     this.option('--server <url>', 'Server base URL (default: http://localhost:3004)');
+
+    // MAF-L1-FM-003: wire the action handler. Without it, commander matched
+    // the `export` subcommand, found no action, and silently exited 0 with
+    // empty stdout+stderr — run() below was dead code. Same pattern as
+    // BenchmarkCommand (benchmark.ts): the action delegates to run().
+    this.action(async () => { await this.run(); });
   }
   
   async run(): Promise<void> {
