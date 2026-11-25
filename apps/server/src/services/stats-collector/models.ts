@@ -30,6 +30,37 @@ export function isObjectObjectSentinel(value: unknown): boolean {
 }
 
 /**
+ * DF-MAFIA-AI-BENCHMARK-22-R3: explicit audit label substituted for a
+ * provider/model identity that cannot be attributed at aggregation time —
+ * a value that is not a non-empty string (the pre-stringification bug
+ * shape) or the persisted corruption sentinel itself. Not a fabricated
+ * model id: a bucket label, so corrupted usage stays visible in the
+ * reports without the sentinel ever rendering as a model key.
+ */
+export const UNATTRIBUTED_IDENTITY = 'UNATTRIBUTED';
+
+/**
+ * DF-MAFIA-AI-BENCHMARK-22-R3: normalize a persisted provider/model pair
+ * for aggregation. A non-string value (an object that would string-coerce
+ * to the sentinel), an empty/whitespace string, or the sentinel literal
+ * itself collapses to UNATTRIBUTED_IDENTITY per field; valid strings are
+ * trimmed. This is the read-time guarantee that no aggregation row can
+ * ever carry '[object Object]' as a provider or model — the bug class is
+ * killed at the point where DB strings become report keys.
+ */
+export function normalizeUsageIdentity(
+  provider: unknown,
+  model: unknown,
+): { provider: string; model: string } {
+  const norm = (value: unknown): string => {
+    const s = typeof value === 'string' ? value.trim() : '';
+    if (!s || isObjectObjectSentinel(s)) return UNATTRIBUTED_IDENTITY;
+    return s;
+  };
+  return { provider: norm(provider), model: norm(model) };
+}
+
+/**
  * SQL expression selecting the canonical MODEL string for a table alias
  * (MAF-GAP-036/045). Some rows carry the provider prefix inside the model
  * column (provider='openai', model='openai/gpt-4o-mini') while others do

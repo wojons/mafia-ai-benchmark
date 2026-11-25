@@ -29,6 +29,8 @@ import {
   countGamesWithoutPlayerRow,
   generateRecommendations,
   partitionModelRows,
+  isObjectObjectSentinel,
+  normalizeUsageIdentity,
 } from './models.js';
 import { getMatchups } from './matchups.js';
 import { getPlayersFromEvents, calculateRolePerformance } from './players.js';
@@ -806,6 +808,34 @@ function createEmptyReport(): Record<string, unknown> {
   };
 }
 
+/**
+ * DF-MAFIA-AI-BENCHMARK-22-R3: store-layer guard against the
+ * '[object Object]' corruption class. better-sqlite3 string-coerces an
+ * object bound into a TEXT column, persisting the literal sentinel
+ * (incident 2026-09-24: 22 usage rows + 18 players rows) which then leaked
+ * into aggregate reports as a phantom model key. provider/model must be
+ * non-empty strings that are not the sentinel; anything else fails fast
+ * here instead of poisoning the corpus. The legacy adapter write path
+ * carries the equivalent guard (DF-MAFIA-AI-BENCHMARK-22).
+ */
+function requireUsageIdentity(method: string, field: string, value: unknown): string {
+  const s = typeof value === 'string' ? value.trim() : '';
+  if (!s) {
+    throw new TypeError(
+      `${method}: ${field} must be a non-empty string ` +
+        `(got ${value === null ? 'null' : typeof value}); a non-string value ` +
+        `would be persisted as the literal '[object Object]' corruption sentinel`,
+    );
+  }
+  if (isObjectObjectSentinel(s)) {
+    throw new TypeError(
+      `${method}: ${field} is the '[object Object]' corruption sentinel; ` +
+        `refusing to persist it as a provider/model identity`,
+    );
+  }
+  return s;
+}
+
 export class StatsCollector {
   private gameRepository: GameRepository;
   private gameLifecycle?: GameLifecycleReconciler;
@@ -816,13 +846,17 @@ export class StatsCollector {
   }
   
   // ==================== TOKEN USAGE ====================
-  
+  //
+  // (requireUsageIdentity is module-scoped above the class.)
+
   /**
    * Record token usage
    */
   recordTokenUsage(record: TokenUsageRecord): void {
+    const provider = requireUsageIdentity('recordTokenUsage', 'provider', record.provider);
+    const model = requireUsageIdentity('recordTokenUsage', 'model', record.model);
     this.gameRepository.getDatabase().prepare(`
-      INSERT INTO token_usage 
+      INSERT INTO token_usage
       (id, game_id, player_id, turn_number, provider, model, prompt_tokens, completion_tokens, total_tokens, cost, timestamp)
       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `).run(
@@ -830,8 +864,8 @@ export class StatsCollector {
       record.gameId,
       record.playerId,
       record.turnNumber,
-      record.provider,
-      record.model,
+      provider,
+      model,
       record.promptTokens,
       record.completionTokens,
       record.totalTokens,
@@ -890,6 +924,10 @@ export class StatsCollector {
    * Record API call
    */
   recordAPICall(record: APICallRecord): void {
+    // DF-MAFIA-AI-BENCHMARK-22-R3: same store-layer guard as
+    // recordTokenUsage — fail fast instead of persisting '[object Object]'.
+    const provider = requireUsageIdentity('recordAPICall', 'provider', record.provider);
+    const model = requireUsageIdentity('recordAPICall', 'model', record.model);
     this.gameRepository.getDatabase().prepare(`
       INSERT INTO api_calls
       (id, game_id, player_id, provider, model, endpoint, latency, status_code, error, timestamp)
@@ -898,8 +936,8 @@ export class StatsCollector {
       uuidv4(),
       record.gameId,
       record.playerId,
-      record.provider,
-      record.model,
+      provider,
+      model,
       record.endpoint,
       record.latency,
       record.statusCode || null,
@@ -1032,19 +1070,30 @@ export class StatsCollector {
 
     const merged = new Map<string, AgentStats>();
     for (const row of usageRows) {
+      // DF-MAFIA-AI-BENCHMARK-22-R3: the persisted corpus contains legacy
+      // incident rows (2026-09-24: 28 usage rows) whose provider/model is
+      // the literal '[object Object]' string. models.ts (the
+      // modelPerformance pipeline) already filters that sentinel; this
+      // pipeline did not, so the sentinel surfaced as a real agentStats
+      // row (live: agentId 'ALL', provider AND model '[object Object]').
+      // Normalize here — where DB strings become aggregation keys — so an
+      // unattributable identity can never render as a model again. Usage
+      // counts stay (honest audit), the identity is labeled UNATTRIBUTED
+      // (see normalizeUsageIdentity), never a fabricated model id.
+      const identity = normalizeUsageIdentity(row.provider, row.model);
       // A token_usage row only exists when a real billed API response was
       // recorded, so when api_calls has no matching rows the executions
       // themselves are the successes (same contract as agent_sessions:
       // response IS NOT NULL).
-      merged.set(`${row.agentId}/${row.provider}/${row.model}`, {
+      merged.set(`${row.agentId}/${identity.provider}/${identity.model}`, {
         agentId: row.agentId as string,
         executions: row.executions as number,
         successes: row.successes as number,
         totalLatency: row.totalLatency as number,
         totalTokens: row.totalTokens as number,
         totalCost: row.totalCost as number,
-        provider: row.provider as string | undefined,
-        model: row.model as string | undefined,
+        provider: identity.provider,
+        model: identity.model,
       });
     }
 
@@ -1066,7 +1115,10 @@ export class StatsCollector {
     `).all() as Record<string, unknown>[];
 
     for (const row of sessionRows) {
-      const key = `${row.agentId}/${row.provider}/${row.model}`;
+      // DF-MAFIA-AI-BENCHMARK-22-R3: same identity normalization as the
+      // usage source above — the class fix, not just the reported site.
+      const identity = normalizeUsageIdentity(row.provider, row.model);
+      const key = `${row.agentId}/${identity.provider}/${identity.model}`;
       if (merged.has(key)) continue;
       merged.set(key, {
         agentId: row.agentId as string,
@@ -1075,8 +1127,8 @@ export class StatsCollector {
         totalLatency: row.totalLatency as number,
         totalTokens: row.totalTokens as number,
         totalCost: row.totalCost as number,
-        provider: row.provider as string | undefined,
-        model: row.model as string | undefined,
+        provider: identity.provider,
+        model: identity.model,
       });
     }
 

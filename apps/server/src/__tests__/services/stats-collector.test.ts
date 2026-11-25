@@ -1944,6 +1944,165 @@ describe('StatsCollector', () => {
       expect(report.trends.some(t => t.model.includes('[object Object]'))).toBe(false);
     });
   });
+
+  // ==========================================================================
+  // DF-MAFIA-AI-BENCHMARK-22-R3: getAgentStats() still passed persisted
+  // '[object Object]' strings straight through as aggregation keys — the
+  // live report served an agentStats row (agentId 'ALL', executions 5,
+  // 913,012 tokens) with provider AND model literally '[object Object]'.
+  // models.ts (modelPerformance pipeline) was already guarded in -R2; this
+  // fixes the remaining store/aggregation surface: agentStats reads
+  // normalize unattributable identities to the UNATTRIBUTED audit label,
+  // and the StatsCollector write APIs fail fast instead of string-coercing
+  // an object into the corpus again.
+  // ==========================================================================
+
+  describe("[object Object] agentStats normalization (DF-MAFIA-AI-BENCHMARK-22-R3)", () => {
+    /** Deep-scan any nested value for the sentinel as a model/provider. */
+    function countSentinelIdentities(root: unknown): number {
+      let count = 0;
+      const visit = (node: unknown): void => {
+        if (Array.isArray(node)) {
+          node.forEach(visit);
+          return;
+        }
+        if (node !== null && typeof node === 'object') {
+          const rec = node as Record<string, unknown>;
+          if (rec.model === '[object Object]' || rec.provider === '[object Object]') count += 1;
+          for (const v of Object.values(rec)) visit(v);
+        }
+      };
+      visit(root);
+      return count;
+    }
+
+    it('labels persisted [object Object] token_usage rows UNATTRIBUTED in getAgentStats() (live corpus shape)', () => {
+      repo.seedGame({ id: 'incident-game', status: 'ENDED' });
+      // The exact persisted incident shape: sentinel strings already in the
+      // corpus (agentId 'ALL' roll-up + a per-player row), written before
+      // any write guard existed. These cannot go through recordTokenUsage
+      // anymore — insert them at the DB layer like the legacy adapter did.
+      repo.insertTokenUsage({
+        gameId: 'incident-game', playerId: 'ALL', turnNumber: 0,
+        provider: '[object Object]', model: '[object Object]',
+        promptTokens: 10, completionTokens: 10, totalTokens: 20, cost: 0.01,
+      });
+      repo.insertTokenUsage({
+        gameId: 'incident-game', playerId: 'ALL', turnNumber: 0,
+        provider: '[object Object]', model: '[object Object]',
+        promptTokens: 5, completionTokens: 5, totalTokens: 20, cost: 0.005,
+      });
+      repo.insertTokenUsage({
+        gameId: 'incident-game', playerId: 'p17902564857780', turnNumber: 1,
+        provider: '[object Object]', model: '[object Object]',
+        promptTokens: 5, completionTokens: 5, totalTokens: 15196, cost: 0.02,
+      });
+      // A real row keeps aggregating under its own identity.
+      repo.insertTokenUsage({
+        gameId: 'incident-game', playerId: 'ALL', turnNumber: 0,
+        provider: 'realprov', model: 'realm',
+        promptTokens: 1, completionTokens: 1, totalTokens: 2, cost: 0.001,
+      });
+
+      const agentStats = stats.getAgentStats();
+      // No sentinel can render as an identity anymore.
+      expect(agentStats.some(a => a.provider === '[object Object]' || a.model === '[object Object]')).toBe(false);
+      // The corrupted rows collapse into one labeled audit row that keeps
+      // their usage (2 ALL rows + 1 per-player row, summed tokens), so the
+      // incident is visible without a fabricated model id.
+      const allUnattributed = agentStats.filter(
+        a => a.agentId === 'ALL' && a.provider === 'UNATTRIBUTED' && a.model === 'UNATTRIBUTED',
+      );
+      expect(allUnattributed).toHaveLength(1);
+      expect(allUnattributed[0].executions).toBe(2);
+      expect(allUnattributed[0].totalTokens).toBe(40);
+      const perPlayerUnattributed = agentStats.find(
+        a => a.agentId === 'p17902564857780' && a.model === 'UNATTRIBUTED',
+      );
+      expect(perPlayerUnattributed?.executions).toBe(1);
+      expect(perPlayerUnattributed?.totalTokens).toBe(15196);
+      // The real model row is untouched.
+      expect(agentStats.some(a => a.provider === 'realprov' && a.model === 'realm')).toBe(true);
+    });
+
+    it('labels [object Object] agent_sessions rows UNATTRIBUTED in getAgentStats() (class coverage)', () => {
+      repo.seedGame({ id: 'session-game', status: 'ENDED' });
+      stats.recordAgentSession({
+        gameId: 'session-game', playerId: 'p1', turnNumber: 1, phase: 'DAY_DISCUSSION',
+        prompt: 'hi', response: 'ok', think: 't', says: 's',
+        tokensUsed: 10, promptTokens: 5, completionTokens: 5,
+        latency: 100, cost: 0.001,
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        provider: '[object Object]' as any, model: '[object Object]' as any,
+        timestamp: Date.now(),
+      });
+
+      const agentStats = stats.getAgentStats();
+      expect(agentStats.some(a => a.provider === '[object Object]' || a.model === '[object Object]')).toBe(false);
+      expect(
+        agentStats.some(a => a.agentId === 'p1' && a.provider === 'UNATTRIBUTED' && a.model === 'UNATTRIBUTED'),
+      ).toBe(true);
+    });
+
+    it('recordTokenUsage/recordAPICall refuse non-string and sentinel provider/model (store-layer guard)', () => {
+      repo.seedGame({ id: 'guard-game', status: 'ENDED' });
+      const valid = {
+        gameId: 'guard-game', playerId: 'p1', turnNumber: 1,
+        promptTokens: 1, completionTokens: 1, totalTokens: 2, cost: 0,
+        timestamp: Date.now(),
+      };
+
+      // Object provider — the exact input that created the incident corpus.
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      expect(() => stats.recordTokenUsage({ ...valid, provider: { id: 'oops' } as any, model: 'm' })).toThrow(TypeError);
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      expect(() => stats.recordTokenUsage({ ...valid, provider: 'p', model: { id: 'oops' } as any })).toThrow(TypeError);
+      // The sentinel literal itself is refused too.
+      expect(() => stats.recordTokenUsage({ ...valid, provider: '[object Object]', model: 'm' })).toThrow(TypeError);
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      expect(() => stats.recordAPICall({ ...valid, provider: { id: 'oops' } as any, model: 'm', endpoint: '/chat', latency: 1 })).toThrow(TypeError);
+
+      // Nothing was written — the corpus stays clean.
+      expect(stats.getTotalTokens('guard-game')).toBe(0);
+      expect(stats.getGameAPICalls('guard-game')).toHaveLength(0);
+
+      // Valid strings still persist (whitespace is trimmed).
+      stats.recordTokenUsage({ ...valid, provider: '  openai  ', model: 'gpt-4o-mini' });
+      expect(stats.getTotalTokens('guard-game')).toBe(2);
+    });
+
+    it('generateReport() serves zero [object Object] identities across ALL data sections (AC gate shape)', () => {
+      // The live-corpus mix: corrupted usage rows (agentStats source) AND
+      // corrupted player rows (modelPerformance source).
+      repo.seedGame({
+        id: 'ac-game', status: 'ENDED', winner: 'TOWN',
+        players: [
+          { id: 'p-bad', name: 'Bad', role: 'MAFIA', joinOrder: 0,
+            provider: '[object Object]', model: '[object Object]', won: 1, tokens_used: 500 },
+          { id: 'p-ok', name: 'Ok', role: 'VILLAGER', joinOrder: 1,
+            provider: 'openai', model: 'gpt-4o-mini', won: 0, tokens_used: 100 },
+        ],
+      });
+      repo.insertTokenUsage({
+        gameId: 'ac-game', playerId: 'ALL', turnNumber: 0,
+        provider: '[object Object]', model: '[object Object]',
+        promptTokens: 10, completionTokens: 10, totalTokens: 913012, cost: 0.13,
+      });
+      repo.insertApiCall({
+        gameId: 'ac-game', playerId: 'ALL',
+        provider: '[object Object]', model: '[object Object]',
+        endpoint: 'legacy-engine', latency: 50,
+      });
+
+      // Same assertion the AC gate runs against the live endpoint:
+      // a jq paths-scan over every nested object in .data.
+      const report = stats.generateReport();
+      expect(countSentinelIdentities(report)).toBe(0);
+      // And the unattributable usage is still auditable, under its label.
+      const agentStats = report.agentStats as Array<Record<string, unknown>>;
+      expect(agentStats.some(a => a.model === 'UNATTRIBUTED')).toBe(true);
+    });
+  });
 });
 
 // ch:trace row=DF-MAFIA-AI-BENCHMARK-41 spec=apps/server/src/services/stats-collector/index.ts#getGameStats wave=none:serial-tick test=apps/server/src/__tests__/services/stats-collector.test.ts::uses one completed-game population for stats and report summary when mock games are present (DF-MAFIA-AI-BENCHMARK-41) doc=none:api-contract evidence=.gitreins/history/2026-10-22/7acc2aeb/verdict.json witness=live:http://localhost:3004/api/v1/stats+report mafiaWinRate=0.021463414634146343 verdict=9a20feb1 commit=5f9fcaa memory=none:namespace-grant
