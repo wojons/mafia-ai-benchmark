@@ -4,8 +4,16 @@ A fully static site built from the benchmark corpus — run index, per-run
 replays, and a model leaderboard. No runtime API dependency anywhere:
 publishing is a sync of the `site/` tree, never a live API.
 
-Live: https://wojons.github.io/mafia-ai-benchmark/ (GitHub Pages, `gh-pages`
-branch, source = `gh-pages / (root)`).
+URL once enabled: https://wojons.github.io/mafia-ai-benchmark/ (GitHub Pages,
+`gh-pages` branch, source = `gh-pages / (root)`).
+
+**Status (2026-11-25): the branch is pushed but Pages is NOT yet enabled** — the
+repo's admin must do a one-time flip (Settings → Pages → "Deploy from a branch":
+`gh-pages` / `/ (root)`, or `gh api -X POST repos/wojons/mafia-ai-benchmark/pages
+-f "source[branch]=gh-pages" -f "source[path]=/"` with an admin token; the repo
+identity `totalwindupflightsystems` is push-only, admin:false, so the Pages API
+answers 404 to it). Until that flip the URL above serves 404 — do not treat it
+as live.
 
 ## Regeneration (one deterministic command)
 
