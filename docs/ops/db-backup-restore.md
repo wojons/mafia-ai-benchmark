@@ -147,6 +147,7 @@ three core tables are gated non-zero.
 | `MAFIA_DB_BACKUP_RETAIN` | `14` |
 | `MAFIA_DB_BACKUP_METHOD` | `auto` (`api` = never fall back, `trio` = force the fallback arm) |
 | `MAFIA_DB_HEALTH_URL` | `http://localhost:3004/health` |
+| `MAFIA_DB_BACKUP_WAIT_S` | `300` (when the server container is down at preflight — e.g. the run landed inside a deploy-refresh recreate window — wait up to this many seconds in 30s polls for it to return before the fail-closed refusal; `0` restores the old instant-refusal behavior) |
 
 Runs are serialised with `flock` on `<dest>/.backup.lock`; a second run (cron
 overlapping a human) exits 2 rather than interleaving.
