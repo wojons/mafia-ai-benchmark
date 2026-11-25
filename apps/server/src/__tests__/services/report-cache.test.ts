@@ -22,9 +22,13 @@
  *      must track per-game changes immediately).
  *   4. The error-fallback path is never memoized: after a failure the
  *      next call retries and recovers.
+ *   5. PERF-MAFIA-009: the watermark itself is BOUNDED (per-table COUNT +
+ *      MAX(rowid), no per-row payload reads) and still changes when a new
+ *      row lands in ANY fingerprinted table; in-place UPDATEs are caught
+ *      by the cache layer's total_changes() guard (tests 2's update cases).
  */
 import { describe, it, expect, beforeEach } from 'vitest';
-import { StatsCollector } from '../../services/stats-collector.js';
+import { StatsCollector, computeReportWatermark } from '../../services/stats-collector.js';
 import { createSqliteBackedRepository } from './mocks.js';
 
 // Type alias matching the return shape of createSqliteBackedRepository().
@@ -131,8 +135,9 @@ describe('StatsCollector report memoization (PERF-MAFIA-2)', () => {
       expect((first as any).summary.mafiaWinRate).toBe(1);
 
       // The write-time mock marker flipped AFTER the report was cached —
-      // same row count, same statuses, different bytes. The watermark's
-      // config-length sum must catch it.
+      // same row count, same statuses, different bytes. The bounded
+      // watermark cannot see this (no count/rowid moved); the report
+      // cache's total_changes() guard must catch it (PERF-MAFIA-009).
       repo.db.prepare(
         `UPDATE games SET config = json_set(config, '$.mock', 1) WHERE id = ?`,
       ).run('mg1');
@@ -162,6 +167,92 @@ describe('StatsCollector report memoization (PERF-MAFIA-2)', () => {
       expect((second as any).summary.completedGames).toBe(1);
       // Same-ms note: the activeGames/completedGames flips above prove the
       // cache busted — generatedAt can be byte-identical in the same ms.
+    });
+  });
+
+  describe('bounded report watermark (PERF-MAFIA-009)', () => {
+    it('is stable across consecutive calls on unchanged data (cache-reuse precondition)', () => {
+      repo.seedGame({ id: 'g1', status: 'ENDED', winner: 'TOWN', duration: 30_000 });
+      const one = computeReportWatermark(repo);
+      const two = computeReportWatermark(repo);
+      expect(one).not.toBeNull();
+      expect(one).toBe(two);
+    });
+
+    it('changes the fingerprint when a new row lands in EACH fingerprinted table', () => {
+      // The bounded watermark's contract: any new row in any of the seven
+      // source tables must change it, so every cache keyed on it
+      // invalidates. This is the exact live-corpus probe from
+      // PERF-MAFIA-009, replayed on the in-memory fixture.
+      repo.seedGame({ id: 'g1', status: 'ENDED', winner: 'TOWN', duration: 30_000 });
+
+      const expectBust = (mutate: () => void): void => {
+        const before = computeReportWatermark(repo);
+        expect(before).not.toBeNull();
+        mutate();
+        const after = computeReportWatermark(repo);
+        expect(after).not.toBeNull();
+        expect(after).not.toBe(before);
+      };
+
+      // games — a second game row.
+      expectBust(() => repo.seedGame({ id: 'g2', status: 'ENDED', winner: 'MAFIA', duration: 45_000 }));
+      // players — a player row on the first game.
+      expectBust(() =>
+        repo.seedGame({
+          id: 'g1',
+          status: 'ENDED',
+          winner: 'TOWN',
+          duration: 30_000,
+          players: [{ id: 'p1', name: 'P1', role: 'VILLAGER', joinOrder: 0 }],
+        }),
+      );
+      // events — an event row on the first game.
+      expectBust(() =>
+        repo.seedGame({
+          id: 'g1',
+          status: 'ENDED',
+          winner: 'TOWN',
+          duration: 30_000,
+          events: [{ type: 'PHASE_CHANGED', data: { winner: 'TOWN' }, phase: 'GAME_OVER' }],
+        }),
+      );
+      // token_usage
+      expectBust(() =>
+        repo.insertTokenUsage({ gameId: 'g1', playerId: 'p1', turnNumber: 1, provider: 'OPENAI', model: 'gpt-4', promptTokens: 1, completionTokens: 1, totalTokens: 2, cost: 0.001, timestamp: Date.now() }),
+      );
+      // api_calls
+      expectBust(() =>
+        repo.insertApiCall({ gameId: 'g1', playerId: 'p1', provider: 'OPENAI', model: 'gpt-4', endpoint: '/chat', latency: 10, timestamp: Date.now() }),
+      );
+      // agent_sessions
+      expectBust(() =>
+        repo.insertAgentSession({ gameId: 'g1', playerId: 'p1', turnNumber: 1, phase: 'DAY_DISCUSSION', prompt: 'p', tokensUsed: 1, promptTokens: 1, completionTokens: 1, latency: 1, cost: 0, provider: 'OPENAI', model: 'gpt-4', timestamp: Date.now() }),
+      );
+      // player_model_assignments (legacy model path)
+      expectBust(() =>
+        repo.db
+          .prepare(`INSERT INTO player_model_assignments (id, game_id, player_id, provider, model) VALUES ('pma-1', ?, 'p1', 'OPENAI', 'gpt-4')`)
+          .run('g1'),
+      );
+    });
+
+    it('changes the fingerprint when a row is DELETEd (count leg)', () => {
+      repo.seedGame({ id: 'g1', status: 'ENDED', winner: 'TOWN', duration: 30_000 });
+      const before = computeReportWatermark(repo);
+      expect(before).not.toBeNull();
+      repo.db.prepare(`DELETE FROM games WHERE id = ?`).run('g1');
+      const after = computeReportWatermark(repo);
+      expect(after).not.toBeNull();
+      expect(after).not.toBe(before);
+    });
+
+    it('drops to null (skip cache, compute fresh) when a fingerprinted table is missing', () => {
+      repo.seedGame({ id: 'g1', status: 'ENDED', winner: 'TOWN', duration: 30_000 });
+      repo.db.exec('DROP TABLE token_usage');
+      // Never serve stale data on a broken fingerprint: null = caller skips
+      // the cache entirely (same contract the report fallback relies on).
+      expect(computeReportWatermark(repo)).toBeNull();
     });
   });
 
