@@ -219,6 +219,39 @@ CREATE TABLE IF NOT EXISTS benchmark_reports (
   format TEXT DEFAULT 'JSON'
 );
 
+-- League runs (MAF-LAYER-3): scheduled mixed-model league play.
+-- config is the normalized JSON config: { models, numPlayers, games,
+-- budgetUsd, seatSeed }. status follows the benchmark run vocabulary plus
+-- BUDGET_CAPPED: the league's terminal state when the hard budget cap
+-- stopped it from creating any further game.
+CREATE TABLE IF NOT EXISTS league_runs (
+  id TEXT PRIMARY KEY,
+  config TEXT NOT NULL,
+  status TEXT NOT NULL DEFAULT 'QUEUED',
+  created_at INTEGER NOT NULL,
+  completed_at INTEGER,
+  updated_at INTEGER NOT NULL,
+  summary TEXT,
+  error TEXT
+);
+
+-- League games (per-game provenance within a league run). seat_map is the
+-- JSON role->model assignment the game was started with (every seat the
+-- engine can address is attributed to one of the configured models);
+-- seat_seed is the per-round shuffle seed so the assignment is replayable.
+CREATE TABLE IF NOT EXISTS league_games (
+  game_id TEXT PRIMARY KEY,
+  league_run_id TEXT NOT NULL,
+  round INTEGER NOT NULL,
+  seat_map TEXT NOT NULL,
+  seat_seed INTEGER NOT NULL,
+  winner TEXT,
+  completed_at INTEGER,
+  error TEXT,
+  FOREIGN KEY (game_id) REFERENCES games(id) ON DELETE CASCADE,
+  FOREIGN KEY (league_run_id) REFERENCES league_runs(id) ON DELETE CASCADE
+);
+
 -- Agent configurations
 CREATE TABLE IF NOT EXISTS agent_configs (
   id TEXT PRIMARY KEY,
@@ -350,6 +383,8 @@ CREATE INDEX IF NOT EXISTS idx_model_stats ON model_aggregate_stats(provider, mo
 CREATE INDEX IF NOT EXISTS idx_agent_sessions_player ON agent_sessions(player_id);
 CREATE INDEX IF NOT EXISTS idx_benchmark_games_run ON benchmark_games(run_id);
 CREATE INDEX IF NOT EXISTS idx_benchmark_runs_status ON benchmark_runs(status);
+CREATE INDEX IF NOT EXISTS idx_league_games_run ON league_games(league_run_id);
+CREATE INDEX IF NOT EXISTS idx_league_runs_status ON league_runs(status);
 
 -- Triggers for updating timestamps
 CREATE TRIGGER IF NOT EXISTS update_agent_configs_timestamp 

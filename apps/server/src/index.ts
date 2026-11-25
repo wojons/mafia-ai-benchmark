@@ -16,6 +16,7 @@ import { AgentCoordinator } from './services/agent-coordinator.js';
 import { EventBus } from './services/event-bus.js';
 import { StatsCollector } from './services/stats-collector.js';
 import { BenchmarkRunner } from './services/benchmark-runner.js';
+import { LeagueRunner } from './services/league-runner.js';
 import { LegacyGameAdapter } from './services/legacy-game-adapter.js';
 import GameRepositoryDefault, { GameRepository } from './db/repository.js';
 import { createDatabase } from './db/migrate.js';
@@ -58,6 +59,7 @@ export interface ServerContext {
   statsCollector: StatsCollector;
   gameRepository: GameRepository;
   benchmarkRunner: BenchmarkRunner;
+  leagueRunner: LeagueRunner;
   legacyAdapter: LegacyGameAdapter | null;
   gameLifecycle?: GameLifecycleReconciler;
 }
@@ -119,10 +121,19 @@ async function main(): Promise<void> {
     gameLifecycle,
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     benchmarkRunner: null as any,
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    leagueRunner: null as any,
     legacyAdapter,
   };
   const benchmarkRunner = new BenchmarkRunner(bootstrapContext);
   bootstrapContext.benchmarkRunner = benchmarkRunner;
+  // MAF-LAYER-3: the league runner shares the same adapter/db seams.
+  const leagueRunner = new LeagueRunner({
+    eventBus,
+    gameRepository,
+    legacyAdapter,
+  });
+  bootstrapContext.leagueRunner = leagueRunner;
   const context: ServerContext = bootstrapContext;
 
   // Retire persisted games whose owner disappeared before serving any reads.
