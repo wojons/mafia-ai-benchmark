@@ -12,6 +12,7 @@ import { createModelsRouter } from './models.js';
 import { createStatsRouter } from './stats.js';
 import { createBenchmarkRouter } from './benchmark.js';
 import { createAgentsRouter } from './agents.js';
+import { createLeagueRouter } from './league.js';
 
 export function setupRoutes(app: Express, context: ServerContext): void {
   const { gameRepository, eventBus } = context;
@@ -31,6 +32,7 @@ export function setupRoutes(app: Express, context: ServerContext): void {
   app.use('/', createStatsRouter(context));
   app.use('/', createBenchmarkRouter(context));
   app.use('/', createAgentsRouter(context));
+  app.use('/', createLeagueRouter(context));
 }
 
 export default setupRoutes;
