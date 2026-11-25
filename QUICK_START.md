@@ -202,6 +202,27 @@ node apps/cli/dist/index.js list-games
 | `pnpm --filter @mafia/cli dev -- stats`                       | View game and model statistics |
 | `pnpm --filter @mafia/cli dev -- watch-game <game-id>`        | Watch a game in real time      |
 | `pnpm --filter @mafia/cli dev -- help`                        | Show all commands              |
+| `pnpm --filter @mafia/cli dev -- runs export <game-id>`       | Export a finished game as a JSONL run record |
+| `pnpm --filter @mafia/cli dev -- runs backfill`               | Export every ENDED game to the runs corpus     |
+
+### Exporting game records (`mafiactl runs`)
+
+Finished games can be exported to a flat corpus of JSONL run records
+(`data/runs/<gameId>.jsonl` — line 1 is the run header with seats, then one
+event line per event in game order; `data/runs/index.jsonl` has exactly one
+line per game). Re-running is idempotent: already-exported games are
+skipped, never duplicated. Requires the server to be running.
+
+```bash
+# One game (id from list-games)
+pnpm --filter @mafia/cli dev -- runs export <game-id>
+
+# Or the whole corpus at once
+pnpm --filter @mafia/cli dev -- runs backfill
+```
+
+See the **Run Record Corpus (`mafiactl runs`)** section in
+[README.md](README.md) for the on-disk format details.
 
 ### Server API Endpoints
 
