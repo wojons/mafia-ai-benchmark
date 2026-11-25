@@ -302,6 +302,8 @@ See **[specs/correct-night-flow.md](specs/correct-night-flow.md)** for complete 
 | `pnpm --filter @mafia/cli list-games` | **List games** | Browse recent games |
 | `pnpm --filter @mafia/cli run config show` | **View config** | Check current settings |
 | `pnpm --filter @mafia/cli run config set <key> <value>` | **Configure** | Customize game params |
+| `pnpm --filter @mafia/cli dev -- runs export <gameId>` | **Export run record** | Dump a completed game to the data/runs corpus (see [Run Record Corpus](#-run-record-corpus-mafiactl-runs)) |
+| `pnpm --filter @mafia/cli dev -- runs backfill` | **Backfill run records** | Export every ENDED game the server reports |
 
 > **Note:** `pnpm --filter @mafia/cli config ...` is intercepted by pnpm's built-in `config` command instead of the `config` script, and that command has no recursive mode: on pnpm 11.13.1 it prints `[ERROR] Unknown option: 'recursive'` / `For help, run: pnpm help config` and exits 1. (`ERR_PNPM_RECURSIVE_RUN_NO_SCRIPT` is a different call — `pnpm --filter <pkg> run <missing-script>` reports `None of the selected packages has a "<script>" script`.) So config subcommands use the `run config ...` form. `stats` and `list-games` work directly as scripts.
 
@@ -315,6 +317,73 @@ See **[specs/correct-night-flow.md](specs/correct-night-flow.md)** for complete 
 > In checkouts without that setting (older clones, forks), prefix the command
 > with `CI=true` (e.g. `CI=true pnpm --filter @mafia/cli dev -- benchmark`)
 > or run the built CLI directly: `node apps/cli/dist/index.js <cmd>`.
+
+## 📦 Run Record Corpus (`mafiactl runs`)
+
+Every completed game can be exported to a flat on-disk corpus of JSONL run
+records — the dataset downstream consumers (the metrics deriver and the
+static site) read directly.
+
+| Command | Purpose | When to Use |
+| --- | --- | --- |
+| `pnpm --filter @mafia/cli dev -- runs export <gameId>` | **Export one game** | Dump a completed game as a JSONL run file + index line |
+| `pnpm --filter @mafia/cli dev -- runs backfill` | **Export every game** | Build/refresh the whole corpus from all ENDED games |
+
+Both commands talk to the running server (default `http://localhost:3004`,
+override with `--server <url>`) and use only the existing REST endpoints —
+`GET /api/v1/games/:gameId` and `GET /api/v1/games/:gameId/replay`; backfill
+pages through `GET /api/v1/games?status=ENDED`. `export` accepts a game id as
+shown by `list-games` and refuses a game whose status is not `ENDED`.
+Output directory defaults to `data/runs`, overridable with `--data-dir <dir>`
+or the `MAFIA_RUNS_DIR` env var.
+
+### Corpus layout
+
+```
+data/runs/
+├── <gameId>.jsonl      one file per game, named by its game id
+└── index.jsonl         exactly one line per exported game
+```
+
+Each `<gameId>.jsonl` file is a JSONL document:
+
+- **Line 1 — run header.** A single JSON object with `game_id`, `started_at`,
+  `ended_at`, `num_players` (the actual seat count), `winner`, `provenance`,
+  and `seats` — one seat object per player in join order (`seat` is 1-based),
+  each with `player_id`, `provider`, `model`, `role`, `survived` and `won`.
+  `provenance` is `single` when every seat names exactly one
+  (provider, model) pair, `mixed` across ≥ 2 pairs, and `unknown` when any
+  seat lacks attribution (historical games are labeled, never invented).
+  Legacy games never recorded a start time, so `started_at` falls back to the
+  game's `createdAt`.
+- **Lines 2+ — one projected event per line, in game order** (ascending
+  timestamp, ties broken by the event's storage sequence). Each event line
+  carries `id`, `type`, `timestamp`, `actor_id`, `visibility`, `data` and
+  `metadata`; arbitrary payload fields ride inside `data`/`metadata` verbatim.
+  A game with 65 events therefore produces 66 lines.
+
+`index.jsonl` mirrors the header plus a `path` field pointing at the run file
+(`game_id`, `path`, `started_at`, `winner`, `provenance`, `seats`) — one line
+per game, so the index can drive consumers without opening every file.
+
+### Idempotency
+
+Serialization is deterministic, so re-running either command is
+compare-then-skip: when the existing run file's bytes are identical the file
+is left untouched (`✓ Run file unchanged (already exported)`), and the index
+line is appended only when no line for that `game_id` exists yet — never
+duplicated. `backfill` reports the split (e.g. `4889 ENDED game(s) on server,
+0 newly written, 4889 already up to date`), so a second run is a cheap
+no-op; this also makes backfill resumable after an interrupted run.
+
+> **Note — working directory:** like the `config` commands, the default
+> `data/runs` path is resolved against the CLI process's working directory.
+> Under `pnpm --filter @mafia/cli ...` the process runs in `apps/cli/`, so the
+> corpus lands in `apps/cli/data/runs/`; a direct invocation from the repo
+> root (`node apps/cli/dist/index.js runs backfill`) lands in the repo's
+> `data/runs/`. Both are gitignored (the `data/` pattern matches at any
+> depth). Point the two forms at the same directory with `--data-dir` or
+> `MAFIA_RUNS_DIR` when mixing them.
 
 ### Server Commands
 
