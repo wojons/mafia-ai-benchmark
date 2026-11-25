@@ -11,6 +11,22 @@ export const DEFAULT_SERVER_URL = 'http://localhost:3004';
 export const DEFAULT_WS_URL = 'ws://localhost:3004/ws';
 
 /**
+ * Default SQLite game database path (MAF-INIT-001 integrity-report).
+ * Matches the server's db:migrate default (DB_PATH || './data/mafia.db') —
+ * relative to the process CWD so running mafiactl from the repo root lands
+ * on the repo's data/mafia.db.
+ */
+export const DEFAULT_DB_PATH = 'data/mafia.db';
+
+/**
+ * Resolve the SQLite game database path for the integrity report.
+ * Precedence: explicit --db flag > MAFIA_DB_PATH env > DEFAULT_DB_PATH.
+ */
+export function resolveDbPath(cliDb?: string): string {
+  return cliDb || process.env.MAFIA_DB_PATH || DEFAULT_DB_PATH;
+}
+
+/**
  * Resolve the HTTP server base URL for API commands.
  * Precedence: explicit --server flag > MAFIA_SERVER_URL env > DEFAULT_SERVER_URL.
  */

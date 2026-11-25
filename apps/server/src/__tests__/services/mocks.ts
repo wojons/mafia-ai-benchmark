@@ -901,8 +901,11 @@ export function createSqliteBackedRepository(): GameRepository & {
           (p.isMafia ?? 0) ? 1 : 0,
           p.joinOrder,
           p.id, // agent_id
-          p.provider ?? null,
-          p.model ?? null,
+          // MAF-INIT-001: the players table carries an attribution CHECK in
+          // fresh schemas — fixtures without explicit attribution get the
+          // fixture default instead of a forbidden NULL row.
+          p.provider ?? 'openai',
+          p.model ?? 'gpt-4o-mini',
           p.survived ?? null,
           p.won ?? null,
           p.tokens_used ?? 0,

@@ -149,6 +149,43 @@ export class DatabaseMigrator {
           )
       `).run();
 
+      // MAF-INIT-001 backfill: the live corpus carried NULL on EVERY row of
+      // games.total_tokens / games.total_cost while token_usage and
+      // players.tokens_used held real data — dead columns that read as
+      // data. Backfill ENDED games whose rollup is still NULL, from the
+      // authoritative token_usage rows when any exist (tokens AND cost,
+      // both recorded or derivable there), else from players.tokens_used
+      // for the token count alone. Cost is derivable ONLY from token_usage
+      // — a players-only fallback never invents a cost, so total_cost stays
+      // NULL for those games. Idempotent: only still-NULL rows are touched;
+      // re-runs are no-ops and the write-time path (updateGameTokenRollup)
+      // owns every row written after this migration shipped.
+      this.db.prepare(`
+        UPDATE games SET
+          total_tokens = (
+            SELECT COALESCE(SUM(t.total_tokens), 0) FROM token_usage t WHERE t.game_id = games.id
+          ),
+          total_cost = (
+            SELECT COALESCE(SUM(t.cost), 0) FROM token_usage t WHERE t.game_id = games.id
+          )
+        WHERE status = 'ENDED'
+          AND total_tokens IS NULL
+          AND EXISTS (SELECT 1 FROM token_usage t WHERE t.game_id = games.id)
+      `).run();
+
+      this.db.prepare(`
+        UPDATE games SET
+          total_tokens = (
+            SELECT COALESCE(SUM(p.tokens_used), 0) FROM players p WHERE p.game_id = games.id
+          )
+        WHERE status = 'ENDED'
+          AND total_tokens IS NULL
+          AND EXISTS (
+            SELECT 1 FROM players p
+            WHERE p.game_id = games.id AND p.tokens_used IS NOT NULL AND p.tokens_used > 0
+          )
+      `).run();
+
       console.log('✅ Database schema initialized successfully');
       
       return {

@@ -19,6 +19,13 @@ CREATE TABLE IF NOT EXISTS games (
 );
 
 -- Players table
+-- MAF-INIT-001: a player row MUST carry real model attribution. provider and
+-- model are not nullable-in-practice anymore: the CHECK refuses any insert
+-- (or replace) whose provider/model is NULL or blank, so the unattributed
+-- player rows on the live corpus cannot recur in a fresh schema. The same
+-- rule lives in the TS write path (GameRepository.addPlayer/upsertPlayer)
+-- because pre-existing databases keep their old schema and never get this
+-- CHECK silently.
 CREATE TABLE IF NOT EXISTS players (
   id TEXT PRIMARY KEY,
   game_id TEXT NOT NULL,
@@ -38,7 +45,11 @@ CREATE TABLE IF NOT EXISTS players (
   correct_votes INTEGER DEFAULT 0,
   incorrect_votes INTEGER DEFAULT 0,
   role_performance REAL DEFAULT 0,
-  FOREIGN KEY (game_id) REFERENCES games(id) ON DELETE CASCADE
+  FOREIGN KEY (game_id) REFERENCES games(id) ON DELETE CASCADE,
+  CHECK (
+    provider IS NOT NULL AND length(trim(provider)) > 0
+    AND model IS NOT NULL AND length(trim(model)) > 0
+  )
 );
 
 -- Events table (Event Sourcing)

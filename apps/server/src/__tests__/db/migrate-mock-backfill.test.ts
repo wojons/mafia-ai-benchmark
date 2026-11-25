@@ -34,9 +34,11 @@ describe('DatabaseMigrator — MAF-REV-002 historical mock-game backfill', () =>
   }
 
   function seedPlayer(id: string, gameId: string, tokensUsed: number): void {
+    // MAF-INIT-001: the players table carries an attribution CHECK in fresh
+    // schemas — fixtures attribute their rows like real inserts do.
     migrator.getDatabase()
-      .prepare(`INSERT INTO players (id, game_id, name, role, join_order, tokens_used)
-                VALUES (?, ?, 'p', 'VILLAGER', 1, ?)`)
+      .prepare(`INSERT INTO players (id, game_id, name, role, join_order, tokens_used, provider, model)
+                VALUES (?, ?, 'p', 'VILLAGER', 1, ?, 'openai', 'gpt-4o-mini')`)
       .run(id, gameId, tokensUsed);
   }
 

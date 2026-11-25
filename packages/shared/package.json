@@ -56,6 +56,11 @@
       "import": "./dist/providers/model-metadata.js",
       "require": "./dist/providers/model-metadata.js",
       "types": "./dist/providers/model-metadata.d.ts"
+    },
+    "./providers/model-pricing-table.js": {
+      "import": "./dist/providers/model-pricing-table.js",
+      "require": "./dist/providers/model-pricing-table.js",
+      "types": "./dist/providers/model-pricing-table.d.ts"
     }
   },
   "scripts": {

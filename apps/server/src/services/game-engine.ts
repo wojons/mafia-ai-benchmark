@@ -117,12 +117,26 @@ export class GameEngine {
       return { success: false, error: 'Player name already taken' };
     }
     
+    // MAF-INIT-001 attribution enforcement: a joined player must carry real
+    // model attribution — the repository refuses an unattributed insert, so
+    // reject the join with a named error instead of reaching that throw.
+    const provider = agentConfig?.provider?.trim() ?? '';
+    const model = agentConfig?.model?.trim() ?? '';
+    if (!provider || !model) {
+      return {
+        success: false,
+        error:
+          `Player ${playerName} cannot join game ${gameId} without both provider and model ` +
+          '(MAF-INIT-001: every player row must carry real model attribution)',
+      };
+    }
+    
     const player = this.gameRepository.addPlayer(
       gameId, 
       playerName,
       agentConfig?.agentId,
-      agentConfig?.provider,
-      agentConfig?.model
+      provider,
+      model
     );
     
     const event = this.gameRepository.addEvent(gameId, {

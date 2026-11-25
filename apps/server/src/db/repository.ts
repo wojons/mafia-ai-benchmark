@@ -23,6 +23,28 @@ function isTerminalEvent(event: GameEvent): boolean {
   return event.metadata?.phase === 'GAME_OVER';
 }
 
+/**
+ * MAF-INIT-001 attribution enforcement: a players row without BOTH a
+ * non-empty provider AND model must never persist. The write path throws
+ * loudly (the schema CHECK covers fresh databases; pre-existing schemas
+ * never get rewritten, so the guard here is the enforcement that always
+ * applies).
+ */
+function assertPlayerAttribution(gameId: string, provider: string, model: string): void {
+  const badProvider = typeof provider !== 'string' || provider.trim() === '';
+  const badModel = typeof model !== 'string' || model.trim() === '';
+  if (badProvider || badModel) {
+    const missing = [
+      ...(badProvider ? ['provider'] : []),
+      ...(badModel ? ['model'] : []),
+    ].join(' and ');
+    throw new Error(
+      `MAF-INIT-001 attribution enforcement: refusing to persist player for game ` +
+        `${gameId} without ${missing} — every player row must carry real model attribution.`,
+    );
+  }
+}
+
 /** Row shape from player_model_assignments table. */
 export interface PlayerModelAssignmentRow {
   id: string;
@@ -544,6 +566,35 @@ export class GameRepository {
       gameId
     );
   }
+
+  /**
+   * Populate the game-level token rollup (games.total_tokens / total_cost)
+   * from the recorded token_usage rows (MAF-INIT-001 choice (a)).
+   *
+   * The live corpus carried NULL on every row because the legacy done path
+   * never wrote the columns while token_usage held real data — dead columns
+   * that read as data. This method writes the SUM of the game's token_usage
+   * rows (including the per-player rows whose cost the pricing table
+   * derived) whenever usage rows EXIST. A game with no usage rows keeps its
+   * NULL rollup: an absent measurement is never rewritten as a 0. Call at
+   * game end, AFTER persistUsage lands the usage rows.
+   */
+  updateGameTokenRollup(gameId: string): void {
+    const row = this.db.prepare(`
+      SELECT
+        COUNT(*) AS usage_rows,
+        COALESCE(SUM(total_tokens), 0) AS tokens,
+        COALESCE(SUM(cost), 0) AS cost
+      FROM token_usage
+      WHERE game_id = ?
+    `).get(gameId) as { usage_rows: number; tokens: number; cost: number };
+
+    if (!row.usage_rows) return;
+
+    this.db.prepare(`
+      UPDATE games SET total_tokens = ?, total_cost = ? WHERE id = ?
+    `).run(row.tokens, row.cost, gameId);
+  }
   
   /**
    * List all games with optional filters
@@ -676,9 +727,17 @@ export class GameRepository {
   // ==================== PLAYERS ====================
   
   /**
-   * Add player to game
+   * Add player to game (MAF-INIT-001 attribution enforcement).
+   *
+   * provider and model are REQUIRED: a player insert without both fails
+   * loudly (throws) instead of persisting an unattributed row — the
+   * 18/200 unattributed-game corpus case must be impossible for new games.
+   * A schema CHECK carries the same rule for fresh databases; this guard
+   * covers pre-existing schemas that never get rewritten. Throws on
+   * missing/blank values with the game id named.
    */
-  addPlayer(gameId: string, name: string, agentId?: string, provider?: string, model?: string): Player {
+  addPlayer(gameId: string, name: string, agentId: string | undefined, provider: string, model: string): Player {
+    assertPlayerAttribution(gameId, provider, model);
     const playerId = uuidv4();
     const joinOrder = this.db.prepare(
       'SELECT COUNT(*) as count FROM players WHERE game_id = ?'
@@ -739,9 +798,12 @@ export class GameRepository {
     role: string;
     isMafia: boolean;
     joinOrder: number;
-    provider?: string;
-    model?: string;
+    provider: string;
+    model: string;
   }): void {
+    // MAF-INIT-001: same attribution rule as addPlayer — the legacy bridge's
+    // roster persist is the main insert path for players rows.
+    assertPlayerAttribution(gameId, player.provider, player.model);
     this.db.prepare(`
       INSERT OR REPLACE INTO players
         (id, game_id, name, role, is_alive, is_mafia, join_order, agent_id, provider, model)

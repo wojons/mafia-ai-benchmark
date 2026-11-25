@@ -1008,6 +1008,61 @@ describe('LegacyGameAdapter', () => {
   // ==========================================================================
 
   describe('persistUsage()', () => {
+    // MAF-INIT-001: per-row cost_usd derives from the shared model-pricing
+    // table when the bridge reports none — never a fabricated 0, and a
+    // model with no table entry records cost NULL (absence).
+    it('derives a missing cost from the model-pricing table and NULLs unpriced models', () => {
+      const sqliteRepo = createSqliteBackedRepository();
+      sqliteRepo.seedGame({ id: 'g-pricing', status: 'IN_PROGRESS' });
+      const sqliteAdapter = new LegacyGameAdapter(eventBus, sqliteRepo as any);
+
+      (sqliteAdapter as any).persistUsage('g-pricing', [
+        // Priced model (gpt-4o-mini: $0.15/1M in, $0.60/1M out), bridge
+        // reports no cost -> derived: 0.5*0.15/1 + 0.25*0.6/1 ... i.e.
+        // (500_000/1M)*0.15 + (250_000/1M)*0.60 = 0.225.
+        {
+          provider: 'openai',
+          model: 'gpt-4o-mini',
+          promptTokens: 500_000,
+          completionTokens: 250_000,
+          totalTokens: 750_000,
+          cost: 0,
+          apiCalls: 1,
+          latencyMs: 100,
+        },
+        // No pricing entry exists -> cost NULL, never 0.
+        {
+          provider: 'moonshotai',
+          model: 'moonshotai/Kimi-K2.6',
+          promptTokens: 10_000,
+          completionTokens: 5_000,
+          totalTokens: 15_000,
+          cost: 0,
+          apiCalls: 1,
+          latencyMs: 100,
+        },
+        // Bridge-reported positive cost is authoritative, never recomputed.
+        {
+          provider: 'openai',
+          model: 'gpt-4o-mini',
+          promptTokens: 1,
+          completionTokens: 1,
+          totalTokens: 2,
+          cost: 0.999,
+          apiCalls: 1,
+          latencyMs: 100,
+        },
+      ]);
+
+      const rows = sqliteRepo.db.prepare(
+        'SELECT provider, model, cost FROM token_usage WHERE game_id = ? ORDER BY rowid'
+      ).all('g-pricing') as Array<{ provider: string; model: string; cost: number | null }>;
+      expect(rows).toHaveLength(3);
+      expect(rows[0].cost).toBeCloseTo(0.225, 12);
+      expect(rows[1].cost).toBeNull();
+      expect(rows[2].cost).toBe(0.999);
+    });
+
     it('persists token_usage / api_calls / player_game_stats rows from a bridge usage aggregate', () => {
       const sqliteRepo = createSqliteBackedRepository();
       sqliteRepo.seedGame({ id: 'g-usage', status: 'IN_PROGRESS' });
@@ -1886,7 +1941,7 @@ describe('LegacyGameAdapter', () => {
       };
     }
 
-    it('persists one players row per assignment with role/is_mafia/provider/model', () => {
+    it('persists attributed rows at roster time and defers unresolvable roles (MAF-INIT-001)', () => {
       const sqliteRepo = createSqliteBackedRepository();
       sqliteRepo.seedGame({ id: 'g-roster', status: 'IN_PROGRESS' });
       const sqliteAdapter = new LegacyGameAdapter(eventBus, sqliteRepo as any);
@@ -1899,6 +1954,13 @@ describe('LegacyGameAdapter', () => {
           MAFIA: 'openai/gpt-4o-mini',
           TOWN: 'anthropic/claude-3',
         },
+      });
+      (sqliteAdapter as any).activeGames.set('g-roster', {
+        gameId: 'g-roster',
+        process: null,
+        eventCount: 1,
+        status: 'RUNNING',
+        startedAt: new Date(Date.now() - 5000),
       });
 
       (sqliteAdapter as any).translateAndPublishEvent(
@@ -1913,31 +1975,51 @@ describe('LegacyGameAdapter', () => {
         61,
       );
 
+      // MAF-INIT-001: a role the config cannot name is DEFERRED, never
+      // persisted with NULL attribution (the schema CHECK and the
+      // repository guard both refuse that insert).
       const rows = sqliteRepo.db.prepare(
         'SELECT * FROM players WHERE game_id = ? ORDER BY join_order'
       ).all('g-roster') as Array<Record<string, unknown>>;
-      expect(rows).toHaveLength(3);
-      // Row ids match the assignment ids (the event stream's actorIds) so
-      // event-derived players and table rows stay consistent.
+      expect(rows).toHaveLength(2);
       expect(rows[0]).toMatchObject({
         id: 'p1', name: 'Alice', role: 'MAFIA', is_mafia: 1, join_order: 0,
         provider: 'openai', model: 'gpt-4o-mini', is_alive: 1,
       });
-      // SHERIFF has no roleModels entry: model comes from the TOWN spec
-      // only for VILLAGER-role players; SHERIFF stays NULL (honest — the
-      // runner maps SHERIFF to model A, but a bare TOWN-keyed config does
-      // not name it; the done-time usage backfill covers the real model).
-      expect(rows[1]).toMatchObject({
-        id: 'p2', name: 'Bob', role: 'SHERIFF', is_mafia: 0, join_order: 1,
-        provider: null, model: null,
-      });
       // VILLAGER assignment matches the TOWN config key (TOWN<->VILLAGER).
-      expect(rows[2]).toMatchObject({
+      expect(rows[1]).toMatchObject({
         id: 'p3', name: 'Carol', role: 'VILLAGER', is_mafia: 0, join_order: 2,
         provider: 'anthropic', model: 'claude-3',
       });
       // won stays NULL at creation — setPlayersWon fills it at game end.
       expect(rows.every(r => r.won === null)).toBe(true);
+
+      // The SHERIFF seat rides the adapter's deferral map until done
+      // attributes it.
+      const pending = (sqliteAdapter as any).deferredAttribution.get('g-roster');
+      expect(pending).toEqual([
+        { playerId: 'p2', name: 'Bob', role: 'SHERIFF', isMafia: false, joinOrder: 1 },
+      ]);
+
+      // Done: the engine's real per-player usage names the SHERIFF's model —
+      // the deferred row is inserted WITH that recorded attribution.
+      (sqliteAdapter as any).handleBridgeMessage('g-roster', {
+        type: 'done',
+        winner: 'TOWN',
+        totalEvents: 1,
+        dayCount: 1,
+        usage: [],
+        usageByPlayer: [
+          { playerId: 'p2', provider: 'deepseek', model: 'deepseek-v4-flash', promptTokens: 1, completionTokens: 1, totalTokens: 2, cost: 0, apiCalls: 1, latencyMs: 100 },
+        ],
+      });
+      const sheriff = sqliteRepo.db.prepare(
+        'SELECT id, role, provider, model FROM players WHERE id = ?'
+      ).get('p2') as Record<string, unknown>;
+      expect(sheriff).toMatchObject({
+        id: 'p2', role: 'SHERIFF', provider: 'deepseek', model: 'deepseek-v4-flash',
+      });
+      expect(((sqliteAdapter as any).deferredAttribution.get('g-roster') ?? []).length).toBe(0);
     });
 
     it('falls back to role/mafiaTeam for is_mafia when assignments lack the boolean', () => {
@@ -1945,9 +2027,18 @@ describe('LegacyGameAdapter', () => {
       sqliteRepo.seedGame({ id: 'g-roster2', status: 'IN_PROGRESS' });
       const sqliteAdapter = new LegacyGameAdapter(eventBus, sqliteRepo as any);
       (sqliteAdapter as any).gameConfigs.set('g-roster2', { numPlayers: 3 });
+      (sqliteAdapter as any).activeGames.set('g-roster2', {
+        gameId: 'g-roster2',
+        process: null,
+        eventCount: 1,
+        status: 'RUNNING',
+        startedAt: new Date(Date.now() - 5000),
+      });
 
       // Engine-native shape: no isMafia on assignments, mafia ids in
-      // mafiaTeam (the extractPlayersFromEvents contract).
+      // mafiaTeam (the extractPlayersFromEvents contract). MAF-INIT-001:
+      // the config names no model, so the roster rows are DEFERRED and
+      // inserted at done WITH the engine's usage attribution.
       (sqliteAdapter as any).translateAndPublishEvent(
         'g-roster2',
         rolesAssignedEvent({
@@ -1960,6 +2051,18 @@ describe('LegacyGameAdapter', () => {
         }),
         1,
       );
+      (sqliteAdapter as any).handleBridgeMessage('g-roster2', {
+        type: 'done',
+        winner: 'TOWN',
+        totalEvents: 1,
+        dayCount: 1,
+        usage: [],
+        usageByPlayer: [
+          { playerId: 'p1', provider: 'openai', model: 'gpt-4o-mini', promptTokens: 1, completionTokens: 1, totalTokens: 2, cost: 0, apiCalls: 1, latencyMs: 100 },
+          { playerId: 'p2', provider: 'openai', model: 'gpt-4o-mini', promptTokens: 1, completionTokens: 1, totalTokens: 2, cost: 0, apiCalls: 1, latencyMs: 100 },
+          { playerId: 'p3', provider: 'openai', model: 'gpt-4o-mini', promptTokens: 1, completionTokens: 1, totalTokens: 2, cost: 0, apiCalls: 1, latencyMs: 100 },
+        ],
+      });
 
       const rows = sqliteRepo.db.prepare(
         'SELECT id, role, is_mafia FROM players WHERE game_id = ? ORDER BY join_order'
@@ -2058,6 +2161,9 @@ describe('LegacyGameAdapter', () => {
       });
 
       // Game start -> ROLES_ASSIGNED roster -> done(winner=TOWN).
+      // MAF-INIT-001: DOCTOR/SHERIFF have no roleModels entry (only
+      // MAFIA+TOWN), so their roster rows are DEFERRED and the done
+      // message must carry the engine's real usage attribution for them.
       (sqliteAdapter as any).translateAndPublishEvent(
         'g-e2e',
         rolesAssignedEvent({
@@ -2076,6 +2182,10 @@ describe('LegacyGameAdapter', () => {
         totalEvents: 1,
         dayCount: 1,
         usage: [],
+        usageByPlayer: [
+          { playerId: 'p2', provider: 'openai', model: 'gpt-4o', promptTokens: 1, completionTokens: 1, totalTokens: 2, cost: 0, apiCalls: 1, latencyMs: 100 },
+          { playerId: 'p3', provider: 'openai', model: 'gpt-4o', promptTokens: 1, completionTokens: 1, totalTokens: 2, cost: 0, apiCalls: 1, latencyMs: 100 },
+        ],
       });
 
       const rows = sqliteRepo.db.prepare(
@@ -2086,8 +2196,13 @@ describe('LegacyGameAdapter', () => {
       expect(rows[0]).toMatchObject({ id: 'p1', is_mafia: 1, won: 0, provider: 'openai', model: 'gpt-4o-mini' });
       for (const row of rows.slice(1)) {
         expect(row.won).toBe(1);
-        // DOCTOR/SHERIFF have no roleModels entry here (only MAFIA+TOWN);
-        // VILLAGER resolves through the TOWN key.
+        // DOCTOR/SHERIFF were deferred at roster time (no roleModels entry)
+        // and inserted at done WITH their recorded usage attribution.
+        if (row.id === 'p2' || row.id === 'p3') {
+          expect(row.provider).toBe('openai');
+          expect(row.model).toBe('gpt-4o');
+        }
+        // VILLAGER resolves through the TOWN key at roster time.
         if (row.id === 'p4') {
           expect(row.provider).toBe('anthropic');
           expect(row.model).toBe('claude-3');
@@ -2120,11 +2235,13 @@ describe('LegacyGameAdapter', () => {
         }),
         1,
       );
-      // Before done: rows exist with NULL provider/model.
+      // MAF-INIT-001: before done, nothing is persisted — the config could
+      // not name either role, so both seats are deferred (a NULL-attributed
+      // players row is forbidden).
       const before = sqliteRepo.db.prepare(
-        'SELECT provider, model FROM players WHERE game_id = ?'
-      ).all('g-backfill') as Array<Record<string, unknown>>;
-      expect(before.every(r => r.provider === null && r.model === null)).toBe(true);
+        'SELECT COUNT(*) as c FROM players WHERE game_id = ?'
+      ).get('g-backfill') as { c: number };
+      expect(before.c).toBe(0);
 
       (sqliteAdapter as any).handleBridgeMessage('g-backfill', {
         type: 'done',
