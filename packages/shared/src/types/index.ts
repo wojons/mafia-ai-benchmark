@@ -398,6 +398,18 @@ export interface ModelStats {
 // All fields use snake_case — these are on-disk artifact schemas, independent
 // of the camelCase REST API shapes they are derived from.
 
+/**
+ * Corpus-level model attribution for one run (MAF-INIT-001):
+ *   - 'unknown'  at least one seat carries no provider+model — the run is
+ *                NOT leaderboard-published material and downstream
+ *                consumers must treat its attribution as partial;
+ *   - 'single'   every seat attributed and exactly one (provider, model);
+ *   - 'mixed'    every seat attributed across ≥ 2 (provider, model) pairs.
+ * The label is DERIVED from the seats at export time — never invented,
+ * never carried over from a previous export.
+ */
+export type RunProvenance = 'single' | 'mixed' | 'unknown';
+
 /** One seat (player) summary in a run record / index entry. */
 export interface RunSeat {
   /** 1-based seat number, derived from Player.joinOrder. */
@@ -425,6 +437,11 @@ export interface RunRecord {
   num_players: number;
   /** 'MAFIA' | 'TOWN'; null when the game had no decided outcome. */
   winner: string | null;
+  /**
+   * Seat-level attribution label (MAF-INIT-001): 'unknown' when any seat
+   * lacks provider+model, 'single'/'mixed' when fully attributed.
+   */
+  provenance: RunProvenance;
   seats: RunSeat[];
 }
 
@@ -446,6 +463,8 @@ export interface RunIndexEntry {
   path: string;
   started_at: string | null;
   winner: string | null;
+  /** Mirrors the run record's seat-level attribution label (MAF-INIT-001). */
+  provenance: RunProvenance;
   seats: RunSeat[];
 }
 

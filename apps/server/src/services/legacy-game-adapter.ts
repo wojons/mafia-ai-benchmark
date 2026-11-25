@@ -12,6 +12,10 @@ import { EventBus } from './event-bus.js';
 import { GameRepository } from '../db/repository.js';
 import { extractPlayersFromEvents as extractPlayersFromEventStream } from '../db/player-extraction.js';
 import { GameEvent, EventVisibility, GamePhase, EventType } from '@mafia/shared/events';
+// MAF-INIT-001: per-player cost_usd derives from the shared model-pricing
+// table — never a magic inline number at a call site. Missing pricing is
+// `null` (persisted as absence), never a fabricated 0.
+import { computeCostUsd } from '@mafia/shared/providers/model-pricing-table.js';
 import { v4 as uuidv4 } from 'uuid';
 import path from 'path';
 import { fileURLToPath } from 'url';
@@ -103,6 +107,15 @@ export interface LegacyGameState {
   degenerate?: boolean;
   /** OBS-001: closed-set provider prefix for the {provider} metric label. */
   provider?: string;
+}
+
+/** A roster entry deferred until done-time attribution (MAF-INIT-001). */
+export interface DeferredPlayerAttribution {
+  playerId: string;
+  name: string;
+  role: string;
+  isMafia: boolean;
+  joinOrder: number;
 }
 
 /**
@@ -206,6 +219,14 @@ export class LegacyGameAdapter extends EventEmitter {
   private childLogs: ChildLogObserver;
   /** OBS-006: bridge launcher (defaults to child_process.spawn). */
   private spawnChild?: BridgeSpawn;
+  /**
+   * MAF-INIT-001: roster entries persistPlayers deferred because the game
+   * config named no model for their role. Keyed by game id, drained by the
+   * done handler once the bridge's usageByPlayer names the real
+   * (provider, model). Adapter-level (not per-game state) so the deferral
+   * survives even where an activeGames entry lookup fails.
+   */
+  private deferredAttribution: Map<string, DeferredPlayerAttribution[]>;
   
   private static instance: LegacyGameAdapter | null = null;
   
@@ -219,6 +240,7 @@ export class LegacyGameAdapter extends EventEmitter {
     this.gameRepository = gameRepository;
     this.activeGames = new Map();
     this.gameConfigs = new Map();
+    this.deferredAttribution = new Map();
     this.childLogs = new ChildLogObserver();
     this.spawnChild = options.spawn;
     this.bridgeScriptPath = path.resolve(__dirname, 'legacy-bridge.js');
@@ -588,6 +610,15 @@ export class LegacyGameAdapter extends EventEmitter {
             // losing side) so model win rates read real data. Only when the
             // bridge reported a real winner; games without players rows
             // (legacy usage-only games) are a no-op.
+            //
+            // MAF-INIT-001: the deferred-attribution flush runs BEFORE
+            // setPlayersWon — deferred rows are inserted here and must be
+            // included in the won sweep (an INSERT after the sweep would
+            // leave their won NULL).
+            this.flushDeferredPlayerAttribution(
+              gameId,
+              message.usageByPlayer as PlayerUsageAggregate[] | undefined,
+            );
             if (winner === 'MAFIA' || winner === 'TOWN') {
               this.gameRepository.setPlayersWon(gameId, winner);
             }
@@ -651,6 +682,16 @@ export class LegacyGameAdapter extends EventEmitter {
           message.usageByPlayer as PlayerUsageAggregate[] | undefined,
           message.callOutcomes as CallOutcomes | undefined,
         );
+
+        // MAF-INIT-001 choice (a): populate the game-level token rollup
+        // (games.total_tokens / games.total_cost) from the token_usage rows
+        // persistUsage just wrote, so the columns stop reading as dead data.
+        try {
+          this.gameRepository.updateGameTokenRollup(gameId);
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        } catch (e: any) {
+          console.error(`[LegacyAdapter] Failed to update game token rollup: ${e?.message || e}`);
+        }
 
         // OBS-002: Tier-1 LLM metrics from the SAME rows persistUsage just
         // wrote — per-model completed requests, latency, tokens and cost. The
@@ -1004,6 +1045,23 @@ export class LegacyGameAdapter extends EventEmitter {
         (id, game_id, player_id, turn_number, provider, model, prompt_tokens, completion_tokens, total_tokens, cost, timestamp)
       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `);
+    /**
+     * MAF-INIT-001: per-row cost_usd. A bridge-reported positive cost is
+     * authoritative; otherwise the SHARED model-pricing table derives it
+     * from the recorded token counts (no magic inline numbers at call
+     * sites). No pricing entry for the model -> `null`: the row records
+     * absence, never a fabricated 0.
+     */
+    const resolveUsageCost = (
+      provider: string,
+      model: string,
+      promptTokens: number,
+      completionTokens: number,
+      reportedCost: unknown,
+    ): number | null => {
+      if (typeof reportedCost === 'number' && reportedCost > 0) return reportedCost;
+      return computeCostUsd(provider, model, promptTokens, completionTokens);
+    };
     const insertApiCall = db.prepare(`
       INSERT INTO api_calls
         (id, game_id, player_id, provider, model, endpoint, latency, status_code, error, timestamp)
@@ -1039,7 +1097,7 @@ export class LegacyGameAdapter extends EventEmitter {
           u.promptTokens || 0,
           u.completionTokens || 0,
           u.totalTokens || 0,
-          u.cost || 0,
+          resolveUsageCost(provider, model, u.promptTokens || 0, u.completionTokens || 0, u.cost),
           now,
         );
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -1123,7 +1181,7 @@ export class LegacyGameAdapter extends EventEmitter {
             u.promptTokens || 0,
             u.completionTokens || 0,
             u.totalTokens || 0,
-            u.cost || 0,
+            resolveUsageCost(provider, model, u.promptTokens || 0, u.completionTokens || 0, u.cost),
             now,
           );
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -1241,6 +1299,13 @@ export class LegacyGameAdapter extends EventEmitter {
    * from the request config via resolvePlayerModel; won stays NULL until
    * setPlayersWon at game end.
    *
+   * MAF-INIT-001 attribution enforcement: a player whose model the config
+   * cannot name is NOT persisted with NULL attribution (forbidden — the
+   * repository throws and the schema CHECK refuses it on fresh databases).
+   * The roster entry is deferred on the game state and the done handler
+   * inserts it once the bridge's usageByPlayer names the real
+   * (provider, model); if usage never names it, the refusal is loud.
+   *
    * All writes are best-effort: a failure logs and never breaks the event
    * flow. INSERT OR REPLACE keeps the row idempotent if the roster event
    * arrives more than once.
@@ -1259,6 +1324,7 @@ export class LegacyGameAdapter extends EventEmitter {
     }
     const config = this.gameConfigs.get(gameId);
     let persisted = 0;
+    let deferred = 0;
 
     assignments.forEach((assignment, index) => {
       const playerId = typeof assignment.playerId === 'string' ? assignment.playerId : '';
@@ -1273,6 +1339,29 @@ export class LegacyGameAdapter extends EventEmitter {
         : `Player ${playerId.substring(0, 8)}`;
       const model = this.resolvePlayerModel(config, role);
 
+      if (!model?.provider || !model?.model) {
+        // MAF-INIT-001: never persist an unattributed row. Defer to done
+        // time, where the engine's real per-player usage names the model.
+        deferred += 1;
+        const pending = this.deferredAttribution.get(gameId) ?? [];
+        if (!pending.some((p) => p.playerId === playerId)) {
+          pending.push({
+            playerId,
+            name,
+            role,
+            isMafia,
+            joinOrder: index,
+          });
+        }
+        this.deferredAttribution.set(gameId, pending);
+        console.warn(
+          `[LegacyAdapter:${gameId}] ATTRIBUTION DEFERRED: player ${playerId} (${role}) has no ` +
+            'config-named model — row persists only when the done-message usage names it ' +
+            '(MAF-INIT-001: unattributed player rows are forbidden).',
+        );
+        return;
+      }
+
       try {
         this.gameRepository.upsertPlayer(gameId, {
           id: playerId,
@@ -1280,8 +1369,8 @@ export class LegacyGameAdapter extends EventEmitter {
           role,
           isMafia,
           joinOrder: index,
-          provider: model?.provider,
-          model: model?.model,
+          provider: model.provider,
+          model: model.model,
         });
         persisted += 1;
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -1290,7 +1379,76 @@ export class LegacyGameAdapter extends EventEmitter {
       }
     });
 
-    console.log(`[LegacyAdapter:${gameId}] Persisted ${persisted} player row(s) from ROLES_ASSIGNED`);
+    console.log(
+      `[LegacyAdapter:${gameId}] Persisted ${persisted} player row(s) from ROLES_ASSIGNED` +
+        (deferred > 0 ? `, deferred ${deferred} unattributed (MAF-INIT-001)` : ''),
+    );
+  }
+
+  /**
+   * Insert the roster entries persistPlayers deferred (MAF-INIT-001).
+   *
+   * A deferred player is inserted only when the done message's usageByPlayer
+   * names a real, string-typed (provider, model) for its id — the same
+   * attribution backfillPlayerModel has always trusted. When usage never
+   * names the player, the row is REFUSED with a loud error naming the game
+   * and player: an unattributed players row is forbidden, and a missing row
+   * is the honest shape the integrity report surfaces as unattributed.
+   */
+  private flushDeferredPlayerAttribution(
+    gameId: string,
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    usageByPlayer: any[] | undefined,
+  ): void {
+    const pending = this.deferredAttribution.get(gameId) ?? [];
+    if (pending.length === 0) return;
+    this.deferredAttribution.delete(gameId);
+
+    const usageByPlayerId = new Map<string, { provider: string; model: string }>();
+    if (Array.isArray(usageByPlayer)) {
+      for (const u of usageByPlayer as PlayerUsageAggregate[]) {
+        if (!u || !u.playerId) continue;
+        // DF-MAFIA-AI-BENCHMARK-22: string-only attribution — object-typed
+        // values wrote the '[object Object]' sentinel rows in 2026-09-24.
+        if (typeof u.provider !== 'string' || !u.provider.trim()) continue;
+        if (typeof u.model !== 'string' || !u.model.trim()) continue;
+        if (!usageByPlayerId.has(u.playerId)) {
+          usageByPlayerId.set(u.playerId, {
+            provider: u.provider.trim(),
+            model: u.model.trim(),
+          });
+        }
+      }
+    }
+
+    for (const entry of pending) {
+      const attribution = usageByPlayerId.get(entry.playerId);
+      if (!attribution) {
+        console.error(
+          `[LegacyAdapter:${gameId}] ATTRIBUTION REFUSED (MAF-INIT-001): player ${entry.playerId} ` +
+            `(${entry.role}) has no provider/model in the request config and none in the ` +
+            'engine usage — players row NOT persisted; the game stays unattributed rather ' +
+            'than carrying invented attribution.',
+        );
+        continue;
+      }
+      try {
+        this.gameRepository.upsertPlayer(gameId, {
+          id: entry.playerId,
+          name: entry.name,
+          role: entry.role,
+          isMafia: entry.isMafia,
+          joinOrder: entry.joinOrder,
+          provider: attribution.provider,
+          model: attribution.model,
+        });
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      } catch (e: any) {
+        console.error(
+          `[LegacyAdapter] Failed to persist deferred player ${entry.playerId}: ${e?.message || e}`,
+        );
+      }
+    }
   }
 
   /**

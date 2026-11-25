@@ -15,6 +15,7 @@ import { StatsCommand } from './commands/stats.js';
 import { BenchmarkCommand } from './commands/benchmark.js';
 import { RunsCommand } from './commands/runs.js';
 import { MetricsCommand } from './commands/metrics.js';
+import { IntegrityReportCommand } from './commands/integrity.js';
 import { InitCommand } from './commands/init.js';
 
 const program = new Command();
@@ -44,6 +45,7 @@ program.addCommand(new StatsCommand());
 program.addCommand(new BenchmarkCommand());
 program.addCommand(new RunsCommand());
 program.addCommand(new MetricsCommand());
+program.addCommand(new IntegrityReportCommand());
 
 // Default command - show help
 program.action(() => {
@@ -73,6 +75,7 @@ program.on('--help', () => {
   console.log('  $ mafiactl runs backfill           # Export every ENDED game as run files');
   console.log('  $ mafiactl metrics derive data/runs  # Derive one metrics.jsonl per run (MAF-LAYER-2)');
   console.log('  $ mafiactl metrics aggregate         # Print the per-model metrics table');
+  console.log('  $ mafiactl integrity-report --db data/mafia.db --json  # Corpus integrity counts (MAF-INIT-001)');
   console.log('');
   console.log('🔗 Links:');
   console.log('  Docs:  https://github.com/wojons/mafia-ai-benchmark');

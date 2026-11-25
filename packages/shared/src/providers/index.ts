@@ -224,4 +224,5 @@ export * from './lmstudio.js';
 export * from './custom.js';
 export * from './factory.js';
 export * from './model-metadata.js';
+export * from './model-pricing-table.js';
 export * from './cost-tracking.js';

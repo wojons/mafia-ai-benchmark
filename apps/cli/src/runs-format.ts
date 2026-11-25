@@ -13,6 +13,7 @@
 import type {
   RunEventLine,
   RunIndexEntry,
+  RunProvenance,
   RunRecord,
   RunSeat,
 } from '@mafia/shared/types';
@@ -53,6 +54,25 @@ export interface ApiEvent {
 }
 
 /**
+ * Derive the seat-level attribution label (MAF-INIT-001): 'unknown' when ANY
+ * seat lacks a non-empty provider AND model — historical games are labeled,
+ * never invented (a missing attribution is never filled in); 'single' when
+ * fully attributed with exactly one (provider, model) pair; 'mixed' when
+ * fully attributed across ≥ 2 pairs.
+ */
+export function deriveRunProvenance(seats: RunSeat[]): RunProvenance {
+  if (seats.length === 0) return 'unknown';
+  const attributedPairs = new Set<string>();
+  for (const seat of seats) {
+    const provider = typeof seat.provider === 'string' ? seat.provider.trim() : '';
+    const model = typeof seat.model === 'string' ? seat.model.trim() : '';
+    if (!provider || !model) return 'unknown';
+    attributedPairs.add(`${provider}\u0000${model}`);
+  }
+  return attributedPairs.size === 1 ? 'single' : 'mixed';
+}
+
+/**
  * Shape one seat. seat = joinOrder + 1 (1-based, in join order); survived is
  * the player's end-of-game aliveness; won is the server-reported per-player
  * result, derived from the decided winner exactly the way the server's
@@ -85,16 +105,18 @@ export function buildRunSeat(player: ApiPlayer, winner: string | null): RunSeat 
  */
 export function buildRunRecord(game: ApiGameDetail): RunRecord {
   const winner = game.winner ?? null;
+  const seats = game.players
+    .slice()
+    .sort((a, b) => a.joinOrder - b.joinOrder)
+    .map((p) => buildRunSeat(p, winner));
   return {
     game_id: game.id,
     started_at: game.startedAt ?? game.createdAt ?? null,
     ended_at: game.endedAt ?? null,
     num_players: game.players.length,
     winner,
-    seats: game.players
-      .slice()
-      .sort((a, b) => a.joinOrder - b.joinOrder)
-      .map((p) => buildRunSeat(p, winner)),
+    provenance: deriveRunProvenance(seats),
+    seats,
   };
 }
 
@@ -148,6 +170,7 @@ export function buildIndexEntry(record: RunRecord, relativePath: string): RunInd
     path: relativePath,
     started_at: record.started_at,
     winner: record.winner,
+    provenance: record.provenance,
     seats: record.seats,
   };
 }

@@ -130,6 +130,7 @@ function runRecord(gameId: string, winner: string | null, seats: RunSeat[]): Run
     ended_at: TS_BASE,
     num_players: seats.length,
     winner,
+    provenance: 'single',
     seats: seats.map((s, i) => ({ ...s, seat: i + 1 })),
   };
 }

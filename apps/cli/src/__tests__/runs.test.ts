@@ -16,6 +16,7 @@ import type { ApiEvent, ApiGameDetail } from '../runs-format.js';
 import {
   buildIndexEntry,
   buildRunRecord,
+  deriveRunProvenance,
   orderEvents,
   projectEvent,
   serializeIndexLine,
@@ -66,6 +67,39 @@ describe('buildRunRecord (header shaping)', () => {
     expect(record.ended_at).toBe('2026-11-21T01:37:27.433Z');
     expect(record.num_players).toBe(2);
     expect(record.winner).toBe('TOWN');
+  });
+
+  it('labels a fully attributed single-model run provenance=single (MAF-INIT-001)', () => {
+    const record = buildRunRecord(makeGame());
+    expect(record.provenance).toBe('single');
+  });
+
+  it('labels a fully attributed multi-model run provenance=mixed (MAF-INIT-001)', () => {
+    const game = makeGame();
+    game.players[1] = { ...game.players[1], model: 'openai/gpt-4o' };
+    const record = buildRunRecord(game);
+    expect(record.provenance).toBe('mixed');
+  });
+
+  it('labels a run with ANY unattributed seat provenance=unknown — never invented (MAF-INIT-001)', () => {
+    // The historical 18/200 corpus shape: one seat without provider+model.
+    const game = makeGame();
+    game.players[1] = { ...game.players[1], provider: undefined, model: undefined };
+    const record = buildRunRecord(game);
+    expect(record.provenance).toBe('unknown');
+    // No attribution is fabricated for the unattributed seat.
+    expect(record.seats[0].provider).toBeNull();
+    expect(record.seats[0].model).toBeNull();
+  });
+
+  it('carries the label onto the index entry too (MAF-INIT-001)', () => {
+    const record = buildRunRecord(makeGame());
+    const entry = buildIndexEntry(record, 'game-1.jsonl');
+    expect(entry.provenance).toBe('single');
+  });
+
+  it('deriveRunProvenance is unknown for an empty seat list', () => {
+    expect(deriveRunProvenance([])).toBe('unknown');
   });
 
   it('orders seats by joinOrder and numbers them 1-based', () => {
@@ -179,6 +213,7 @@ describe('serializeRunFile (JSONL body)', () => {
       path: 'game-1.jsonl',
       started_at: record.started_at,
       winner: record.winner,
+      provenance: record.provenance,
       seats: record.seats,
     });
     expect(serializeIndexLine(entry).endsWith('\n')).toBe(true);
