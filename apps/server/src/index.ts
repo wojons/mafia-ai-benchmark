@@ -161,6 +161,19 @@ async function main(): Promise<void> {
       `${reconcileSummary.inspected} inspected`,
   );
 
+  // MAF-L3-FM-001: recover LEAGUE runs stranded by a previous shutdown, with
+  // the same rationale and durable-DB-evidence policy as the benchmark pass
+  // above (the league loop's event subscriptions and awaited game promises
+  // die with the process, so a crash mid-loop leaves the run RUNNING
+  // forever). Runs only before serving traffic; idempotent — a genuinely
+  // active run is preserved as-is. Mirrors the benchmark log line's shape.
+  const leagueReconcileSummary = leagueRunner.reconcileStrandedRuns();
+  logger.info(
+    'League run reconciliation: ' +
+      `${leagueReconcileSummary.reconciled} recovered, ${leagueReconcileSummary.leftActive} left active, ` +
+      `${leagueReconcileSummary.inspected} inspected`,
+  );
+
   // OBS-002: prime mafia_benchmark_run_stranded / mafia_benchmark_games_queued
   // from the just-reconciled state, then keep them fresh on a timer. Games can
   // start and finish between run transitions (the run stays RUNNING), so a
