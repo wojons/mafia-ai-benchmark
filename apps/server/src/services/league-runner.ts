@@ -453,7 +453,7 @@ export class LeagueRunner {
         )
         .all(row.id) as Array<{ game_id: string; completed_at: number | null; error: string | null }>;
 
-      let config: NormalizedLeagueConfig | null = null;
+      let config: NormalizedLeagueConfig | null;
       try {
         config = JSON.parse(row.config) as NormalizedLeagueConfig;
       } catch {
