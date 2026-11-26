@@ -12,6 +12,7 @@ import {
   extractPlayersFromEvents,
   extractedPlayerToPlayer,
 } from './player-extraction.js';
+import { canonicalModelSql } from '../services/model-identity.js';
 
 /**
  * True for an event that records a decided outcome. Matches the terminal-event
@@ -1210,7 +1211,11 @@ export class GameRepository {
     // provider is the model's OWN prefix, not the stored 'CUSTOM'. The
     // returned provider/model are the normalized spellings, matching what
     // getModelComparison keys on. Models without a slash (e.g. the honest
-    // 'CUSTOM/openai' legacy floor) are unchanged.
+    // 'CUSTOM/openai' legacy floor) are unchanged. DF-MAFIA-AI-BENCHMARK-55:
+    // the stripped id is then mapped through the shared dated-alias table
+    // (canonicalModelSql) inside the GROUP BY, so a dated snapshot id
+    // ('gpt-4o-2024-08-06') aggregates into its engine family's group and
+    // its games are counted, never dropped by the downstream merge-max.
     const pProvExpr =
       `CASE WHEN instr(p.model, '/') > 0 ` +
       `AND lower(substr(p.model, 1, instr(p.model, '/') - 1)) = lower(p.provider) ` +
@@ -1219,8 +1224,10 @@ export class GameRepository {
       `THEN substr(p.model, 1, instr(p.model, '/') - 1) ` +
       `ELSE p.provider END`;
     const pModelExpr =
-      `CASE WHEN instr(p.model, '/') > 0 ` +
-      `THEN substr(p.model, instr(p.model, '/') + 1) ELSE p.model END`;
+      canonicalModelSql(
+        `CASE WHEN instr(p.model, '/') > 0 ` +
+        `THEN substr(p.model, instr(p.model, '/') + 1) ELSE p.model END`,
+      );
     const acProvExpr =
       `CASE WHEN instr(ac.model, '/') > 0 ` +
       `AND lower(substr(ac.model, 1, instr(ac.model, '/') - 1)) = lower(ac.provider) ` +
@@ -1229,8 +1236,10 @@ export class GameRepository {
       `THEN substr(ac.model, 1, instr(ac.model, '/') - 1) ` +
       `ELSE ac.provider END`;
     const acModelExpr =
-      `CASE WHEN instr(ac.model, '/') > 0 ` +
-      `THEN substr(ac.model, instr(ac.model, '/') + 1) ELSE ac.model END`;
+      canonicalModelSql(
+        `CASE WHEN instr(ac.model, '/') > 0 ` +
+        `THEN substr(ac.model, instr(ac.model, '/') + 1) ELSE ac.model END`,
+      );
     // PERF-MAFIA-6: when the caller already materialized the degenerate/mock
     // gate for this build (`getIncludedCompareGameIds`), the two correlated
     // `events` counts are replaced by a json_each probe on the id set — the
