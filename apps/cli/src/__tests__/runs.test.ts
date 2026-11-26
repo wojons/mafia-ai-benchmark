@@ -8,9 +8,11 @@
  * export path consumes (GET /api/v1/games/:id + /replay).
  */
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { mkdtempSync, readFileSync, existsSync, rmSync } from 'fs';
+import { mkdtempSync, mkdirSync, readFileSync, existsSync, rmSync, utimesSync, writeFileSync } from 'fs';
 import { tmpdir } from 'os';
 import * as path from 'path';
+import * as http from 'http';
+import { spawn } from 'child_process';
 
 import type { ApiEvent, ApiGameDetail } from '../runs-format.js';
 import {
@@ -22,8 +24,7 @@ import {
   serializeIndexLine,
   serializeRunFile,
 } from '../runs-format.js';
-import { exportGame } from '../commands/runs.js';
-import { RunsCommand } from '../commands/runs.js';
+import { exportGame, RunsCommand, withIndexLock } from '../commands/runs.js';
 
 // ---------- fixtures ----------
 
@@ -307,6 +308,291 @@ describe('exportGame (file + index state)', () => {
     expect(lines).toHaveLength(2);
     expect(JSON.parse(lines[1]).game_id).toBe('game-1');
   });
+});
+
+// ---------- index concurrency (MAF-L1-FM-002) ----------
+
+/**
+ * apps/cli root — `pnpm --filter @mafia/cli test:run` always runs this suite
+ * with the package dir as cwd. The spawned export children resolve the tsx
+ * loader (node_modules) and src/commands/runs.ts from here.
+ */
+const CLI_ROOT = process.cwd();
+const RUNS_TS = path.join(CLI_ROOT, 'src', 'commands', 'runs.ts');
+
+/** Payload set served by the stub server / stubbed fetch, keyed by game id. */
+type GamePayloads = Record<string, { detail: ApiGameDetail; events: ApiEvent[] }>;
+
+function makeGamePayloads(...ids: string[]): GamePayloads {
+  return Object.fromEntries(
+    ids.map((id) => [
+      id,
+      {
+        detail: makeGame({ id }),
+        events: [makeEvent(`${id}-e1`, '2026-11-21T01:36:00.000Z', 1)],
+      },
+    ]),
+  );
+}
+
+function stubGameFetch(games: GamePayloads): unknown {
+  return vi.fn(async (url: string) => {
+    const match = /\/api\/v1\/games\/([^/]+)(\/replay)?$/.exec(url);
+    const game = match ? games[match[1]] : undefined;
+    if (!match || !game) {
+      throw new Error(`unexpected fetch: ${url}`);
+    }
+    if (match[2]) {
+      return { ok: true, status: 200, json: async () => ({ success: true, data: game.events, count: game.events.length }) };
+    }
+    return { ok: true, status: 200, json: async () => ({ success: true, data: game.detail }) };
+  });
+}
+
+/** Real loopback HTTP server serving the game REST payloads (for children). */
+function startStubGameServer(games: GamePayloads): Promise<{ url: string; close: () => Promise<void> }> {
+  const server = http.createServer((req, res) => {
+    const match = /\/api\/v1\/games\/([^/]+)(\/replay)?$/.exec(req.url ?? '');
+    const game = match ? games[match[1]] : undefined;
+    if (!match || !game) {
+      res.writeHead(404, { 'content-type': 'application/json' });
+      res.end(JSON.stringify({ success: false, error: 'not found' }));
+      return;
+    }
+    res.writeHead(200, { 'content-type': 'application/json' });
+    if (match[2]) {
+      res.end(JSON.stringify({ success: true, data: game.events, count: game.events.length }));
+    } else {
+      res.end(JSON.stringify({ success: true, data: game.detail }));
+    }
+  });
+  return new Promise((resolve) => {
+    server.listen(0, '127.0.0.1', () => {
+      resolve({
+        url: `http://127.0.0.1:${(server.address() as { port: number }).port}`,
+        close: () =>
+          new Promise<void>((done) => {
+            server.close(() => done());
+            server.closeAllConnections();
+          }),
+      });
+    });
+  });
+}
+
+interface ExportChildResult {
+  code: number | null;
+  stdout: string;
+  stderr: string;
+}
+
+/**
+ * Spawn one export "process" exactly the way two concurrent `mafiactl runs
+ * export` invocations would run: a separate OS process importing the real
+ * exportGame from source (tsx loader), pointed at a real loopback server.
+ */
+function spawnExportChild(childScript: string, serverUrl: string, runsDir: string, gameId: string): Promise<ExportChildResult> {
+  return new Promise((resolve) => {
+    const child = spawn(
+      process.execPath,
+      ['--import', 'tsx', childScript, serverUrl, runsDir, gameId],
+      { cwd: CLI_ROOT, stdio: ['ignore', 'pipe', 'pipe'] },
+    );
+    let stdout = '';
+    let stderr = '';
+    child.stdout.on('data', (chunk: Buffer) => { stdout += chunk.toString('utf-8'); });
+    child.stderr.on('data', (chunk: Buffer) => { stderr += chunk.toString('utf-8'); });
+    child.on('error', (err) => resolve({ code: -1, stdout, stderr: `${stderr}${err.message}\n` }));
+    child.on('close', (code) => resolve({ code, stdout, stderr }));
+  });
+}
+
+/** Assert the child completed a real export and return its outcome flags. */
+function expectChildOk(result: ExportChildResult): { fileChanged: boolean; indexChanged: boolean } {
+  const line = result.stdout.split('\n').find((l) => l.startsWith('EXPORT-OK '));
+  expect(line, `child did not complete an export (exit=${result.code}) stderr=${result.stderr} stdout=${result.stdout}`).toBeDefined();
+  expect(result.code, `child exited non-zero: ${result.stderr}`).toBe(0);
+  return JSON.parse((line as string).slice('EXPORT-OK '.length));
+}
+
+/** Read index.jsonl as parsed lines — a torn/interleaved line throws here. */
+function readIndexLines(runsDir: string): Array<{ game_id?: string; path?: string }> {
+  return readFileSync(path.join(runsDir, 'index.jsonl'), 'utf-8')
+    .split('\n')
+    .filter((l) => l.trim() !== '')
+    .map((l) => JSON.parse(l) as { game_id?: string; path?: string });
+}
+
+/** Write the per-process export child into its own temp dir (not runsDir). */
+function writeExportChildScript(childDir: string): string {
+  const script = path.join(childDir, 'export-child.mjs');
+  writeFileSync(
+    script,
+    [
+      '// Spawned by runs.test.ts (MAF-L1-FM-002): one `mafiactl runs export`',
+      '// process in miniature — imports the real exportGame from source and',
+      '// exports one game, exiting 0 (or 1 with EXPORT-FAIL on stderr).',
+      'const [serverUrl, runsDir, gameId] = process.argv.slice(2);',
+      'try {',
+      `  const mod = await import(${JSON.stringify(RUNS_TS)});`,
+      '  const outcome = await mod.exportGame(serverUrl, runsDir, gameId);',
+      "  console.log('EXPORT-OK ' + JSON.stringify(outcome));",
+      '} catch (err) {',
+      "  console.error('EXPORT-FAIL ' + ((err && err.message) || String(err)));",
+      '  process.exit(1);',
+      '}',
+      '',
+    ].join('\n'),
+    'utf-8',
+  );
+  return script;
+}
+
+describe('runs index concurrency (MAF-L1-FM-002)', () => {
+  let runsDir: string;
+  let childDir: string;
+
+  beforeEach(() => {
+    runsDir = mkdtempSync(path.join(tmpdir(), 'mafiactl-runs-conc-'));
+    childDir = mkdtempSync(path.join(tmpdir(), 'mafiactl-runchild-'));
+    vi.spyOn(console, 'log').mockImplementation(() => {});
+  });
+
+  afterEach(() => {
+    vi.unstubAllGlobals();
+    vi.restoreAllMocks();
+    rmSync(runsDir, { recursive: true, force: true });
+    rmSync(childDir, { recursive: true, force: true });
+  });
+
+  it('two concurrent in-process exports (same + different games) leave exactly one index line per game', async () => {
+    vi.stubGlobal('fetch', stubGameFetch(makeGamePayloads('game-1', 'game-2')));
+    const [r1, r2, r3, r4] = await Promise.all([
+      exportGame('http://test', runsDir, 'game-1'),
+      exportGame('http://test', runsDir, 'game-1'),
+      exportGame('http://test', runsDir, 'game-2'),
+      exportGame('http://test', runsDir, 'game-2'),
+    ]);
+
+    // Exactly one index append per game even when two exports race.
+    expect([r1.indexChanged, r2.indexChanged].filter(Boolean)).toHaveLength(1);
+    expect([r3.indexChanged, r4.indexChanged].filter(Boolean)).toHaveLength(1);
+
+    const lines = readIndexLines(runsDir);
+    expect(lines).toHaveLength(2);
+    expect(new Set(lines.map((l) => l.game_id))).toEqual(new Set(['game-1', 'game-2']));
+    for (const line of lines) {
+      expect(line.path, 'index line must carry a path').toBeDefined();
+      expect(existsSync(path.join(runsDir, line.path as string))).toBe(true);
+    }
+    // The lock never outlives its critical section.
+    expect(existsSync(path.join(runsDir, 'index.lock'))).toBe(false);
+  });
+
+  it('withIndexLock serializes concurrent holders — critical sections never overlap', async () => {
+    // The deterministic red arm: gut withIndexLock's body (plain invocation)
+    // and both sections overlap -> maxInFlight 2 and the alternating
+    // enter/exit timeline breaks. This is the property that makes
+    // interleaved/corrupt index appends impossible across processes.
+    let inFlight = 0;
+    let maxInFlight = 0;
+    const timeline: string[] = [];
+    const section = async (name: string): Promise<void> => {
+      inFlight += 1;
+      maxInFlight = Math.max(maxInFlight, inFlight);
+      timeline.push(`enter:${name}`);
+      await new Promise((resolve) => setTimeout(resolve, 50));
+      timeline.push(`exit:${name}`);
+      inFlight -= 1;
+    };
+    await Promise.all([
+      withIndexLock(runsDir, () => section('a')),
+      withIndexLock(runsDir, () => section('b')),
+    ]);
+    expect(maxInFlight).toBe(1);
+    expect(timeline.map((step) => step.split(':')[0])).toEqual(['enter', 'exit', 'enter', 'exit']);
+    expect(existsSync(path.join(runsDir, 'index.lock'))).toBe(false);
+  });
+
+  it('withIndexLock fails loudly on a live foreign lock and leaves it untouched', async () => {
+    const lockPath = path.join(runsDir, 'index.lock');
+    mkdirSync(lockPath);
+    writeFileSync(path.join(lockPath, 'holder.token'), 'someone-else', 'utf-8');
+    await expect(
+      withIndexLock(runsDir, () => 'never-runs', { pollMs: 5, timeoutMs: 60 }),
+    ).rejects.toThrow(/Timed out .* waiting for the runs index lock/);
+    // A contender that gives up must not break the live holder's lock.
+    expect(existsSync(lockPath)).toBe(true);
+    expect(readFileSync(path.join(lockPath, 'holder.token'), 'utf-8')).toBe('someone-else');
+  });
+
+  it('withIndexLock breaks a stale lock left by a crashed export', async () => {
+    const lockPath = path.join(runsDir, 'index.lock');
+    mkdirSync(lockPath);
+    writeFileSync(path.join(lockPath, 'holder.token'), 'crashed-export', 'utf-8');
+    // Backdate the lock past the stale window.
+    const old = new Date(Date.now() - 60000);
+    utimesSync(lockPath, old, old);
+    const result = await withIndexLock(runsDir, () => 'ran-under-broken-lock', {
+      pollMs: 5,
+      staleMs: 1000,
+      timeoutMs: 5000,
+    });
+    expect(result).toBe('ran-under-broken-lock');
+    expect(existsSync(lockPath)).toBe(false);
+  });
+
+  it('two spawned export PROCESSES exporting the same game leave exactly one index line', async () => {
+    expect(existsSync(RUNS_TS), `runs.ts not found at ${RUNS_TS} — the spawned children assume the vitest cwd is apps/cli`).toBe(true);
+    const server = await startStubGameServer(makeGamePayloads('game-a'));
+    try {
+      const script = writeExportChildScript(childDir);
+      const [c1, c2] = await Promise.all([
+        spawnExportChild(script, server.url, runsDir, 'game-a'),
+        spawnExportChild(script, server.url, runsDir, 'game-a'),
+      ]);
+      const o1 = expectChildOk(c1);
+      const o2 = expectChildOk(c2);
+      // The duplicate-line race: both processes must agree on who appends.
+      expect([o1.indexChanged, o2.indexChanged].filter(Boolean)).toHaveLength(1);
+
+      const lines = readIndexLines(runsDir);
+      expect(lines).toHaveLength(1);
+      expect(lines[0].game_id).toBe('game-a');
+      expect(existsSync(path.join(runsDir, 'index.lock'))).toBe(false);
+    } finally {
+      await server.close();
+    }
+  }, 60000);
+
+  it('two spawned export PROCESSES exporting different games cannot interleave or duplicate index lines', async () => {
+    expect(existsSync(RUNS_TS), `runs.ts not found at ${RUNS_TS} — the spawned children assume the vitest cwd is apps/cli`).toBe(true);
+    const server = await startStubGameServer(makeGamePayloads('game-b', 'game-c'));
+    try {
+      const script = writeExportChildScript(childDir);
+      const [c1, c2] = await Promise.all([
+        spawnExportChild(script, server.url, runsDir, 'game-b'),
+        spawnExportChild(script, server.url, runsDir, 'game-c'),
+      ]);
+      const o1 = expectChildOk(c1);
+      const o2 = expectChildOk(c2);
+      expect(o1.indexChanged).toBe(true);
+      expect(o2.indexChanged).toBe(true);
+
+      // Every line intact (a torn/interleaved line throws in readIndexLines),
+      // exactly one line per game, no duplicates.
+      const lines = readIndexLines(runsDir);
+      expect(lines).toHaveLength(2);
+      expect(new Set(lines.map((l) => l.game_id))).toEqual(new Set(['game-b', 'game-c']));
+      for (const line of lines) {
+        expect(line.path, 'index line must carry a path').toBeDefined();
+        expect(existsSync(path.join(runsDir, line.path as string))).toBe(true);
+      }
+      expect(existsSync(path.join(runsDir, 'index.lock'))).toBe(false);
+    } finally {
+      await server.close();
+    }
+  }, 60000);
 });
 
 // ---------- command surface ----------
