@@ -8,6 +8,10 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+---
+
+## [1.4.0] — 2026-11-26
+
 Fifth release. The delta since v1.3.0 is the league initiative's build-out:
 the CLI now emits a per-run JSONL run-record corpus, a metrics deriver and
 per-model aggregator turn those records into numbers, a cost-capped league

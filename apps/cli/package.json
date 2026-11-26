@@ -1,6 +1,6 @@
 {
   "name": "@mafia/cli",
-  "version": "1.3.0",
+  "version": "1.4.0",
   "private": true,
   "description": "mafiactl CLI for running games, benchmarks, and managing the Mafia AI Benchmark system",
   "main": "dist/index.js",
