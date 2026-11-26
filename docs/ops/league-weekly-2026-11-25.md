@@ -76,3 +76,53 @@ still NOT enabled — no live URL exists yet.
 2. Pool: still the two ratified OpenRouter models; the xkiro pool stays
    pending server credentials.
 3. GitHub Pages enablement is an admin-gated repo setting.
+
+---
+
+## Addendum — 2026-11-26 (MAF-INIT-002 closure leg: full-corpus site regen + gate status)
+
+Written the day after the body above; supersedes the "Mixed-gate progress"
+counts (8→10) and the "Site" section's 300-run window. Same evidence
+discipline: every number from a file read or an HTTP response this session.
+
+### Corpus gate status (AC3)
+
+- `data/runs/index.jsonl` now holds **4,899** games, **55** flagged
+  `"provenance":"mixed"`.
+- Of the 55, **27 have complete per-seat provider+model provenance on every
+  seat**; **28 are excluded** for at least one seat missing provider or
+  model attribution.
+- Gate wants >= 20 fully-provenanced mixed games: **27/20 — MET**.
+
+### Site regenerated from the FULL corpus
+
+`python3 scripts/generate_site.py --runs 4899` → 4,899 replay pages,
+`site/_data/aggregate.jsonl` with 8 model rows, leaderboard and index
+reflecting the entire corpus (mixed and single-model), not the old
+300-run window. One render crash surfaced a corpus data quirk: run
+`81d7e1be…` carries a list-valued `playerName` in one event — the only
+non-string name in all 4,899 files; fixed with a two-line type guard in
+`scripts/generate_site.py` (`seat_names()`), no numbers affected (details
+in `site/REDERIVATION.md`).
+
+### Re-derivability (AC4 gate arm): MATCH
+
+Independent recompute from the raw run-file headers (bypassing `mafiactl`
+and `data/metrics/` entirely) reproduces every published headline number
+bit-exactly: all 8 model rows MATCH on `games_played`, `win_rate.value`
+and `win_rate.n` — including the top three: openai/gpt-4o-mini 4,215
+games @ 0.7968 win rate (n=20,986), openai 208 @ 0.5505 (n=1,860),
+openai/gpt-4o 42 @ 1.0 (n=237). Method, commands and full table:
+`site/REDERIVATION.md`.
+
+### Site-live status: NOT live (404) — pending one-time admin enable
+
+`https://wojons.github.io/mafia-ai-benchmark/` returned **404** as of
+2026-11-26 (verified live this session). This is NOT "live" and must not
+be reported as such anywhere. Cause: GitHub Pages is not enabled on the
+repo, and the current push-scope identity cannot enable it (POST /pages
+returned 404). Pending one-time admin enable:
+**Settings -> Pages -> Deploy from a branch -> gh-pages**. The regenerated
+site tree is committed on `main` (`site/`); syncing it to `gh-pages`
+happens at push time, after which the URL above should serve it.
+

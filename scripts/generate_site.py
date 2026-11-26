@@ -131,14 +131,14 @@ class RunReplay:
             if ev.get("type") == "ROLES_ASSIGNED":
                 for a in ev.get("data", {}).get("assignments") or []:
                     pid, name = a.get("playerId"), a.get("name")
-                    if pid and name:
+                    if pid and isinstance(name, str) and name:
                         names[pid] = name
         if not names:
             for ev in self.events:  # fall back to names seen on any event data
                 data = ev.get("data") or {}
                 pid = ev.get("actor_id")
                 name = data.get("playerName")
-                if pid and name and pid not in names:
+                if pid and isinstance(name, str) and name and pid not in names:
                     names[pid] = name
         for seat in self.header.get("seats") or []:
             pid = seat.get("player_id")
