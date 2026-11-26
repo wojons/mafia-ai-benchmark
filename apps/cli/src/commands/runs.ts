@@ -8,12 +8,16 @@
  *
  * Both paths are idempotent: re-export rewrites the run file only when its
  * deterministic serialization differs (compare-then-skip) and never
- * duplicates an index line. Fetch paths reuse the existing game REST
- * endpoints only — no new server surface.
+ * duplicates an index line. Index appends are serialized across processes
+ * by a mkdir-based lock (see withIndexLock) so concurrent exports against
+ * the same runs dir cannot interleave, duplicate, or lose index lines.
+ * Fetch paths reuse the existing game REST endpoints only — no new server
+ * surface.
  */
 
 import { Command } from 'commander';
 import chalk from 'chalk';
+import { randomUUID } from 'crypto';
 import * as fs from 'fs';
 import * as path from 'path';
 import { resolveServerUrl } from '../config.js';
@@ -32,6 +36,117 @@ import {
 const REQUEST_TIMEOUT_MS = 30000;
 /** Page size when listing games for backfill. */
 const BACKFILL_PAGE_SIZE = 100;
+
+/** Name of the lock directory guarding index.jsonl, inside the runs dir. */
+const INDEX_LOCK_DIR = 'index.lock';
+/** Token file written inside the lock dir by the current holder. */
+const INDEX_LOCK_TOKEN_FILE = 'holder.token';
+/** How often a lock contender re-attempts acquisition, in ms. */
+const INDEX_LOCK_POLL_MS = 25;
+/**
+ * A lock older than this belonged to a crashed export: the locked critical
+ * section is only a read + append of a small JSONL (milliseconds of local
+ * file IO — network fetches happen BEFORE the lock is taken), so nothing
+ * legitimately holds the lock this long.
+ */
+const INDEX_LOCK_STALE_MS = 10000;
+/**
+ * Acquisition gives up (loudly, failing the export) after this long — an
+ * export that cannot serialize its index write must not append unserialized
+ * anyway.
+ */
+const INDEX_LOCK_TIMEOUT_MS = 30000;
+
+const sleep = (ms: number): Promise<void> =>
+  new Promise((resolve) => setTimeout(resolve, ms));
+
+/**
+ * Run `critical` while holding the runs-dir index lock (MAF-L1-FM-002).
+ *
+ * DESIGN CHOICE — of the two sanctioned fixes we implement the LOCK
+ * (option a), not the temp-file+rename re-dedup (option b): a rename only
+ * makes a single write atomic, so a read-merge-dedupe-write loop can still
+ * silently drop the other process's appended line in the window between its
+ * read and its rename (last writer wins). The lock makes the whole
+ * read-modify-append section mutually exclusive, so concurrent exports
+ * queue up and BOTH appends land — no duplicates, no lost lines.
+ *
+ * Mechanics: fs.mkdirSync is atomic (the loser gets EEXIST) on POSIX and
+ * Windows alike. Losers poll with a short backoff until the lock dir
+ * disappears. A lock whose mtime exceeds INDEX_LOCK_STALE_MS was left by a
+ * crashed export and is broken so a dead process cannot deadlock the
+ * corpus forever; the holder's token file (randomUUID) makes that break
+ * safe — a wake-up holder only ever removes a lock it still owns, never
+ * one that was judged stale and re-acquired by someone else. Residual
+ * trade-off, accepted and documented: mutual exclusion can only be
+ * violated if a holder stalls longer than INDEX_LOCK_STALE_MS inside a
+ * millisecond-scale local-IO section, in which case the latest holder
+ * proceeds and appends are serialized again from there.
+ */
+export async function withIndexLock<T>(
+  runsDir: string,
+  critical: () => Promise<T> | T,
+  opts: {
+    /** Overrides for the tuning constants above (tests use short windows). */
+    pollMs?: number;
+    staleMs?: number;
+    timeoutMs?: number;
+  } = {},
+): Promise<T> {
+  const pollMs = opts.pollMs ?? INDEX_LOCK_POLL_MS;
+  const staleMs = opts.staleMs ?? INDEX_LOCK_STALE_MS;
+  const timeoutMs = opts.timeoutMs ?? INDEX_LOCK_TIMEOUT_MS;
+  const lockPath = path.join(runsDir, INDEX_LOCK_DIR);
+  const tokenFile = path.join(lockPath, INDEX_LOCK_TOKEN_FILE);
+  const token = randomUUID();
+  const deadline = Date.now() + timeoutMs;
+
+  // Acquire.
+  for (;;) {
+    try {
+      fs.mkdirSync(lockPath);
+      break;
+    } catch (err) {
+      if ((err as { code?: string }).code !== 'EEXIST') throw err;
+    }
+    let brokeStaleLock = false;
+    try {
+      if (Date.now() - fs.statSync(lockPath).mtimeMs > staleMs) {
+        fs.rmSync(lockPath, { recursive: true, force: true });
+        brokeStaleLock = true;
+      }
+    } catch {
+      // The holder released the lock between our EEXIST and this stat —
+      // loop around and take it.
+    }
+    if (!brokeStaleLock) {
+      if (Date.now() > deadline) {
+        throw new Error(
+          `Timed out after ${timeoutMs}ms waiting for the runs index lock at ${lockPath} — ` +
+            'another export holds it and it is not yet stale.',
+        );
+      }
+      await sleep(pollMs);
+    }
+  }
+
+  // Hold. Write the token after acquiring so a stale-breaker can never
+  // mistake a freshly created lock for an abandoned one (its mtime is
+  // refreshed by this write), and so release can prove ownership.
+  fs.writeFileSync(tokenFile, token, 'utf-8');
+  try {
+    return await critical();
+  } finally {
+    try {
+      if (fs.readFileSync(tokenFile, 'utf-8') === token) {
+        fs.rmSync(lockPath, { recursive: true, force: true });
+      }
+    } catch {
+      // Our lock is already gone (stale-broken while we were stalled) —
+      // nothing to release, and the current holder's lock stays untouched.
+    }
+  }
+}
 
 /**
  * Data dir resolution: --data-dir > MAFIA_RUNS_DIR > 'data/runs' (relative to
@@ -168,25 +283,36 @@ export async function exportGame(
   }
 
   // Index: exactly one line per game, ever. Re-running must not append.
-  const indexPath = path.join(runsDir, 'index.jsonl');
-  const indexLine = serializeIndexLine(
-    buildIndexEntry(record, fileName),
-  );
+  //
+  // MAF-L1-FM-002: the read-modify-append below was an UNLOCKED cross-process
+  // race — two concurrent `mafiactl runs export` runs against the same runs
+  // dir both read the same index snapshot, both see their game missing, and
+  // both append (same-game exports duplicate the line; interleaved appends
+  // can lose lines). Serialize the section with the mkdir-based index lock
+  // (see withIndexLock for why a lock and not a temp-file+rename re-dedup):
+  // the second export now reads the index AFTER the first one's append
+  // landed and sees its line.
   let indexChanged = false;
-  const existing = fs.existsSync(indexPath)
-    ? fs.readFileSync(indexPath, 'utf-8').split('\n').filter((l) => l.trim() !== '')
-    : [];
-  const alreadyIndexed = existing.some((line) => {
-    try {
-      return (JSON.parse(line) as { game_id?: string }).game_id === gameId;
-    } catch {
-      return false; // a torn line never blocks a fresh export
+  await withIndexLock(runsDir, () => {
+    const indexPath = path.join(runsDir, 'index.jsonl');
+    const indexLine = serializeIndexLine(
+      buildIndexEntry(record, fileName),
+    );
+    const existing = fs.existsSync(indexPath)
+      ? fs.readFileSync(indexPath, 'utf-8').split('\n').filter((l) => l.trim() !== '')
+      : [];
+    const alreadyIndexed = existing.some((line) => {
+      try {
+        return (JSON.parse(line) as { game_id?: string }).game_id === gameId;
+      } catch {
+        return false; // a torn line never blocks a fresh export
+      }
+    });
+    if (!alreadyIndexed) {
+      fs.appendFileSync(indexPath, indexLine, 'utf-8');
+      indexChanged = true;
     }
   });
-  if (!alreadyIndexed) {
-    fs.appendFileSync(indexPath, indexLine, 'utf-8');
-    indexChanged = true;
-  }
 
   return { fileChanged, indexChanged, eventCount: events.length, fileName };
 }
