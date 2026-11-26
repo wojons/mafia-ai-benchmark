@@ -9,6 +9,10 @@ import {
   deriveMatchupsFromBenchmarkGames,
   type MatchupRow,
 } from './derived-matchups.js';
+// DF-MAFIA-AI-BENCHMARK-55 (judge 19a1b924 surface): the persisted rows key
+// through the SAME normalizeModelKey the derived path and every other
+// aggregation use — one shared dated-alias table, no second source.
+import { normalizeModelKey } from './models.js';
 
 /**
  * Get head-to-head matchups.
@@ -44,14 +48,29 @@ export function getMatchups(
     )
     .all() as Record<string, unknown>[];
 
-  const persisted: MatchupRow[] = rows.map((row) => ({
-    modelA: `${row.model_a_provider}/${row.model_a}`,
-    modelB: `${row.model_b_provider}/${row.model_b}`,
-    gamesPlayed: row.games_played as number,
-    modelAWins: row.model_a_wins as number,
-    modelBWins: row.model_b_wins as number,
-    ties: row.ties as number,
-  }));
+  // DF-MAFIA-AI-BENCHMARK-55 (judge 19a1b924 surface): persisted model ids
+  // go through normalizeModelKey so a dated snapshot id stored in
+  // model_matchups reads as its canonical engine family on this surface —
+  // the same key the derived benchmark_games rows carry. Provider spelling
+  // (casing) is preserved exactly like the normalized aggregation rows.
+  const persisted: MatchupRow[] = rows.map((row) => {
+    const a = normalizeModelKey(
+      String(row.model_a_provider ?? ''),
+      String(row.model_a ?? ''),
+    );
+    const b = normalizeModelKey(
+      String(row.model_b_provider ?? ''),
+      String(row.model_b ?? ''),
+    );
+    return {
+      modelA: `${a.provider}/${a.model}`,
+      modelB: `${b.provider}/${b.model}`,
+      gamesPlayed: row.games_played as number,
+      modelAWins: row.model_a_wins as number,
+      modelBWins: row.model_b_wins as number,
+      ties: row.ties as number,
+    };
+  });
 
   // The persisted LIMIT 20 slice defines which pairings the table claims;
   // derivation only fills pairings OUTSIDE that persisted set.
