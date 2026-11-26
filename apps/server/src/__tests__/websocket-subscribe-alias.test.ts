@@ -99,7 +99,11 @@ function waitConnected(ws: WebSocket): Promise<void> {
   });
 }
 
-function waitFor(predicate: () => boolean, timeoutMs = 3000, stepMs = 25): Promise<boolean> {
+// Waits poll an observed condition with a generous deadline and a small step:
+// under full-suite parallel-file contention this worker's event loop is
+// starved, so windows must be sized in seconds, not for an idle machine
+// (MAF-L1-FM-005). Negative assertions pass an explicit short window below.
+function waitFor(predicate: () => boolean, timeoutMs = 10_000, stepMs = 10): Promise<boolean> {
   return new Promise((resolve) => {
     const started = Date.now();
     const timer = setInterval(() => {
@@ -114,12 +118,29 @@ function waitFor(predicate: () => boolean, timeoutMs = 3000, stepMs = 25): Promi
   });
 }
 
+/**
+ * Wait for the SUBSCRIBED ack to actually ARRIVE in the collected stream.
+ *
+ * The handler registers the client before sending the ack, so a resolved
+ * server-side registration wait does not mean the client has the ack yet:
+ * the socket write + client-side message dispatch need extra event-loop
+ * turns, and under parallel-file CPU contention those turns lag. Reading
+ * `all` synchronously after the registration wait is the MAF-L1-FM-005 race
+ * — wait on the message itself instead.
+ */
+async function waitForAck(all: Array<Record<string, unknown>>): Promise<void> {
+  const acked = await waitFor(() => all.some((m) => (m as { type?: string }).type === 'SUBSCRIBED'));
+  expect(acked).toBe(true);
+}
+
 describe('WebSocket SUBSCRIBE {gameId} alias (DF-MAFIA-AI-BENCHMARK-19)', () => {
   afterEach(async () => {
     for (const client of (h.wss.clients as Set<WebSocket>)) {
       client.terminate();
     }
-    await new Promise((resolve) => setTimeout(resolve, 50));
+    // Observed condition, not a fixed sleep: terminations complete
+    // asynchronously and under load a fixed 50ms can be too short.
+    await waitFor(() => h.wss.clients.size === 0, 2_000, 10);
   });
 
   it('AC1: SUBSCRIBE {gameId} aliases to JOIN_GAME — SUBSCRIBED ack carries eventTypes + gameId, and GAME_EVENT frames actually arrive', async () => {
@@ -134,6 +155,7 @@ describe('WebSocket SUBSCRIBE {gameId} alias (DF-MAFIA-AI-BENCHMARK-19)', () => 
     expect(registered).toBe(true);
 
     // Ack shape: SUBSCRIBED with eventTypes ['GAME_EVENT'] and the echoed gameId.
+    await waitForAck(all);
     const ack = all.find((m) => (m as { type?: string }).type === 'SUBSCRIBED');
     expect(ack).toBeDefined();
     const ackPayload = (ack as { payload?: { eventTypes?: string[]; gameId?: string } }).payload;
@@ -149,7 +171,7 @@ describe('WebSocket SUBSCRIBE {gameId} alias (DF-MAFIA-AI-BENCHMARK-19)', () => 
     expect((gameEvents[0] as { type?: string }).type).toBe('PHASE_CHANGED');
     expect((gameEvents[1] as { type?: string }).type).toBe('VOTE_CAST');
     expect((gameEvents[0] as { gameId?: string }).gameId).toBe(gameId);
-  });
+  }, 30_000);
 
   it('AC2: SUBSCRIBE {game_id} (snake_case) aliases the same way', async () => {
     const gameId = 'g-alias-snake';
@@ -161,6 +183,7 @@ describe('WebSocket SUBSCRIBE {gameId} alias (DF-MAFIA-AI-BENCHMARK-19)', () => 
     const registered = await waitFor(() => h.handler.getClientsInGame(gameId).length === 1);
     expect(registered).toBe(true);
 
+    await waitForAck(all);
     const ack = all.find((m) => (m as { type?: string }).type === 'SUBSCRIBED');
     const ackPayload = (ack as { payload?: { eventTypes?: string[]; gameId?: string } }).payload;
     expect(ackPayload?.eventTypes).toEqual(['GAME_EVENT']);
@@ -169,7 +192,7 @@ describe('WebSocket SUBSCRIBE {gameId} alias (DF-MAFIA-AI-BENCHMARK-19)', () => 
     h.eventBus.publish(makeFakeGameEvent(gameId, 'PHASE_CHANGED'));
     const got = await waitFor(() => gameEvents.length >= 1);
     expect(got).toBe(true);
-  });
+  }, 30_000);
 
   it('AC3: plain SUBSCRIBE {eventTypes} is unchanged — ack echoes eventTypes and registers NO game (no GAME_EVENT frames)', async () => {
     const gameId = 'g-alias-plain';
@@ -194,7 +217,7 @@ describe('WebSocket SUBSCRIBE {gameId} alias (DF-MAFIA-AI-BENCHMARK-19)', () => 
     const leaked = await waitFor(() => gameEvents.length >= 1, 500);
     expect(leaked).toBe(false);
     expect(gameEvents.length).toBe(0);
-  });
+  }, 30_000);
 
   it('AC4: after aliasing, LEAVE_GAME stops the aliased stream and re-JOIN_GAME works', async () => {
     const gameId = 'g-alias-leave';
@@ -202,14 +225,16 @@ describe('WebSocket SUBSCRIBE {gameId} alias (DF-MAFIA-AI-BENCHMARK-19)', () => 
     await waitConnected(ws);
 
     ws.send(JSON.stringify({ type: 'SUBSCRIBE', payload: { gameId } }));
-    await waitFor(() => h.handler.getClientsInGame(gameId).length === 1);
+    const subscribed = await waitFor(() => h.handler.getClientsInGame(gameId).length === 1);
+    expect(subscribed).toBe(true);
 
     h.eventBus.publish(makeFakeGameEvent(gameId, 'PHASE_CHANGED'));
     const first = await waitFor(() => gameEvents.length >= 1);
     expect(first).toBe(true);
 
     ws.send(JSON.stringify({ type: 'LEAVE_GAME', payload: {} }));
-    await waitFor(() => h.handler.getClientsInGame(gameId).length === 0);
+    const left = await waitFor(() => h.handler.getClientsInGame(gameId).length === 0);
+    expect(left).toBe(true);
 
     h.eventBus.publish(makeFakeGameEvent(gameId, 'VOTE_CAST'));
     const leaked = await waitFor(() => gameEvents.length >= 2, 500);
@@ -217,11 +242,12 @@ describe('WebSocket SUBSCRIBE {gameId} alias (DF-MAFIA-AI-BENCHMARK-19)', () => 
 
     // Real JOIN_GAME still works on the same connection.
     ws.send(JSON.stringify({ type: 'JOIN_GAME', payload: { gameId } }));
-    await waitFor(() => h.handler.getClientsInGame(gameId).length === 1);
+    const rejoinedGame = await waitFor(() => h.handler.getClientsInGame(gameId).length === 1);
+    expect(rejoinedGame).toBe(true);
 
     h.eventBus.publish(makeFakeGameEvent(gameId, 'GAME_ENDED'));
     const rejoined = await waitFor(() => gameEvents.length >= 2);
     expect(rejoined).toBe(true);
     expect((gameEvents[1] as { type?: string }).type).toBe('GAME_ENDED');
-  });
+  }, 30_000);
 });
