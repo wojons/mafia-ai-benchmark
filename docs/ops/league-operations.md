@@ -10,11 +10,11 @@ after each tick.
 
 Artifacts:
 
-| Artifact | Purpose |
-|---|---|
-| `scripts/league-schedule.json` | the ratified schedule config (pool, players, games, caps, poll timings) |
-| `scripts/league-cron.sh` | cron entry point: cap gate → POST → poll → export; `--dry-run` validates without any request |
-| `docs/ops/league-operations.md` | this note |
+| Artifact                        | Purpose                                                                                      |
+| ------------------------------- | -------------------------------------------------------------------------------------------- |
+| `scripts/league-schedule.json`  | the ratified schedule config (pool, players, games, caps, poll timings)                      |
+| `scripts/league-cron.sh`        | cron entry point: cap gate → POST → poll → export; `--dry-run` validates without any request |
+| `docs/ops/league-operations.md` | this note                                                                                    |
 
 Parent initiative: **MAF-INIT-002** (mixed-model league benchmarking). This
 leg arms the schedule; what remains after it is listed in §6.
@@ -25,15 +25,15 @@ leg arms the schedule; what remains after it is listed in §6.
 
 `scripts/league-schedule.json`:
 
-| Field | Value | Meaning |
-|---|---|---|
-| `models` | `openai/qwen3.6-35b-fast`, `openai/gpt-4o-mini` | the two model specs shuffled across the game's role-group seats each round |
-| `numPlayers` | 10 | seats per game (server bounds: 5..50; a 10-player game spawns 5 role groups: MAFIA, SHERIFF, DOCTOR, VIGILANTE, VILLAGER) |
-| `gamesPerRun` | 2 | rounds played sequentially per league run |
-| `budgetUsdPerRun` | 0.80 | hard spend cap in USD per league run (server-enforced) |
-| `dailyCapUsd` | 5.00 | client-side daily spend ceiling across runs (cron-gated) |
-| `pollIntervalS` | 30 | seconds between status polls |
-| `pollTimeoutS` | 5400 | give up (log as FAILED, exit 1) after 90 minutes |
+| Field             | Value                                           | Meaning                                                                                                                   |
+| ----------------- | ----------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------- |
+| `models`          | `openai/qwen3.6-35b-fast`, `openai/gpt-4o-mini` | the two model specs shuffled across the game's role-group seats each round                                                |
+| `numPlayers`      | 10                                              | seats per game (server bounds: 5..50; a 10-player game spawns 5 role groups: MAFIA, SHERIFF, DOCTOR, VIGILANTE, VILLAGER) |
+| `gamesPerRun`     | 2                                               | rounds played sequentially per league run                                                                                 |
+| `budgetUsdPerRun` | 0.80                                            | hard spend cap in USD per league run (server-enforced)                                                                    |
+| `dailyCapUsd`     | 5.00                                            | client-side daily spend ceiling across runs (cron-gated)                                                                  |
+| `pollIntervalS`   | 30                                              | seconds between status polls                                                                                              |
+| `pollTimeoutS`    | 5400                                            | give up (log as FAILED, exit 1) after 90 minutes                                                                          |
 
 ### Why these two models
 
@@ -48,7 +48,9 @@ OpenRouter-callable from that env, which is the property that matters:
 - `openai/gpt-4o-mini` is the most heavily represented model in the
   historical run corpus (`data/runs/index.jsonl`; as measured 2026-11-25 the
   index holds 4,889 rows and `openai/gpt-4o-mini` is the attributed seat
-  model in the large majority of them). Note the corpus predates MAF-INIT-001
+  model in the large majority of them; re-measured 2026-11-26: 4,897 rows,
+  of which 8 carry `"provenance":"mixed"`). Note the corpus predates
+  MAF-INIT-001
   seat attribution, so `provenance` labels there are `null` — proper
   attribution arrives with the league exports (§5).
 
@@ -57,6 +59,9 @@ from the server env (no xkiro credentials exist server-side). It stays
 documented as the **target pool pending server credentials** — a future leg
 arms it once the server's env can reach it. It is not part of the ratified,
 executable pool and must never be described as live.
+
+Pool changes require **owner sign-off** before `scripts/league-schedule.json`
+is edited; the scheduled list above is the operating baseline until then.
 
 ---
 
@@ -72,7 +77,7 @@ Two independent gates bound the spend:
 2. **Per day (client-side):** the script keeps
    `$LEAGUE_STATE_DIR/daily-spend.json` (`{"date": "...", "spendUsd": N}`,
    reset when the date rolls over) and skips the run — logging `SKIP daily
-   cap`, exit 0 — when `spendUsd + budgetUsdPerRun > dailyCapUsd`.
+cap`, exit 0 — when `spendUsd + budgetUsdPerRun > dailyCapUsd`.
 
 At the recommended **4-hour cadence** a day holds at most 6 runs:
 
@@ -84,6 +89,22 @@ The 7th run of a day is refused by the gate (`4.80 + 0.80 = 5.60 > 5.00`), so
 the worst client-approved day is 4.80 USD. On top of that, `gamesPerRun = 2`
 with a 0.80 budget usually caps a run below the bound — `BUDGET_CAPPED` is a
 normal, successful ending, not a failure.
+
+### Measured actual spend (2026-11-25, run `a2f624d5-06c6-4bc4-bc91-053113a061b7`)
+
+Per-game `costUsd`/`totalTokens` from `GET /api/v1/league/:id`
+(token_usage rollups — the authoritative actuals, per `league-runner.ts`):
+
+| Game    | costUsd    | totalTokens |
+| ------- | ---------- | ----------- |
+| round 1 | 0.09068605 | 559,822     |
+| round 2 | 0.03621155 | 197,938     |
+
+The run billed **$0.1269 total** against its $0.80 upper-bound budget —
+~6x headroom. At this actual rate a full day of six scheduled runs costs
+well under $1, far inside the $5.00 cap; the client's upper-bound
+accounting (0.80/run) is what makes the gate conservative, not the real
+bill.
 
 ---
 
@@ -112,7 +133,7 @@ What one real-mode invocation does, in order:
 
 1. Daily-cap gate (§2) — skip is a clean exit 0.
 2. `POST /api/v1/league` with `{"config": {"models": [...], "games":
-   gamesPerRun, "budgetUsd": budgetUsdPerRun, "numPlayers": numPlayers}}`;
+gamesPerRun, "budgetUsd": budgetUsdPerRun, "numPlayers": numPlayers}}`;
    captures `data.leagueId` from the 201 envelope. Non-2xx → log status +
    body, exit 1.
 3. Records the 0.80 upper bound into the daily-spend state file.
@@ -122,7 +143,7 @@ What one real-mode invocation does, in order:
    timeout (90 min) is logged as FAILED, exit 1.
 5. Exports each detail game that finished (non-null `completedAt`, null
    `error`) via `node apps/cli/dist/index.js runs export <gameId> --server
-   <url>` from the repo root — this appends one line per game to
+<url>` from the repo root — this appends one line per game to
    `data/runs/index.jsonl` (the `data/runs` tree is gitignored). A per-game
    export failure is logged and does not stop the remaining exports.
 
