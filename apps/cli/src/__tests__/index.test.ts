@@ -54,4 +54,21 @@ describe('CLI program', () => {
     expect(optFlags.some((f: string) => f.includes('verbose'))).toBe(true);
     expect(optFlags.some((f: string) => f.includes('config'))).toBe(true);
   });
+
+  it('enables positional options on the program and the benchmark command (MAF-L1-FM-004)', () => {
+    // Structural pin: ExportCommand re-declares --server/--games under the
+    // benchmark parent; positional parsing is what keeps `benchmark export
+    // --server X` from landing --server on the parent instead of the export
+    // subcommand. The flag must be set at BOTH levels — the root program
+    // lifts the 'benchmark' operand and would otherwise parse the options
+    // itself before benchmark's own boundary could trip. Behavioral pins
+    // (both option placements reach the export fetch URL) live in
+    // export.test.ts, MAF-L1-FM-004 describe block.
+    const positional = (cmd: unknown) =>
+      (cmd as { _enablePositionalOptions?: boolean })._enablePositionalOptions === true;
+    expect(positional(program)).toBe(true);
+    const bench = program.commands.find((c: { name(): string }) => c.name() === 'benchmark');
+    expect(bench).toBeDefined();
+    expect(positional(bench)).toBe(true);
+  });
 });

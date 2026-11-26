@@ -9,6 +9,7 @@
  * real wiring: parse → action handler → run().
  */
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
+import { Command } from 'commander';
 import { ExportCommand } from '../commands/export.js';
 import { BenchmarkCommand } from '../commands/benchmark.js';
 
@@ -178,5 +179,85 @@ describe('ExportCommand', () => {
     expect(JSON.parse(content)).toEqual(mockData);
     fs.unlinkSync(tmpFile);
     exitSpy.mockRestore();
+  });
+});
+
+/**
+ * MAF-L1-FM-004: benchmark parent option shadowing.
+ *
+ * BenchmarkCommand and its ExportCommand subcommand BOTH declare --server and
+ * --games. Under commander's default (non-positional) parsing the PARENT
+ * consumes identically-named options even when they are written AFTER the
+ * subcommand word, so `benchmark export --server X --games 3` silently fell
+ * back to the defaults (the export fetched the default server and default
+ * game count) — judge run 6b38377b failure mode 0.
+ *
+ * The harness below mirrors the REAL argv path: root program → benchmark →
+ * export. The root level matters — it lifts the 'benchmark' operand out of
+ * argv and dispatches the remaining args to benchmark, so the first
+ * positional boundary must trip at the ROOT (index.ts), the second at
+ * benchmark. Parsing BenchmarkCommand directly (as the tests above do) skips
+ * the root level and cannot pin this wiring.
+ */
+describe('MAF-L1-FM-004: benchmark parent option shadowing', () => {
+  function buildCli(): { root: Command; bench: BenchmarkCommand } {
+    const root = new Command();
+    root.name('mafiactl').enablePositionalOptions();
+    const bench = new BenchmarkCommand();
+    root.addCommand(bench);
+    return { root, bench };
+  }
+
+  beforeEach(() => {
+    vi.spyOn(console, 'log').mockImplementation(() => {});
+    vi.spyOn(console, 'error').mockImplementation(() => {});
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue({
+      ok: true,
+      json: async () => ({ results: [] }),
+      text: async () => '',
+    }));
+    vi.spyOn(process.stdout, 'write').mockImplementation(() => true);
+  });
+
+  afterEach(() => {
+    vi.restoreAllMocks();
+    vi.unstubAllGlobals();
+  });
+
+  function fetchUrl(): string {
+    return (fetch as unknown as { mock: { calls: unknown[][] } }).mock.calls[0][0] as string;
+  }
+
+  it('arm 1 — options after the subcommand: `benchmark export --server http://x --games 3` carries both into the fetch URL', async () => {
+    const { root } = buildCli();
+    await root.parseAsync(['node', 'test', 'benchmark', 'export', '--server', 'http://x', '--games', '3']);
+
+    // Pre-fix this fetch hit the DEFAULT server with no games param: the
+    // parent consumed --server/--games and export fell back to defaults.
+    expect(fetchUrl()).toBe('http://x/api/v1/benchmark/export?format=json&games=3');
+  });
+
+  it('arm 2 — single option after the subcommand: `benchmark export --server http://x` reaches the fetch URL', async () => {
+    const { root } = buildCli();
+    await root.parseAsync(['node', 'test', 'benchmark', 'export', '--server', 'http://x']);
+
+    expect(fetchUrl()).toBe('http://x/api/v1/benchmark/export?format=json');
+  });
+
+  it('short -g form after the subcommand reaches the fetch URL too', async () => {
+    const { root } = buildCli();
+    await root.parseAsync(['node', 'test', 'benchmark', 'export', '-g', '3']);
+
+    expect(fetchUrl()).toBe('http://localhost:3004/api/v1/benchmark/export?format=json&games=3');
+  });
+
+  it('parent-region --server stays on the benchmark parent (positional semantics: applied, not swallowed, not leaked)', async () => {
+    const { root, bench } = buildCli();
+    await root.parseAsync(['node', 'test', 'benchmark', '--server', 'http://parent', 'export']);
+
+    // The parent-region --server belongs to `benchmark` itself: export
+    // fetches the DEFAULT server and the parent keeps the value.
+    expect(fetchUrl()).toBe('http://localhost:3004/api/v1/benchmark/export?format=json');
+    expect(bench.opts().server).toBe('http://parent');
   });
 });

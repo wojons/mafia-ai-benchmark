@@ -26,7 +26,17 @@ program
   .description('Mafia AI Benchmark CLI - Manage games, agents, and benchmarks')
   .version(version)
   .option('--verbose', 'Enable verbose logging')
-  .option('--config <path>', 'Config file path', './mafia.config.json');
+  .option('--config <path>', 'Config file path', './mafia.config.json')
+  // MAF-L1-FM-004: subcommands re-declare identically-named options (benchmark
+  // export re-declares --server/--games). Under the default non-positional
+  // parsing the PARENT consumes those options even when written after the
+  // subcommand word, so `benchmark export --server X` silently fell back to
+  // the default server. Positional options keep each command's options in
+  // their own region (parent options before the subcommand word, subcommand
+  // options after). This must ALSO be set on BenchmarkCommand itself — the
+  // root lifts the 'benchmark' operand, and benchmark must trip its own
+  // boundary at 'export'.
+  .enablePositionalOptions();
 
 // Global options
 program.configureOutput({
