@@ -499,14 +499,17 @@ describe('OBS-006 orphan detector (mafia_game_in_progress)', () => {
     const state = adapter.startGame({ numPlayers: 5 });
     const child = state.process;
     try {
-      // Bounded poll (5 ms steps, 5 s ceiling) — never a blind sleep: the
+      // Bounded poll (10 ms steps, 15 s ceiling) — never a blind sleep: the
       // child announces that it is running and has installed its handlers.
-      const readyDeadline = Date.now() + 5_000;
+      // Windows sized for a contended event loop (MAF-L1-FM-006): under
+      // full-suite parallel-file load this worker is CPU-starved, so ceilings
+      // must be in seconds, not for an idle machine.
+      const readyDeadline = Date.now() + 15_000;
       while (!fs.existsSync(readyMarker)) {
         if (Date.now() > readyDeadline) {
-          throw new Error('the bridge child never signalled readiness within 5000 ms');
+          throw new Error('the bridge child never signalled readiness within 15000 ms');
         }
-        await new Promise((resolve) => setTimeout(resolve, 5));
+        await new Promise((resolve) => setTimeout(resolve, 10));
       }
       // The pid in the marker is the pid Node reports: the process this test
       // watches IS the script that installed the SIGTERM handler.
@@ -533,7 +536,9 @@ describe('OBS-006 orphan detector (mafia_game_in_progress)', () => {
       expect(valueOf(await render(), 'mafia_game_in_progress ')).toBe(0);
 
       // Attach the adapter's own exit observation BEFORE signalling, so the
-      // kill cannot race the listener.
+      // kill cannot race the listener. Observed condition (the gameEnded
+      // event), not a fixed sleep, with a deadline generous enough for a
+      // contended event loop (MAF-L1-FM-006, mirroring 957a8ab).
       let deadline: ReturnType<typeof setTimeout> | undefined;
       const observed = new Promise<void>((resolve, reject) => {
         const onEnded = (gameId: string): void => {
@@ -545,16 +550,22 @@ describe('OBS-006 orphan detector (mafia_game_in_progress)', () => {
         adapter.on('gameEnded', onEnded);
         deadline = setTimeout(() => {
           adapter.off('gameEnded', onEnded);
-          reject(new Error('the adapter never observed the bridge child exit within 3000 ms'));
-        }, 3_000);
+          reject(new Error('the adapter never observed the bridge child exit within 15000 ms'));
+        }, 15_000);
       });
 
-      // Kill the real child exactly as stopGame() would. The escalation is a
-      // leak guard only — the script answers SIGTERM, so it never fires.
-      const escalate = setTimeout(() => child.kill('SIGKILL'), 1_500);
+      // Kill the real child exactly as stopGame() would. There is NO
+      // fixed-timer SIGKILL escalation racing the graceful exit: under load a
+      // slow child can need seconds to process SIGTERM, and a fixed window
+      // (previously 1.5 s) would SIGKILL it (exitCode null, signalCode
+      // SIGKILL) and false-fail the exit assertions below — the observed
+      // load-window flake. The child's handlers are already installed (the
+      // readiness marker above proves it), so SIGTERM alone is the
+      // deterministic path; if it somehow never exits, `observed` rejects
+      // with a named error and the finally below SIGKILLs the survivor as
+      // the leak guard.
       expect(child.kill('SIGTERM')).toBe(true);
       await observed;
-      clearTimeout(escalate);
 
       // OS-confirmed death...
       expect(child.exitCode).toBe(0);
@@ -584,7 +595,11 @@ describe('OBS-006 orphan detector (mafia_game_in_progress)', () => {
       adapter.removeAllListeners();
       db.close();
     }
-  });
+    // Per-test timeout above the sum of this arm's internal windows (15 s
+    // readiness + 15 s exit observation): the vitest default 5 s would cap
+    // the generous windows under full-suite load before they could resolve
+    // (MAF-L1-FM-006, mirroring 957a8ab's per-test timeouts).
+  }, 45_000);
 
   it('never counts a game this process still owns, however old its row is', async () => {
     const { file, db } = makeFileDb();
