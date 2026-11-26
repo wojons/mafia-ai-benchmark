@@ -7,6 +7,10 @@
 import type Database from 'better-sqlite3';
 import type { GameRepository } from '../../db/repository.js';
 import { GameRepository as GameRepositoryClass } from '../../db/repository.js';
+import {
+  canonicalModelSql,
+  canonicalizeModelFamily,
+} from '../model-identity.js';
 import { getGameWinnerFromEvents } from './wins.js';
 import { getDegenerateGameIds } from './degenerate.js';
 import { getMockGameIds, getMockGameCounts } from './mock.js';
@@ -71,11 +75,21 @@ export function normalizeUsageIdentity(
  * ('openai/gpt-4o-mini'); the prefix is stripped whenever the model
  * string contains a slash, regardless of the stored provider. Models
  * without a slash are unchanged.
+ *
+ * DF-MAFIA-AI-BENCHMARK-55: the stripped id is then mapped through the
+ * shared dated-alias table (canonicalModelSql) INSIDE the grouping key, so
+ * 'gpt-4o-2024-08-06' aggregates into the 'gpt-4o' group at the SQL grain —
+ * COUNT(DISTINCT game_id) over the merged group counts every game exactly
+ * once (the same semantic the MAF-GAP-045 prefix merge pins). Collapsing
+ * only in TypeScript after the SQL aggregate would let merge-max silently
+ * DROP the alias group's games instead of counting them.
  */
 function normalizedModelSql(alias: string): string {
-  return `CASE WHEN instr(${alias}.model, '/') > 0
-    THEN substr(${alias}.model, instr(${alias}.model, '/') + 1)
-    ELSE ${alias}.model END`;
+  return canonicalModelSql(
+    `CASE WHEN instr(${alias}.model, '/') > 0
+      THEN substr(${alias}.model, instr(${alias}.model, '/') + 1)
+      ELSE ${alias}.model END`,
+  );
 }
 
 /**
@@ -109,21 +123,32 @@ function normalizedProviderSql(alias: string): string {
  * 'OPENAI/openai/gpt-4o-mini' -> 'OPENAI/gpt-4o-mini' behavior. Models
  * without a slash (including the honest 'CUSTOM/openai' legacy floor row)
  * are returned unchanged.
+ *
+ * DF-MAFIA-AI-BENCHMARK-55: after the prefix strip the model id is mapped
+ * through the shared dated-alias table (canonicalizeModelFamily), so a
+ * persisted dated snapshot id ('gpt-4o-2024-08-06') keys as its engine
+ * family ('gpt-4o') at every per-row aggregation point — assignments,
+ * usage lists, latency maps, side-attributed wins, trends, matchups.
  */
 export function normalizeModelKey(
   provider: string,
   model: string,
 ): { provider: string; model: string } {
   if (!provider || !model) return { provider, model };
-  const slash = model.indexOf('/');
+  let normalizedProvider = provider;
+  let normalizedModel = model;
+  const slash = normalizedModel.indexOf('/');
   if (slash > 0) {
-    const prefix = model.slice(0, slash);
-    if (provider.toLowerCase() === prefix.toLowerCase()) {
-      return { provider, model: model.slice(slash + 1) };
+    const prefix = normalizedModel.slice(0, slash);
+    if (normalizedProvider.toLowerCase() === prefix.toLowerCase()) {
+      normalizedModel = normalizedModel.slice(slash + 1);
+    } else {
+      normalizedProvider = prefix;
+      normalizedModel = normalizedModel.slice(slash + 1);
     }
-    return { provider: prefix, model: model.slice(slash + 1) };
   }
-  return { provider, model };
+  normalizedModel = canonicalizeModelFamily(normalizedModel);
+  return { provider: normalizedProvider, model: normalizedModel };
 }
 
 /**
@@ -931,10 +956,14 @@ function getHonestReportFallbackModels(
     for (const r of playerRows) {
       if (!r.provider || !r.model) continue;
       if (isObjectObjectSentinel(r.provider) || isObjectObjectSentinel(r.model)) continue;
-      covered.add(`${r.provider}/${r.model}`);
+      // DF-MAFIA-AI-BENCHMARK-55: key through the same normalizer as the
+      // merge path (prefix strip + dated-alias collapse) so the fallback
+      // cannot re-fragment a family the main tables merge.
+      const norm = normalizeModelKey(r.provider, r.model);
+      covered.add(`${norm.provider}/${norm.model}`);
       rows.push({
-        provider: r.provider,
-        model: r.model,
+        provider: norm.provider,
+        model: norm.model,
         gamesPlayed: r.games_played,
         wins: r.wins,
         winRate: r.games_played > 0 ? r.wins / r.games_played : 0,
@@ -974,11 +1003,13 @@ function getHonestReportFallbackModels(
     for (const r of usageRows) {
       if (!r.provider || !r.model) continue;
       if (isObjectObjectSentinel(r.provider) || isObjectObjectSentinel(r.model)) continue;
-      const key = `${r.provider}/${r.model}`;
+      // DF-MAFIA-AI-BENCHMARK-55: same normalizer as the covered set above.
+      const norm = normalizeModelKey(r.provider, r.model);
+      const key = `${norm.provider}/${norm.model}`;
       if (covered.has(key)) continue;
       rows.push({
-        provider: r.provider,
-        model: r.model,
+        provider: norm.provider,
+        model: norm.model,
         gamesPlayed: r.games_played,
         wins: 0,
         winRate: 0,
@@ -1878,12 +1909,32 @@ export function getCompareReport(
 }
 
 /**
+ * DF-MAFIA-AI-BENCHMARK-55: the minimum gamesPlayed a model needs before
+ * the recommendations surface may name it "best".
+ *
+ * A 1-game series with a single win carries winRate 1.0 — observed live:
+ * 'Best win rate: OPENAI/gpt-4o-2024-08-06 (100.0%)' crowned a dated
+ * snapshot id off one game while the real leaderboard had 99 'gpt-4o'
+ * games. The alias merge removes that specific row, but ANY future
+ * sparse/alias series would re-open the same hole, so the gate is a
+ * property of the recommendation, not of one id: a model qualifies only
+ * when it has played at least MIN_RECOMMENDATION_SAMPLE games.
+ *
+ * 5 = the smallest threshold at which a single lucky win cannot dominate
+ * the ratio (a 1/5 win rate cannot out-rank any honest multi-game series
+ * that won at least one in five). Changing it changes both "Best win rate"
+ * and "Best value" together.
+ */
+export const MIN_RECOMMENDATION_SAMPLE = 5;
+
+/**
  * Generate recommendations based on statistics
  */
 export function generateRecommendations(
   modelComparison: Array<{
     provider: string;
     model: string;
+    gamesPlayed: number;
     winRate: number;
     avgCost: number;
   }>,
@@ -1892,9 +1943,18 @@ export function generateRecommendations(
 
   if (modelComparison.length === 0) return recommendations;
 
-  const bestWinRate = modelComparison.reduce(
+  // DF-MAFIA-AI-BENCHMARK-55: only rows with a real sample may be crowned.
+  // Rows below MIN_RECOMMENDATION_SAMPLE games are never named "best" —
+  // neither by win rate nor by value — so a 1-game alias/snapshot series
+  // at winRate 1.0 cannot win either recommendation.
+  const qualified = modelComparison.filter(
+    (m) => (m.gamesPlayed || 0) >= MIN_RECOMMENDATION_SAMPLE,
+  );
+  if (qualified.length === 0) return recommendations;
+
+  const bestWinRate = qualified.reduce(
     (best, m) => (m.winRate > (best?.winRate || 0) ? m : best),
-    null as (typeof modelComparison)[0] | null,
+    null as (typeof qualified)[0] | null,
   );
 
   if (bestWinRate) {
@@ -1903,13 +1963,13 @@ export function generateRecommendations(
     );
   }
 
-  const bestValue = modelComparison.reduce(
+  const bestValue = qualified.reduce(
     (best, m) => {
       const value = m.winRate / (m.avgCost || 1);
       const bestCurrent = best ? best.winRate / (best.avgCost || 1) : 0;
       return value > bestCurrent ? m : best;
     },
-    null as (typeof modelComparison)[0] | null,
+    null as (typeof qualified)[0] | null,
   );
 
   if (bestValue) {
