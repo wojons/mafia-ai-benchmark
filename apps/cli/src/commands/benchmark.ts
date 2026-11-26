@@ -174,6 +174,18 @@ export class BenchmarkCommand extends Command {
     super('benchmark');
     this.description('Show the accumulated benchmark report, or run a fresh benchmark');
 
+    // MAF-L1-FM-004: ExportCommand re-declares --server/--games. Under the
+    // default non-positional parsing THIS command consumed identically-named
+    // options even when written after the subcommand word, so
+    // `benchmark export --server X --games 3` landed the values here and the
+    // export silently fetched the default server and default game count.
+    // With positional options the boundary trips at 'export': everything
+    // after it is re-parsed by the subcommand (which knows those options).
+    // Requires .enablePositionalOptions() on the ROOT program too (index.ts) —
+    // the root lifts the 'benchmark' operand, and without the root flag this
+    // boundary never sees an operand to trip on.
+    this.enablePositionalOptions();
+
     this.option('--quick', 'Show the accumulated benchmark report (default behavior)', false);
     this.option('--export <path>', 'Export results to file');
     this.option('--json', 'Output results as JSON');
