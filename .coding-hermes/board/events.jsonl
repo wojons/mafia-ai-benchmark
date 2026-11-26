@@ -969,3 +969,9 @@
 {"id":924,"timestamp":"2026-11-25T22:41:59Z","event_type":"task_created","task_id":"MAF-L1-FM-004","actor":"foreman","detail":"{\"id\":\"MAF-L1-FM-004\",\"status\":\"pending\"}","tick_number":null}
 {"id":925,"timestamp":"2026-11-25T22:51:37Z","event_type":"task_completed","task_id":"MAF-GAP-076","actor":"foreman","detail":"{\"status\":\"complete\"}","tick_number":null}
 {"id":926,"timestamp":"2026-11-25T23:16:17Z","event_type":"task_created","task_id":"MAF-L1-FM-005","actor":"foreman","detail":"{\"id\":\"MAF-L1-FM-005\",\"status\":\"pending\"}","tick_number":null}
+{"id":927,"timestamp":"2026-11-25T23:58:17Z","event_type":"task_completed","task_id":"MAF-L1-FM-003","actor":"foreman","detail":"{\"status\":\"complete\"}","tick_number":null}
+{"id":928,"timestamp":"2026-11-26T00:02:05Z","event_type":"task_created","task_id":"MAF-L1-FM-006","actor":"foreman","detail":"{\"id\":\"MAF-L1-FM-006\",\"status\":\"pending\"}","tick_number":null}
+{"id":929,"timestamp":"2026-11-26T00:06:46Z","event_type":"task_updated","task_id":"MAF-L1-FM-004","actor":"foreman","detail":"{\"status\":\"in_progress\"}","tick_number":null}
+{"id":930,"timestamp":"2026-11-26T00:06:46Z","event_type":"task_updated","task_id":"MAF-L1-FM-002","actor":"foreman","detail":"{\"status\":\"in_progress\"}","tick_number":null}
+{"id":931,"timestamp":"2026-11-26T00:06:46Z","event_type":"task_updated","task_id":"MAF-L1-FM-005","actor":"foreman","detail":"{\"status\":\"in_progress\"}","tick_number":null}
+{"id":932,"timestamp":"2026-11-26T00:06:46Z","event_type":"task_updated","task_id":"DF-MAFIA-AI-BENCHMARK-055","actor":"foreman","detail":"{\"status\":\"in_progress\"}","tick_number":null}
