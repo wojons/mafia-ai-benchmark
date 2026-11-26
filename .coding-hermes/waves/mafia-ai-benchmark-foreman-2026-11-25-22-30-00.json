@@ -26,5 +26,23 @@
     }
   ],
   "merge_plan": "serial merge, gate each (build + vitest run mode in worktree), then main push",
-  "notes": "MAF-L3-FM-001 ACs filed this tick (were null). GAP-076 async judge running in main checkout during wave; no deploys until judge completes."
+  "notes": "MAF-L3-FM-001 ACs filed this tick (were null). GAP-076 async judge running in main checkout during wave; no deploys until judge completes.",
+  "finished_at": "2026-11-25T20:25:00-05:00",
+  "recovery_result": {
+    "recovered_by": "mafia-ai-benchmark-foreman-2026-11-25-23-49-34",
+    "MAF-L1-FM-003": {
+      "merged": "aecf639",
+      "judge": "fa327b56 PASS at product tree 1e8d91e",
+      "row": "complete",
+      "gitreins": "terminal"
+    },
+    "MAF-L3-FM-001": {
+      "merged": "6e38e71",
+      "judge": "244f8c16 PASS at b20647b (post lint-fix, post flake-fix tip)",
+      "row": "complete",
+      "gitreins": "terminal"
+    },
+    "worktrees": "reaped (merged+clean); branches deleted",
+    "notes": "both workers had already merged+pushed when the recovery tick opened; recovery closed the judge debt + board truth"
+  }
 }

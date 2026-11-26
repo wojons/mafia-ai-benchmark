@@ -14,7 +14,8 @@
       "brief": "/tmp/mafia-wave-MAF-L1-FM-004-brief.txt",
       "model": "glm-5.3-flash",
       "provider": "opencode-go",
-      "status": "dispatched"
+      "status": "merged",
+      "verdict": "fe551da2 PASS"
     },
     {
       "task_id": "MAF-L1-FM-002",
@@ -23,7 +24,8 @@
       "brief": "/tmp/mafia-wave-MAF-L1-FM-002-brief.txt",
       "model": "glm-5.3-flash",
       "provider": "opencode-go",
-      "status": "dispatched"
+      "status": "merged",
+      "verdict": "239a40a9 PASS"
     },
     {
       "task_id": "MAF-L1-FM-005",
@@ -32,7 +34,8 @@
       "brief": "/tmp/mafia-wave-MAF-L1-FM-005-brief.txt",
       "model": "glm-5.3-flash",
       "provider": "opencode-go",
-      "status": "dispatched"
+      "status": "merged",
+      "verdict": "fd35c384 PASS"
     },
     {
       "task_id": "DF-MAFIA-AI-BENCHMARK-055",
@@ -41,9 +44,23 @@
       "brief": "/tmp/mafia-wave-DF-MAFIA-AI-BENCHMARK-055-brief.txt",
       "model": "glm-5.3-flash",
       "provider": "opencode-go",
-      "status": "dispatched"
+      "status": "merged",
+      "verdict": "fixup R2 dispatched (judge 19a1b924 uncovered h2h/matchups surface) \u2014 re-judge in flight on OpenRouter failover lane"
     }
   ],
   "merge_plan": "serial merge in dispatch order, gates (eslint+tsc+package vitest) per merge on the merged tree, then main push; judges on deepseek failover lane (GITREINS_LLM_BASE_URL=https://api.deepseek.com deepseek-flash) after all merges",
-  "notes": "File-disjoint wave: FM-004 (apps/cli index/benchmark/export), FM-002 (apps/cli runs.ts), FM-005 (apps/server websocket test), DF-055 (apps/server services). Workers own their worktrees; board/.gitreins writes stay in main. L1-FM-006 (orphan-detector flake) deliberately NOT waved — same-suite class as FM-005; batch candidate for the FM-005 worker is noted in its row but kept out of scope to keep the wave disjoint."
+  "notes": "File-disjoint wave: FM-004 (apps/cli index/benchmark/export), FM-002 (apps/cli runs.ts), FM-005 (apps/server websocket test), DF-055 (apps/server services). Workers own their worktrees; board/.gitreins writes stay in main. L1-FM-006 (orphan-detector flake) deliberately NOT waved \u2014 same-suite class as FM-005; batch candidate for the FM-005 worker is noted in its row but kept out of scope to keep the wave disjoint.",
+  "finished_at": "2026-11-25T21:05:00-05:00",
+  "fixups": [
+    {
+      "task_id": "DF-MAFIA-AI-BENCHMARK-055",
+      "worktree": "/home/kara/worktrees/mafia-ai-benchmark-DF-MAFIA-AI-BENCHMARK-055-R2",
+      "branch": "wt/DF-MAFIA-AI-BENCHMARK-055-R2",
+      "merged": "5f53dcb",
+      "reason": "judge 19a1b924 tier2 uncovered: persisted head-to-head + matchups surfaces un-normalized",
+      "status": "merged+closed",
+      "verdict": "4b78a3c4 PASS at 5f53dcb (OpenRouter failover lane; both deepseek accounts 402-drained tonight)"
+    }
+  ],
+  "cleanup_note": "worktrees mafia-ai-benchmark-DF-MAFIA-AI-BENCHMARK-055-R2 and -JUDGE-VENUE + branch wt/JUDGE-VENUE left in place: cleanup command was consent-gated on the api_server surface; reap next tick"
 }
