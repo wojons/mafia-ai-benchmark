@@ -8,6 +8,97 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+Fifth release. The delta since v1.3.0 is the league initiative's build-out:
+the CLI now emits a per-run JSONL run-record corpus, a metrics deriver and
+per-model aggregator turn those records into numbers, a cost-capped league
+runner schedules mixed-model games, and a static benchmark site (run index,
+per-run replays, model leaderboard) is regenerated from the full mixed corpus
+— 27 fully-provenanced runs against a ≥ 20 gate. A corpus integrity gate
+enforces attribution; persisted model keys are normalized; the games list and
+`/api/v1/analytics` get composite-index and memoization wins; ops gains a
+daily verified DB backup + restore drill and in-repo fleet-monitor scrape
+pins. The league leaderboard itself is not live in this release:
+MAF-INIT-002 remains pending on an owner-gated GitHub Pages enable. Nothing
+publishes to npm — the release surface remains the annotated tag, the GitHub
+Release object and the compose stack.
+
+## Known issues
+
+Nine open board rows ride with this release; none is a `docs/RELEASE.md`
+release gate:
+
+- **MAF-INIT-002 (P1, pending)** — the league leaderboard is behind an
+  owner-gated GitHub Pages enable. The site regen and its mixed-corpus gate
+  (27 ≥ 20) are shipped, but the league initiative is NOT claimed as
+  delivered in this release: the Pages flip is owner-gated and still open.
+- **MAF-INIT-003 (P2, in_progress)** — fleet-wide QA-harness unblock in
+  another repo; judge tier-2 blocked on a provider outage (z.ai 429,
+  deepseek 402). Outside this repo's shipped surface.
+- **MAF-L1-FM-001 (P3, pending)** — runs backfill aborts the entire backfill
+  on the first failing game.
+- **MAF-L1-FM-006 (P3, pending)** — OBS-006 orphan-detector test does not
+  yet flip within one refresh.
+- **QA-MAFIA-AI-BENCHMARK-22 (P3, pending)** — HARNESS `docker_build` cell
+  hardcodes the build context.
+- **QA-MAFIA-AI-BENCHMARK-23 (P3, pending)** — HARNESS ui-probe/chaos cells
+  hardcode the dev port.
+- **QA-MAFIA-AI-BENCHMARK-25 (P3, pending)** — HARNESS CI cells are
+  unattributable: `ci-act` emits detail length 0.
+- **QA-MAFIA-AI-BENCHMARK-26 (P4, pending)** — HARNESS chaos-resource cell
+  caps memory with a virtual `ulimit -v`.
+- **QA-MAFIA-AI-BENCHMARK-27 (P3, pending)** — HARNESS `act` runner kills
+  `child_process` spawns mid-run.
+
+**Dogfood staleness (explicitly recorded, not refreshed).** The newest
+dogfood artifact (`docs/dogfood/2026-11-23-integration.md`) was measured at
+HEAD `ec45163`, an ancestor of this release, and is stale — 4968 product
+paths behind this tip. It is recorded here as stale rather than refreshed
+for the cut.
+
+### Added
+
+- League: per-run JSONL run-record corpus emitted by the CLI (`8a8e56d8`,
+  MAF-LAYER-1).
+- League: metrics deriver + per-model aggregator over the run records
+  (`8d2fa2a4`, MAF-LAYER-2).
+- League: scheduled mixed-model league runner, cost-capped and
+  provenance-bound (`da0a281d`, MAF-LAYER-3).
+- League: static benchmark site — run index, per-run replays, model
+  leaderboard (`685944b1`, MAF-LAYER-4).
+- League: site regenerated from the full mixed corpus — 27 fully-provenanced
+  runs ≥ 20 gate — with re-derivability evidence (`96f4d5ee`, MAF-INIT-002).
+- Corpus integrity gate: attribution enforcement, token rollups and an
+  integrity report (`2deb592a`, MAF-INIT-001).
+- Server: startup reconcile for league runs stranded by a crash mid-loop
+  (`e10d9232`).
+- Observability: cumulative LLM cost/token counters seeded from
+  `token_usage` at boot (`1c04471a`, OBS-002).
+- Ops: daily verified DB backup + restore drill for the product DB volume
+  (`2b780d31`, MAF-GAP-075).
+- Ops: fleet-monitor scrape job + alert rules pinned in-repo under
+  `docs/ops` (`bfc921a2`, OBS-007).
+
+### Fixed
+
+- Server: persisted head-to-head + matchups model keys normalized through
+  the canonical alias table (`e7a0fe7e`).
+- CLI: benchmark parent option shadowing — `--server`/`--games` now reach
+  the export subcommand (`349a5e1e`, MAF-L1-FM-004).
+- Stats: `[object Object]` usage identities normalized in the agentStats
+  aggregation (`2bf522e5`, DF-MAFIA-AI-BENCHMARK-22-R3).
+
+### Performance
+
+- Composite index `games(status, created_at)` for the filtered game list
+  (`cf597f15`, PERF-MAFIA-8).
+- `GET /api/v1/analytics` memoized on the cached report watermark machinery
+  (`734e26b7`, PERF-MAFIA-010).
+
+### CI / Docs
+
+- README test counts synced (1508 tests, 20 skipped) alongside the
+  FM-003/FM-001 wave (`eb608b5f`).
+
 ---
 
 ## [1.3.0] — 2026-11-16
