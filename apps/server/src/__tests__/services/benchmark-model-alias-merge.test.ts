@@ -37,6 +37,7 @@ import { describe, it, expect, afterEach } from 'vitest';
 import express from 'express';
 import type { Server } from 'http';
 import { createBenchmarkRouter } from '../../routes/benchmark.js';
+import { createStatsRouter } from '../../routes/stats.js';
 import { StatsCollector } from '../../services/stats-collector.js';
 import {
   generateRecommendations,
@@ -89,6 +90,16 @@ describe('DF-MAFIA-AI-BENCHMARK-55 — dated gpt-4o alias + min-sample recommend
       createBenchmarkRouter({
         benchmarkRunner: {} as never, // these routes never touch the runner
         statsCollector,
+      } as never),
+    );
+    // The stats surface (DF-55 persisted-head-to-head arm) shares the same
+    // collector + repo — extra routes on distinct paths, benchmark routes
+    // untouched.
+    app.use(
+      '/',
+      createStatsRouter({
+        statsCollector,
+        gameRepository: seeded as never,
       } as never),
     );
     server = await new Promise<Server>((resolve) => {
@@ -332,6 +343,65 @@ describe('DF-MAFIA-AI-BENCHMARK-55 — dated gpt-4o alias + min-sample recommend
       expect(recs.every((r) => !r.includes(ALIAS_MODEL))).toBe(true);
       expect(recs.some((r) => r.startsWith('Best value:'))).toBe(true);
       expect(recs.find((r) => r.startsWith('Best value:'))).toContain(BASE_MODEL);
+    });
+  });
+
+  /**
+   * Judge 19a1b924 surface: the PERSISTED head-to-head path (model_matchups
+   * rows read verbatim by getCompareReport's h2h block and by getMatchups)
+   * built its keys straight from row.model_a/model_b with NO
+   * normalizeModelKey — a dated id INSERTed into the persisted table
+   * surfaced as its own series beside the canonical family, while the
+   * derived benchmark_games path was already normalized. Both surfaces must
+   * key through the SAME shared alias table (MODEL_FAMILY_ALIASES via
+   * normalizeModelKey), preserving the provider spelling.
+   */
+  describe('persisted model_matchups surfaces key through the alias table', () => {
+    type H2hRow = {
+      modelA: string;
+      modelB: string;
+      gamesPlayed: number;
+    };
+
+    it('a dated id persisted in model_matchups reads canonical on BOTH the compare headToHead and /stats/matchups', async () => {
+      repo = createSqliteBackedRepository() as unknown as FakeRepo;
+      // The judge probe shape: model_a carries the dated snapshot id,
+      // model_b the distinct mini family. Seeded BEFORE any fetch so the
+      // compare report's watermark cache serves a cold computation.
+      repo.db
+        .prepare(
+          `INSERT INTO model_matchups
+             (id, model_a_provider, model_a, model_b_provider, model_b,
+              games_played, model_a_wins, model_b_wins, ties)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        )
+        .run('h2h-judge', 'openai', ALIAS_MODEL, 'openai', 'gpt-4o-mini', 3, 2, 1, 0);
+      const baseUrl = await startServer(repo);
+
+      const [compare, matchups] = await Promise.all([
+        fetchJson<{ headToHead: H2hRow[] }>(
+          baseUrl,
+          '/api/v1/benchmark/compare',
+        ),
+        fetchJson<H2hRow[]>(baseUrl, '/api/v1/stats/matchups'),
+      ]);
+
+      for (const [surface, rows] of [
+        ['compare.headToHead', compare.headToHead],
+        ['/stats/matchups', matchups],
+      ] as const) {
+        const persisted = rows.find((r) => r.gamesPlayed === 3);
+        expect(
+          persisted,
+          `${surface} keeps the persisted pairing`,
+        ).toBeDefined();
+        // Canonical family keys, provider spelling preserved (lowercase
+        // 'openai' stays lowercase).
+        expect(persisted!.modelA).toBe(`openai/${BASE_MODEL}`);
+        expect(persisted!.modelB).toBe('openai/gpt-4o-mini');
+        // No dated-id series beside the canonical family.
+        expect(JSON.stringify(rows)).not.toContain(ALIAS_MODEL);
+      }
     });
   });
 });

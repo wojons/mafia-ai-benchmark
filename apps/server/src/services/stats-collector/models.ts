@@ -1610,15 +1610,33 @@ export function getCompareReport(
   // DF-36: a matchup pairing that involves the mis-key family is not a
   // real head-to-head — drop those pairs from the comparison surface
   // (their aggregate stays auditable in `unattributedModels`).
+  //
+  // DF-MAFIA-AI-BENCHMARK-55 (judge 19a1b924 surface): the persisted rows
+  // key through the SAME normalizeModelKey every other aggregation uses,
+  // so a dated snapshot id persisted in model_matchups ('openai' /
+  // 'gpt-4o-2024-08-06') reads as its canonical engine family
+  // ('openai/gpt-4o') — consistent with the derived benchmark_games path
+  // and the compare/report series. Provider spelling (casing) is
+  // preserved exactly like the normalized aggregation rows.
   const persistedH2h = h2hRows
-    .map((row) => ({
-      modelA: `${row.model_a_provider || ''}/${row.model_a || ''}`,
-      modelB: `${row.model_b_provider || ''}/${row.model_b || ''}`,
-      gamesPlayed: row.games_played as number,
-      modelAWins: row.model_a_wins as number,
-      modelBWins: row.model_b_wins as number,
-      ties: row.ties as number,
-    }))
+    .map((row) => {
+      const a = normalizeModelKey(
+        String(row.model_a_provider ?? ''),
+        String(row.model_a ?? ''),
+      );
+      const b = normalizeModelKey(
+        String(row.model_b_provider ?? ''),
+        String(row.model_b ?? ''),
+      );
+      return {
+        modelA: `${a.provider}/${a.model}`,
+        modelB: `${b.provider}/${b.model}`,
+        gamesPlayed: row.games_played as number,
+        modelAWins: row.model_a_wins as number,
+        modelBWins: row.model_b_wins as number,
+        ties: row.ties as number,
+      };
+    })
     .filter(
       (row) =>
         !isUnattributedModelKey(row.modelA) && !isUnattributedModelKey(row.modelB),
